@@ -143,18 +143,105 @@
         <button
           type="button"
           id="reasoningButton"
+          class="reasoning-button"
+          data-level="0"
           aria-label="Reforço de raciocínio"
+          aria-haspopup="menu"
+          aria-expanded="false"
           title="Reforço de raciocínio"
         >
-          <span class="reasoning-icon">⚡</span>
-          <span class="reasoning-label" id="reasoningLabel">Raciocínio</span>
+          <span class="reasoning-icon" aria-hidden="true">⚡</span>
+          <span class="reasoning-label" id="reasoningLabel">Nenhum</span>
+          <span class="reasoning-meter" id="reasoningMeter" aria-hidden="true">
+            <i></i><i></i><i></i><i></i>
+          </span>
+          <span class="reasoning-caret" aria-hidden="true">▾</span>
         </button>
-        <div class="reasoning-dropdown" id="reasoningDropdown" role="menu">
-          <button type="button" data-reasoning="none" class="reasoning-item">Nenhum</button>
-          <button type="button" data-reasoning="low" class="reasoning-item">Baixo</button>
-          <button type="button" data-reasoning="medium" class="reasoning-item">Médio</button>
-          <button type="button" data-reasoning="high" class="reasoning-item">Alto</button>
-          <button type="button" data-reasoning="xhigh" class="reasoning-item">Máximo</button>
+
+        <div
+          class="reasoning-dropdown"
+          id="reasoningDropdown"
+          role="menu"
+        >
+          <button
+            type="button"
+            class="reasoning-item"
+            data-reasoning="none"
+            data-level="0"
+            role="menuitemradio"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Nenhum</span>
+              <span class="reasoning-item-hint">Direto, sem pensar muito</span>
+            </span>
+            <span class="reasoning-meter" aria-hidden="true">
+              <i></i><i></i><i></i><i></i>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            data-reasoning="low"
+            data-level="1"
+            role="menuitemradio"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Baixo</span>
+              <span class="reasoning-item-hint">Resposta rápida</span>
+            </span>
+            <span class="reasoning-meter" aria-hidden="true">
+              <i></i><i></i><i></i><i></i>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            data-reasoning="medium"
+            data-level="2"
+            role="menuitemradio"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Médio</span>
+              <span class="reasoning-item-hint">Equilíbrio entre velocidade e cuidado</span>
+            </span>
+            <span class="reasoning-meter" aria-hidden="true">
+              <i></i><i></i><i></i><i></i>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            data-reasoning="high"
+            data-level="3"
+            role="menuitemradio"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Alto</span>
+              <span class="reasoning-item-hint">Pensa bem antes de responder</span>
+            </span>
+            <span class="reasoning-meter" aria-hidden="true">
+              <i></i><i></i><i></i><i></i>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            data-reasoning="xhigh"
+            data-level="4"
+            role="menuitemradio"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Máximo</span>
+              <span class="reasoning-item-hint">Bem mais lento e detalhado</span>
+            </span>
+            <span class="reasoning-meter" aria-hidden="true">
+              <i></i><i></i><i></i><i></i>
+            </span>
+          </button>
         </div>
       </div>
 
@@ -184,7 +271,7 @@
 
   </main>
 
-  <script src="script.js?v=3"></script>
+  <script src="script.js?v=4"></script>
 
 </body>
 

@@ -121,3 +121,20 @@ O parâmetro enviado à API é configurável no `.env`:
 
 Se o modelo não suportar esse parâmetro, basta deixar `REASONING_PARAM`
 vazio (desliga o recurso).
+
+## Timeout e HTTP 524
+
+A NEXA tenta o streaming primeiro; se não der certo, repete a chamada de
+forma bloqueante. A API fica atrás de um proxy (Cloudflare) que responde
+**524** quando a resposta não chega a tempo — o padrão é ~100s.
+
+Para não esperar o proxy cortar, o servidor desiste do stream antes disso:
+
+- `STREAM_TIMEOUT` — tempo máximo até o primeiro pedaço do stream, em
+  segundos (padrão `45`). Mantenha abaixo de ~100.
+
+Se o stream estoura esse prazo, o log mostra algo como
+`stream não respondeu em 45s (ReadTimeout)` e a chamada segue pelo caminho
+bloqueante. Ainda assim o **524 pode aparecer** quando o modelo é lento demais
+(alto `MAX_OUTPUT_TOKENS` combinado com raciocínio alto) — nesse caso a única
+saída é reduzir `MAX_OUTPUT_TOKENS` ou o nível de raciocínio.

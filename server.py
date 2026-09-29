@@ -24,6 +24,12 @@ MAX_HISTORY_MESSAGES = 12
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "1024"))
 MAX_MEMORY_LENGTH = 400
 
+CONNECT_TIMEOUT = 10
+# Tempo máximo até o primeiro pedaço do stream. Precisa ficar abaixo dos ~100s
+# do proxy (que responde 524), para o servidor desistir antes e cair no
+# caminho bloqueante em vez de esperar o proxy cortar.
+STREAM_TIMEOUT = int(os.environ.get("STREAM_TIMEOUT", "45"))
+
 REASONING_PARAM = os.environ.get("REASONING_PARAM", "reasoning_effort").strip()
 REASONING_LEVELS = ["none", "low", "medium", "high", "xhigh"]
 REASONING_VALUES = [
@@ -382,7 +388,10 @@ def make_stream_response(lines, user_id, user_message):
                 break
 
     except requests.RequestException as error:
-        print("[NEXA] falha ao ler o stream:", error)
+        print(
+            "[NEXA] stream interrompido (%s). Indo pelo caminho bloqueante."
+            % type(error).__name__
+        )
         return None
 
     if not first_texts:
@@ -582,11 +591,14 @@ def chat():
             headers=auth_headers(),
             json=request_body(True, messages, memories, reasoning),
             stream=True,
-            timeout=(10, 300),
+            timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
         )
 
     except requests.RequestException as error:
-        print("[NEXA] falha ao abrir o stream:", error)
+        print(
+            "[NEXA] stream não respondeu em %ds (%s). Indo pelo caminho bloqueante."
+            % (STREAM_TIMEOUT, type(error).__name__)
+        )
         upstream = None
 
     if upstream is not None and upstream.status_code == 200:

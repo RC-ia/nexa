@@ -1084,15 +1084,17 @@ body {
 }
 
 .reasoning-button {
+  position: relative;
+
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 6px;
 
   width: auto;
   height: 40px;
 
-  border: 0;
+  border: 1px solid var(--line);
 
   border-radius: 12px;
 
@@ -1106,15 +1108,48 @@ body {
 
   white-space: nowrap;
 
-  padding: 0 10px;
+  padding: 0 9px 0 10px;
 
   cursor: pointer;
+
+  overflow: hidden;
 
   transition:
     transform 0.15s ease,
     background 0.2s ease,
     color 0.2s ease,
+    border-color 0.2s ease,
     box-shadow 0.2s ease;
+}
+
+/* Brilho que varre o botão quando o raciocínio está ligado. */
+.reasoning-button::before {
+  content: "";
+
+  position: absolute;
+  inset: 0;
+
+  background:
+    linear-gradient(
+      100deg,
+      transparent 20%,
+      rgba(255, 255, 255, 0.14) 50%,
+      transparent 80%
+    );
+
+  transform: translateX(-100%);
+
+  pointer-events: none;
+}
+
+.reasoning-button:hover::before {
+  animation: reasoningSheen 0.9s ease;
+}
+
+@keyframes reasoningSheen {
+  to {
+    transform: translateX(100%);
+  }
 }
 
 .reasoning-button:active {
@@ -1126,27 +1161,122 @@ body {
 
   background: #241438;
 
+  border-color: var(--line-hover);
+
   box-shadow:
     0 0 18px rgba(139, 92, 246, 0.18);
 }
 
 .reasoning-button .reasoning-icon {
   font-size: 14px;
+
+  line-height: 1;
+
+  filter: drop-shadow(0 0 6px rgba(167, 139, 250, 0.5));
 }
 
 .reasoning-button.active {
   color: #fff;
 
+  border-color:
+    rgba(167, 139, 250, 0.55);
+
   background:
     linear-gradient(
       135deg,
-      #8b5cf6,
-      #6d28d9
+      #7c3aed,
+      #5b21b6
     );
 
   box-shadow:
-    0 0 18px rgba(139, 92, 246, 0.3);
+    0 0 20px rgba(139, 92, 246, 0.32),
+    inset 0 0 14px rgba(255, 255, 255, 0.07);
 }
+
+.reasoning-caret {
+  font-size: 10px;
+
+  line-height: 1;
+
+  opacity: 0.6;
+
+  transition: transform 0.2s ease;
+}
+
+.reasoning-button[aria-expanded="true"] .reasoning-caret {
+  transform: rotate(180deg);
+}
+
+
+/* =========================
+   MEDIDOR DE NÍVEL
+========================= */
+
+.reasoning-meter {
+  display: flex;
+
+  align-items: flex-end;
+
+  gap: 2px;
+
+  height: 12px;
+}
+
+.reasoning-meter i {
+  width: 3px;
+
+  border-radius: 2px;
+
+  background: currentColor;
+
+  opacity: 0.2;
+
+  transition:
+    opacity 0.2s ease,
+    height 0.2s ease;
+}
+
+.reasoning-meter i:nth-child(1) {
+  height: 4px;
+}
+
+.reasoning-meter i:nth-child(2) {
+  height: 7px;
+}
+
+.reasoning-meter i:nth-child(3) {
+  height: 10px;
+}
+
+.reasoning-meter i:nth-child(4) {
+  height: 12px;
+}
+
+/* O nível escolhido acende as barras correspondentes. */
+.reasoning-button[data-level="1"] .reasoning-meter i:nth-child(-n+1),
+.reasoning-item[data-level="1"] .reasoning-meter i:nth-child(-n+1) {
+  opacity: 1;
+}
+
+.reasoning-button[data-level="2"] .reasoning-meter i:nth-child(-n+2),
+.reasoning-item[data-level="2"] .reasoning-meter i:nth-child(-n+2) {
+  opacity: 1;
+}
+
+.reasoning-button[data-level="3"] .reasoning-meter i:nth-child(-n+3),
+.reasoning-item[data-level="3"] .reasoning-meter i:nth-child(-n+3) {
+  opacity: 1;
+}
+
+.reasoning-button[data-level="4"] .reasoning-meter i:nth-child(-n+4),
+.reasoning-item[data-level="4"] .reasoning-meter i:nth-child(-n+4) {
+  opacity: 1;
+}
+
+
+/* =========================
+   DROPDOWN
+========================= */
 
 .reasoning-dropdown {
   position: absolute;
@@ -1158,25 +1288,44 @@ body {
 
   flex-direction: column;
 
-  min-width: 132px;
+  gap: 2px;
+
+  width: 240px;
 
   padding: 6px;
 
   border: 1px solid var(--line);
 
-  border-radius: 12px;
+  border-radius: 14px;
 
   background:
     linear-gradient(
       145deg,
-      rgba(18, 13, 27, 0.98),
-      rgba(9, 7, 13, 0.98)
+      rgba(20, 14, 31, 0.99),
+      rgba(9, 7, 13, 0.99)
     );
 
   box-shadow:
-    0 12px 35px rgba(0, 0, 0, 0.5);
+    0 18px 45px rgba(0, 0, 0, 0.62),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  backdrop-filter: blur(14px);
+
+  animation: reasoningDrop 0.16s ease-out;
 
   z-index: 10;
+}
+
+@keyframes reasoningDrop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .reasoning-dropdown.open {
@@ -1184,23 +1333,24 @@ body {
 }
 
 .reasoning-item {
-  position: relative;
-
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 
   width: 100%;
 
   height: auto;
 
-  border: 0;
+  border: 1px solid transparent;
 
-  border-radius: 8px;
+  border-radius: 9px;
 
   background: transparent;
 
   color: var(--muted);
 
-  padding: 8px 10px 8px 26px;
+  padding: 8px 10px;
 
   font-size: 13px;
 
@@ -1208,19 +1358,44 @@ body {
 
   text-align: left;
 
-  white-space: nowrap;
-
   cursor: pointer;
 
   transition:
     background 0.15s ease,
-    color 0.15s ease;
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.reasoning-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+
+  min-width: 0;
+}
+
+.reasoning-item-name {
+  color: inherit;
+
+  font-size: 13px;
+}
+
+.reasoning-item-hint {
+  color: #6f6680;
+
+  font-size: 11px;
+
+  line-height: 1.35;
 }
 
 .reasoning-item:hover {
   color: #fff;
 
-  background: rgba(76, 29, 149, 0.35);
+  background: rgba(76, 29, 149, 0.32);
+}
+
+.reasoning-item:hover .reasoning-item-hint {
+  color: #b3a8c4;
 }
 
 .reasoning-item.active {
@@ -1229,25 +1404,19 @@ body {
   background:
     linear-gradient(
       135deg,
-      #8b5cf6,
-      #6d28d9
+      rgba(139, 92, 246, 0.32),
+      rgba(76, 29, 149, 0.32)
     );
 
+  border-color:
+    rgba(167, 139, 250, 0.4);
+
   box-shadow:
-    0 0 14px rgba(139, 92, 246, 0.35);
+    0 0 16px rgba(139, 92, 246, 0.16);
 }
 
-.reasoning-item.active::before {
-  content: "\2713";
-
-  position: absolute;
-
-  left: 9px;
-  top: 50%;
-
-  transform: translateY(-50%);
-
-  font-size: 12px;
+.reasoning-item.active .reasoning-item-hint {
+  color: #d4c7ea;
 }
 
 
@@ -1321,11 +1490,21 @@ footer {
   }
 
   .reasoning-button {
-    padding: 0 6px;
+    width: 40px;
+
+    padding: 0;
+
+    gap: 0;
   }
 
-  .reasoning-button .reasoning-label {
+  /* Sem espaço para o ícone + medidor + caret: fica só o raio. */
+  .reasoning-button .reasoning-label,
+  .reasoning-button .reasoning-caret {
     display: none;
+  }
+
+  .reasoning-dropdown {
+    width: min(240px, calc(100vw - 48px));
   }
 }
 

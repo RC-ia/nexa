@@ -10,11 +10,20 @@ const USER_ID_KEY = "nexa_user_id";
 const REASONING_KEY = "nexa_reasoning";
 
 const REASONING_LABELS = {
-  none: "Raciocínio",
+  none: "Nenhum",
   low: "Baixo",
   medium: "Médio",
   high: "Alto",
   xhigh: "Máximo",
+};
+
+/* Quantidade de barras acesas no medidor, por nível. */
+const REASONING_LEVELS = {
+  none: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+  xhigh: 4,
 };
 
 const history = [];
@@ -106,6 +115,8 @@ if ("speechSynthesis" in window) {
 let reasoningLevel = "none";
 
 function loadReasoning() {
+  reasoningLevel = "none";
+
   try {
     const saved =
       localStorage.getItem(REASONING_KEY);
@@ -146,17 +157,27 @@ function renderReasoning() {
   const dropdown =
     document.getElementById("reasoningDropdown");
 
+  const level =
+    REASONING_LEVELS[reasoningLevel] ?? 0;
+
   if (label) {
     label.textContent =
       REASONING_LABELS[reasoningLevel] ||
-      "Raciocínio";
+      "Nenhum";
   }
 
   if (button) {
     button.classList.toggle(
       "active",
-      reasoningLevel !== "none"
+      level > 0
     );
+
+    /*
+      O medidor de barras usa data-level
+      para acender só as barras do nível.
+    */
+
+    button.dataset.level = String(level);
   }
 
   if (dropdown) {
@@ -172,7 +193,7 @@ function renderReasoning() {
         );
 
         item.setAttribute(
-          "aria-selected",
+          "aria-checked",
           isActive ? "true" : "false"
         );
       });
@@ -189,11 +210,26 @@ function setupReasoningUI() {
     return;
   }
 
+  function setOpen(isOpen) {
+    dropdown.classList.toggle(
+      "open",
+      isOpen
+    );
+
+    button.setAttribute(
+      "aria-expanded",
+      isOpen ? "true" : "false"
+    );
+  }
+
   button.addEventListener(
     "click",
     function (event) {
       event.stopPropagation();
-      dropdown.classList.toggle("open");
+
+      setOpen(
+        !dropdown.classList.contains("open")
+      );
     }
   );
 
@@ -212,14 +248,24 @@ function setupReasoningUI() {
 
       saveReasoning();
       renderReasoning();
-      dropdown.classList.remove("open");
+      setOpen(false);
     }
   );
 
   document.addEventListener(
     "click",
     function () {
-      dropdown.classList.remove("open");
+      setOpen(false);
+    }
+  );
+
+  document.addEventListener(
+    "keydown",
+    function (event) {
+      if (event.key === "Escape") {
+        setOpen(false);
+        button.focus();
+      }
     }
   );
 }
