@@ -28,7 +28,7 @@ Copie `.env.example` para `.env` e preencha a chave:
 API_KEY=sua-chave-aqui
 ```
 
-Opcionais (já têm padrão): `API_BASE`, `MODEL`, `PORT`, `MEMORY_DB`.
+Opcionais (já têm padrão): `API_BASE`, `MODEL`, `PORT`, `MAX_OUTPUT_TOKENS`, `MEMORY_DB`.
 Nunca versione o `.env` (ele já está no `.gitignore`).
 
 ## 3. Rodar

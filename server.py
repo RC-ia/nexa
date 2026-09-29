@@ -21,7 +21,7 @@ VERSION_FILE = BASE_DIR / os.environ.get("VERSION_FILE", ".nexa_version")
 DEFAULT_VERSION = "0.01"
 
 MAX_HISTORY_MESSAGES = 12
-MAX_OUTPUT_TOKENS = 180
+MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "1024"))
 MAX_MEMORY_LENGTH = 400
 
 STATIC_FILES = {"index.html", "style.css", "script.js"}
@@ -174,6 +174,15 @@ def extract_text(data):
     return ""
 
 
+def finish_reason(data):
+    choices = data.get("choices") or []
+
+    if not choices:
+        return None
+
+    return (choices[0] or {}).get("finish_reason")
+
+
 def build_messages(messages, memories):
     contents = [{"role": "system", "content": SYSTEM_PROMPT}]
 
@@ -317,6 +326,7 @@ def make_stream_response(lines, user_id, user_message):
 
     def generate():
         full_text = "".join(first_texts)
+        reason = None
 
         try:
             for text in first_texts:
@@ -328,6 +338,8 @@ def make_stream_response(lines, user_id, user_message):
                 if not data:
                     continue
 
+                reason = finish_reason(data) or reason
+
                 text = extract_text(data)
 
                 if not text:
@@ -335,6 +347,13 @@ def make_stream_response(lines, user_id, user_message):
 
                 full_text += text
                 yield sse({"type": "text", "text": text})
+
+            if reason == "length":
+                print(
+                    "[NEXA] resposta cortada por limite de tokens "
+                    "(MAX_OUTPUT_TOKENS=%d). Aumente no .env se precisar."
+                    % MAX_OUTPUT_TOKENS
+                )
 
             yield sse({"type": "done", "model": MODEL})
 
@@ -376,9 +395,18 @@ def make_blocking_response(user_id, user_message, messages, memories):
         }), 502
 
     try:
-        text = extract_text(response.json())
+        payload = response.json()
     except ValueError:
-        text = ""
+        payload = {}
+
+    if finish_reason(payload) == "length":
+        print(
+            "[NEXA] resposta cortada por limite de tokens "
+            "(MAX_OUTPUT_TOKENS=%d). Aumente no .env se precisar."
+            % MAX_OUTPUT_TOKENS
+        )
+
+    text = extract_text(payload)
 
     if not text.strip():
         return jsonify({"error": "O modelo respondeu sem texto."}), 502
