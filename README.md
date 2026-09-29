@@ -122,6 +122,22 @@ O parâmetro enviado à API é configurável no `.env`:
 Se o modelo não suportar esse parâmetro, basta deixar `REASONING_PARAM`
 vazio (desliga o recurso).
 
+## Ver o pensamento
+
+Abaixo do nome NEXA há um botão **Ver pensamento** que abre um painel com o
+raciocínio do modelo enquanto ele responde. Começa fechado, e o ponto ao lado
+do botão pulsa durante o processamento.
+
+O painel é preenchido em tempo real, conforme o raciocínio chega no stream.
+Ele é limpo a cada nova pergunta e ao usar "Nova conversa".
+
+O raciocínio só aparece se o modelo realmente o enviar: o backend lê
+`reasoning_content` (o campo mais comum), `reasoning` ou `thinking` — tanto
+no streaming quanto na resposta bloqueante. Modelos que não expõem
+raciocínio deixam o painel com a mensagem "O modelo não expôs o raciocínio
+desta resposta". Nesses casos, selecionar um nível no seletor de reforço
+também pode não ter efeito.
+
 ## Timeout e HTTP 524
 
 A NEXA tenta o streaming primeiro; se não der certo, repete a chamada de

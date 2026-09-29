@@ -447,6 +447,109 @@ function hideTyping() {
 
 /*
   ==========================================
+  PENSAMENTO DA NEXA
+  ==========================================
+*/
+
+let thinkingText = "";
+
+function getThinkingElements() {
+  return {
+    toggle: document.getElementById("thinkingToggle"),
+    panel: document.getElementById("thinkingPanel"),
+    text: document.getElementById("thinkingText"),
+    state: document.getElementById("thinkingState"),
+    label: document.querySelector(".thinking-toggle-text"),
+  };
+}
+
+function setThinkingOpen(isOpen) {
+  const elements = getThinkingElements();
+
+  if (!elements.toggle || !elements.panel) {
+    return;
+  }
+
+  elements.panel.hidden = !isOpen;
+
+  elements.toggle.setAttribute(
+    "aria-expanded",
+    isOpen ? "true" : "false"
+  );
+
+  if (elements.label) {
+    elements.label.textContent =
+      isOpen
+        ? "Ocultar pensamento"
+        : "Ver pensamento";
+  }
+}
+
+function renderThinking(state) {
+  const elements = getThinkingElements();
+
+  if (!elements.toggle) {
+    return;
+  }
+
+  elements.toggle.classList.toggle(
+    "has-thinking",
+    thinkingText.length > 0
+  );
+
+  elements.toggle.classList.toggle(
+    "is-thinking",
+    state === "thinking"
+  );
+
+  if (elements.text) {
+    elements.text.textContent = thinkingText;
+  }
+
+  if (elements.state) {
+    if (state === "thinking") {
+      elements.state.textContent = "processando...";
+    } else if (thinkingText) {
+      elements.state.textContent = "concluído";
+    }
+  }
+}
+
+function resetThinking() {
+  thinkingText = "";
+  renderThinking("idle");
+}
+
+function appendThinking(chunk) {
+  thinkingText += chunk;
+  renderThinking("thinking");
+}
+
+function setupThinkingUI() {
+  const elements = getThinkingElements();
+
+  if (!elements.toggle || !elements.panel) {
+    return;
+  }
+
+  setThinkingOpen(false);
+  renderThinking("idle");
+
+  elements.toggle.addEventListener(
+    "click",
+    function (event) {
+      event.stopPropagation();
+
+      setThinkingOpen(
+        elements.panel.hidden
+      );
+    }
+  );
+}
+
+
+/*
+  ==========================================
   MENSAGEM STREAMING
   ==========================================
 */
@@ -507,6 +610,8 @@ function updateStreamingMessage(
 */
 
 async function askNexa(text) {
+  resetThinking();
+
   const response =
     await fetch("/api/chat", {
       method: "POST",
@@ -621,6 +726,18 @@ async function askNexa(text) {
       }
 
       /*
+        Raciocínio do modelo, exibido
+        no painel de pensamento.
+      */
+
+      if (
+        data.type === "reasoning" &&
+        typeof data.text === "string"
+      ) {
+        appendThinking(data.text);
+      }
+
+      /*
         Streaming terminou.
       */
 
@@ -628,6 +745,8 @@ async function askNexa(text) {
         data.type === "done"
       ) {
         finished = true;
+
+        renderThinking("done");
       }
 
       /*
@@ -745,6 +864,9 @@ function clearConversation() {
     MEMORY_KEY
   );
 
+  resetThinking();
+  setThinkingOpen(false);
+
   hideTyping();
 
   chat.innerHTML = `
@@ -817,6 +939,9 @@ composer.addEventListener(
         "NEXA error:",
         error
       );
+
+      renderThinking("idle");
+      setThinkingOpen(false);
 
       hideTyping();
 
@@ -948,6 +1073,7 @@ restoreConversation();
 loadReasoning();
 setupReasoningUI();
 renderReasoning();
+setupThinkingUI();
 
 /*
   ==========================================

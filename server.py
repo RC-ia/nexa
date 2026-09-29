@@ -187,6 +187,29 @@ def extract_text(data):
     return ""
 
 
+def extract_reasoning(data):
+    """
+    O raciocínio chega em campos diferentes dependendo do modelo/router
+    (reasoning_content é o mais comum em APIs compatíveis com OpenAI).
+    """
+
+    choices = data.get("choices") or []
+
+    if not choices:
+        return ""
+
+    choice = choices[0] or {}
+
+    for holder in (choice.get("delta") or {}, choice.get("message") or {}):
+        for field in ("reasoning_content", "reasoning", "thinking"):
+            value = holder.get(field)
+
+            if isinstance(value, str):
+                return value
+
+    return ""
+
+
 def finish_reason(data):
     choices = data.get("choices") or []
 
@@ -413,6 +436,11 @@ def make_stream_response(lines, user_id, user_message):
 
                 reason = finish_reason(data) or reason
 
+                thinking = extract_reasoning(data)
+
+                if thinking:
+                    yield sse({"type": "reasoning", "text": thinking})
+
                 text = extract_text(data)
 
                 if not text:
@@ -475,11 +503,15 @@ def make_blocking_response(user_id, user_message, messages, memories, reasoning)
         )
 
     text = extract_text(payload)
+    thinking = extract_reasoning(payload).strip()
 
     if not text.strip():
         return jsonify({"error": "O modelo respondeu sem texto."}), 502
 
     def generate():
+        if thinking:
+            yield sse({"type": "reasoning", "text": thinking})
+
         yield sse({"type": "text", "text": text})
         yield sse({"type": "done", "model": MODEL})
 
