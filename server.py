@@ -190,6 +190,30 @@ def finish_reason(data):
     return (choices[0] or {}).get("finish_reason")
 
 
+def log_upstream_error(response):
+    """
+    O 524 é um timeout do proxy na frente da API (Cloudflare), não um erro
+    do modelo: a resposta não chegou a tempo. Ele chega acompanhado de um
+    HTML gigante, então nunca vale a pena logar o corpo cru.
+    """
+
+    status = response.status_code
+
+    if status == 524:
+        print(
+            "[NEXA] %s HTTP 524 — timeout na ponte para a API. "
+            "A resposta demorou demais (o limite padrão do proxy é ~100s). "
+            "Tente reduzir o nível de raciocínio ou o MAX_OUTPUT_TOKENS no .env."
+            % MODEL
+        )
+        return
+
+    print(
+        "[NEXA] %s HTTP %d: %s"
+        % (MODEL, status, response.text[:500])
+    )
+
+
 def build_messages(messages, memories):
     contents = [{"role": "system", "content": SYSTEM_PROMPT}]
 
@@ -424,7 +448,7 @@ def make_blocking_response(user_id, user_message, messages, memories, reasoning)
         return jsonify({"error": "Falha ao consultar o modelo."}), 502
 
     if response.status_code != 200:
-        print("[NEXA]", MODEL, "HTTP", response.status_code, response.text[:500])
+        log_upstream_error(response)
         return jsonify({
             "error": "Falha ao consultar o modelo (HTTP %d)." % response.status_code
         }), 502
@@ -578,7 +602,7 @@ def chat():
         upstream.close()
 
     elif upstream is not None:
-        print("[NEXA]", MODEL, "HTTP", upstream.status_code, upstream.text[:500])
+        log_upstream_error(upstream)
         upstream.close()
 
     return make_blocking_response(user_id, user_message, messages, memories, reasoning)
