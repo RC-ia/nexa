@@ -101,3 +101,23 @@ funcionou.
 
 O servidor expõe a versão em `GET /api/version`, e o `script.js` preenche o
 rodapé ao carregar a página.
+
+## Reforço de raciocínio
+
+Alguns modelos pedem um nível de raciocínio (ou "força de pensamento") para
+responder. A NEXA tem um seletor ao lado do microfone com os níveis
+**Nenhum / Baixo / Médio / Alto / Máximo**. A escolha fica salva no
+`localStorage` do navegador, então não precisa selecionar de novo na próxima
+sessão.
+
+O parâmetro enviado à API é configurável no `.env`:
+
+- `REASONING_PARAM` — nome do campo no corpo da requisição (padrão
+  `reasoning_effort`).
+- `REASONING_VALUES` — valores correspondentes a cada nível, na ordem
+  exibida no seletor. Use uma vírgula inicial para o nível "Nenhum" não
+  enviar nada. Por exemplo:
+  `REASONING_VALUES=,low,medium,high,xhigh`.
+
+Se o modelo não suportar esse parâmetro, basta deixar `REASONING_PARAM`
+vazio (desliga o recurso).

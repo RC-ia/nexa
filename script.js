@@ -7,6 +7,15 @@ const newChatButton = document.getElementById("newChatButton");
 
 const MEMORY_KEY = "nexa_conversation";
 const USER_ID_KEY = "nexa_user_id";
+const REASONING_KEY = "nexa_reasoning";
+
+const REASONING_LABELS = {
+  none: "Raciocínio",
+  low: "Baixo",
+  medium: "Médio",
+  high: "Alto",
+  xhigh: "Máximo",
+};
 
 const history = [];
 
@@ -86,6 +95,135 @@ if ("speechSynthesis" in window) {
   window.speechSynthesis.onvoiceschanged =
     loadNexaVoice;
 }
+
+
+/*
+  ==========================================
+  REFORÇO DE RACIOCÍNIO
+  ==========================================
+*/
+
+let reasoningLevel = "none";
+
+function loadReasoning() {
+  try {
+    const saved =
+      localStorage.getItem(REASONING_KEY);
+
+    if (
+      saved &&
+      REASONING_LABELS.hasOwnProperty(saved)
+    ) {
+      reasoningLevel = saved;
+    }
+  } catch (error) {
+    console.error(
+      "Erro ao carregar reforço de raciocínio:",
+      error
+    );
+  }
+}
+
+function saveReasoning() {
+  try {
+    localStorage.setItem(
+      REASONING_KEY,
+      reasoningLevel
+    );
+  } catch (error) {
+    console.error(
+      "Erro ao salvar reforço de raciocínio:",
+      error
+    );
+  }
+}
+
+function renderReasoning() {
+  const label =
+    document.getElementById("reasoningLabel");
+  const button =
+    document.getElementById("reasoningButton");
+  const dropdown =
+    document.getElementById("reasoningDropdown");
+
+  if (label) {
+    label.textContent =
+      REASONING_LABELS[reasoningLevel] ||
+      "Raciocínio";
+  }
+
+  if (button) {
+    button.classList.toggle(
+      "active",
+      reasoningLevel !== "none"
+    );
+  }
+
+  if (dropdown) {
+    dropdown
+      .querySelectorAll(".reasoning-item")
+      .forEach(item => {
+        const isActive =
+          item.dataset.reasoning === reasoningLevel;
+
+        item.classList.toggle(
+          "active",
+          isActive
+        );
+
+        item.setAttribute(
+          "aria-selected",
+          isActive ? "true" : "false"
+        );
+      });
+  }
+}
+
+function setupReasoningUI() {
+  const button =
+    document.getElementById("reasoningButton");
+  const dropdown =
+    document.getElementById("reasoningDropdown");
+
+  if (!button || !dropdown) {
+    return;
+  }
+
+  button.addEventListener(
+    "click",
+    function (event) {
+      event.stopPropagation();
+      dropdown.classList.toggle("open");
+    }
+  );
+
+  dropdown.addEventListener(
+    "click",
+    function (event) {
+      const item =
+        event.target.closest(".reasoning-item");
+
+      if (!item) {
+        return;
+      }
+
+      reasoningLevel =
+        item.dataset.reasoning || "none";
+
+      saveReasoning();
+      renderReasoning();
+      dropdown.classList.remove("open");
+    }
+  );
+
+  document.addEventListener(
+    "click",
+    function () {
+      dropdown.classList.remove("open");
+    }
+  );
+}
+
 
 /*
   ==========================================
@@ -338,7 +476,9 @@ async function askNexa(text) {
         history:
           history.slice(-12),
 
-        userId
+        userId,
+
+        reasoning: reasoningLevel
       })
     });
 
@@ -759,6 +899,9 @@ function restoreConversation() {
 
 loadMemory();
 restoreConversation();
+loadReasoning();
+setupReasoningUI();
+renderReasoning();
 
 /*
   ==========================================

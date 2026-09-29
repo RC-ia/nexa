@@ -1074,9 +1074,128 @@ body {
     0 0 25px rgba(139, 92, 246, 0.42);
 }
 
-.composer button:disabled {
-  opacity: 0.5;
-  cursor: wait;
+
+/* =========================
+   RACIOCÍNIO (FORÇA)
+========================= */
+
+.reasoning-wrap {
+  position: relative;
+}
+
+.reasoning-button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+
+  font-size: 13px;
+
+  padding: 0 9px;
+
+  color: var(--accent-light);
+
+  min-width: 0;
+}
+
+.reasoning-button:hover {
+  color: #fff;
+
+  background: #241438;
+
+  box-shadow:
+    0 0 18px rgba(139, 92, 246, 0.18);
+}
+
+.reasoning-button .reasoning-icon {
+  font-size: 14px;
+}
+
+.reasoning-button.active {
+  color: #fff;
+
+  background:
+    linear-gradient(
+      135deg,
+      #8b5cf6,
+      #6d28d9
+    );
+
+  box-shadow:
+    0 0 18px rgba(139, 92, 246, 0.3);
+}
+
+.reasoning-dropdown {
+  position: absolute;
+
+  bottom: calc(100% + 8px);
+  left: 0;
+
+  display: none;
+
+  flex-direction: column;
+
+  min-width: 132px;
+
+  padding: 6px;
+
+  border: 1px solid var(--line);
+
+  border-radius: 12px;
+
+  background:
+    linear-gradient(
+      145deg,
+      rgba(18, 13, 27, 0.98),
+      rgba(9, 7, 13, 0.98)
+    );
+
+  box-shadow:
+    0 12px 35px rgba(0, 0, 0, 0.5);
+
+  z-index: 10;
+}
+
+.reasoning-dropdown.open {
+  display: flex;
+}
+
+.reasoning-item {
+  border: 0;
+
+  border-radius: 8px;
+
+  background: transparent;
+
+  color: var(--muted);
+
+  padding: 8px 10px;
+
+  font-size: 13px;
+
+  text-align: left;
+
+  cursor: pointer;
+
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.reasoning-item:hover {
+  color: #fff;
+
+  background: rgba(76, 29, 149, 0.35);
+}
+
+.reasoning-item.active {
+  color: #fff;
+
+  background:
+    linear-gradient(
+      135deg,
+      #8b5cf6,
+      #6d28d9
+    );
 }
 
 
@@ -1147,6 +1266,14 @@ footer {
 
   .new-chat-button {
     padding: 8px 10px;
+  }
+
+  .reasoning-button {
+    padding: 0 6px;
+  }
+
+  .reasoning-button .reasoning-label {
+    display: none;
   }
 }
 

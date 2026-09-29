@@ -24,6 +24,13 @@ MAX_HISTORY_MESSAGES = 12
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "1024"))
 MAX_MEMORY_LENGTH = 400
 
+REASONING_PARAM = os.environ.get("REASONING_PARAM", "reasoning_effort").strip()
+REASONING_LEVELS = ["none", "low", "medium", "high", "xhigh"]
+REASONING_VALUES = [
+    value.strip()
+    for value in os.environ.get("REASONING_VALUES", ",low,medium,high,xhigh").split(",")
+]
+
 STATIC_FILES = {"index.html", "style.css", "script.js"}
 
 SYSTEM_PROMPT = "\n".join([
@@ -215,6 +222,39 @@ def build_messages(messages, memories):
     return contents
 
 
+def reasoning_payload(level):
+    if not REASONING_PARAM or not level:
+        return {}
+
+    try:
+        index = REASONING_LEVELS.index(level)
+    except ValueError:
+        return {}
+
+    if index >= len(REASONING_VALUES):
+        return {}
+
+    value = REASONING_VALUES[index]
+
+    if not value:
+        return {}
+
+    return {REASONING_PARAM: value}
+
+
+def request_body(stream, messages, memories, reasoning):
+    body = {
+        "model": MODEL,
+        "messages": build_messages(messages, memories),
+        "stream": stream,
+        "max_tokens": MAX_OUTPUT_TOKENS,
+    }
+
+    body.update(reasoning_payload(reasoning))
+
+    return body
+
+
 def extract_memory(user_id, user_message, assistant_message):
     if not API_KEY or not user_id:
         return
@@ -370,17 +410,12 @@ def make_stream_response(lines, user_id, user_message):
     return Response(stream_with_context(generate()), headers=sse_headers())
 
 
-def make_blocking_response(user_id, user_message, messages, memories):
+def make_blocking_response(user_id, user_message, messages, memories, reasoning):
     try:
         response = requests.post(
             API_BASE + "/chat/completions",
             headers=auth_headers(),
-            json={
-                "model": MODEL,
-                "messages": build_messages(messages, memories),
-                "stream": False,
-                "max_tokens": MAX_OUTPUT_TOKENS,
-            },
+            json=request_body(False, messages, memories, reasoning),
             timeout=(10, 60),
         )
 
@@ -471,6 +506,9 @@ def chat():
 
     user_id = str(body.get("userId") or "")
 
+    reasoning = body.get("reasoning")
+    reasoning = reasoning.strip() if isinstance(reasoning, str) else ""
+
     incoming = body.get("messages")
     if not isinstance(incoming, list):
         incoming = body.get("history")
@@ -518,12 +556,7 @@ def chat():
         upstream = requests.post(
             API_BASE + "/chat/completions",
             headers=auth_headers(),
-            json={
-                "model": MODEL,
-                "messages": build_messages(messages, memories),
-                "stream": True,
-                "max_tokens": MAX_OUTPUT_TOKENS,
-            },
+            json=request_body(True, messages, memories, reasoning),
             stream=True,
             timeout=(10, 300),
         )
@@ -548,7 +581,7 @@ def chat():
         print("[NEXA]", MODEL, "HTTP", upstream.status_code, upstream.text[:500])
         upstream.close()
 
-    return make_blocking_response(user_id, user_message, messages, memories)
+    return make_blocking_response(user_id, user_message, messages, memories, reasoning)
 
 
 init_db()

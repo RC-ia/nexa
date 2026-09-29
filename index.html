@@ -139,6 +139,25 @@
         aria-label="Mensagem"
       >
 
+      <div class="reasoning-wrap" id="reasoningWrap">
+        <button
+          type="button"
+          id="reasoningButton"
+          aria-label="Reforço de raciocínio"
+          title="Reforço de raciocínio"
+        >
+          <span class="reasoning-icon">⚡</span>
+          <span class="reasoning-label" id="reasoningLabel">Raciocínio</span>
+        </button>
+        <div class="reasoning-dropdown" id="reasoningDropdown" role="menu">
+          <button type="button" data-reasoning="none" class="reasoning-item">Nenhum</button>
+          <button type="button" data-reasoning="low" class="reasoning-item">Baixo</button>
+          <button type="button" data-reasoning="medium" class="reasoning-item">Médio</button>
+          <button type="button" data-reasoning="high" class="reasoning-item">Alto</button>
+          <button type="button" data-reasoning="xhigh" class="reasoning-item">Máximo</button>
+        </div>
+      </div>
+
       <button
         type="button"
         id="micButton"
