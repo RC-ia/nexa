@@ -1,5 +1,5 @@
-const PRIMARY_MODEL = "gemma-4-31b-it";
-const FALLBACK_MODEL = "gemini-3.5-flash-lite";
+const API_BASE = "https://9router.rcscan.online/v1";
+const MODEL = "nada";
 
 const SYSTEM_PROMPT = [
   "Você é NEXA.",
@@ -108,7 +108,7 @@ async function extractMemory(
   userMessage,
   assistantMessage
 ) {
-  if (!env.GEMINI_API_KEY || !userId) return;
+  if (!env.API_KEY || !userId) return;
 
   const prompt =
     "Analise a conversa abaixo.\n\n" +
@@ -125,39 +125,30 @@ async function extractMemory(
 
   try {
     const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/" +
-      FALLBACK_MODEL +
-      ":generateContent",
+      API_BASE + "/chat/completions",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-goog-api-key": env.GEMINI_API_KEY
+          "Authorization": "Bearer " + env.API_KEY
         },
         body: JSON.stringify({
-          systemInstruction: {
-            parts: [
-              {
-                text:
-                  "Extraia apenas memórias úteis e verdadeiras do usuário."
-              }
-            ]
-          },
+          model: MODEL,
 
-          contents: [
+          messages: [
+            {
+              role: "system",
+              content:
+                "Extraia apenas memórias úteis e verdadeiras do usuário."
+            },
             {
               role: "user",
-              parts: [
-                {
-                  text: prompt
-                }
-              ]
+              content: prompt
             }
           ],
 
-          generationConfig: {
-            maxOutputTokens: 100
-          }
+          stream: false,
+          max_tokens: 100
         })
       }
     );
@@ -167,7 +158,7 @@ async function extractMemory(
     const data = await response.json();
 
     const memory =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+      data?.choices?.[0]?.message?.content?.trim() || "";
 
     if (
       memory &&
@@ -196,32 +187,29 @@ async function extractMemory(
 ========================= */
 
 function buildContents(messages, memories) {
-  const contents = [];
+  const contents = [
+    {
+      role: "system",
+      content: SYSTEM_PROMPT
+    }
+  ];
 
   if (memories.length) {
     contents.push({
       role: "user",
-      parts: [
-        {
-          text:
-            "Memórias relevantes sobre o usuário:\n" +
-            memories
-              .map(function(memory) {
-                return "- " + memory;
-              })
-              .join("\n")
-        }
-      ]
+      content:
+        "Memórias relevantes sobre o usuário:\n" +
+        memories
+          .map(function(memory) {
+            return "- " + memory;
+          })
+          .join("\n")
     });
 
     contents.push({
-      role: "model",
-      parts: [
-        {
-          text:
-            "Entendido. Vou usar essas memórias quando forem relevantes."
-        }
-      ]
+      role: "assistant",
+      content:
+        "Entendido. Vou usar essas memórias quando forem relevantes."
     });
   }
 
@@ -230,28 +218,18 @@ function buildContents(messages, memories) {
 
     contents.push({
       role:
-        message.role === "assistant"
-          ? "model"
-          : message.role === "model"
-            ? "model"
-            : "user",
+        message.role === "user"
+          ? "user"
+          : "assistant",
 
-      parts: [
-        {
-          text: String(message.content)
-        }
-      ]
+      content: String(message.content)
     });
   }
 
-  if (!contents.length) {
+  if (contents.length === 1) {
     contents.push({
       role: "user",
-      parts: [
-        {
-          text: "Olá"
-        }
-      ]
+      content: "Olá"
     });
   }
 
@@ -264,44 +242,34 @@ function buildContents(messages, memories) {
 ========================= */
 
 function createModelRequest(
-  model,
   apiKey,
   messages,
   memories,
   signal
 ) {
   return fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/" +
-    model +
-    ":streamGenerateContent?alt=sse",
+    API_BASE + "/chat/completions",
     {
       method: "POST",
 
       headers: {
         "Content-Type": "application/json",
-        "X-goog-api-key": apiKey
+        "Authorization": "Bearer " + apiKey
       },
 
       signal,
 
       body: JSON.stringify({
-        systemInstruction: {
-          parts: [
-            {
-              text: SYSTEM_PROMPT
-            }
-          ]
-        },
+        model: MODEL,
 
-        contents:
+        messages:
           buildContents(
             messages,
             memories
           ),
 
-        generationConfig: {
-          maxOutputTokens: 180
-        }
+        stream: true,
+        max_tokens: 180
       })
     }
   );
@@ -340,20 +308,18 @@ function parseSSEEvent(raw) {
 ========================= */
 
 function extractText(data) {
-  const parts =
-    data?.candidates?.[0]?.content?.parts || [];
+  const choice =
+    data?.choices?.[0];
 
-  let text = "";
-
-  for (const part of parts) {
-    if (part?.thought === true) continue;
-
-    if (typeof part?.text === "string") {
-      text += part.text;
-    }
+  if (typeof choice?.delta?.content === "string") {
+    return choice.delta.content;
   }
 
-  return text;
+  if (typeof choice?.message?.content === "string") {
+    return choice.message.content;
+  }
+
+  return "";
 }
 
 
@@ -622,37 +588,28 @@ async function createFallbackResponse(
 ) {
   const response =
     await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/" +
-      FALLBACK_MODEL +
-      ":generateContent",
+      API_BASE + "/chat/completions",
 
       {
         method: "POST",
 
         headers: {
           "Content-Type": "application/json",
-          "X-goog-api-key":
-            env.GEMINI_API_KEY
+          "Authorization":
+            "Bearer " + env.API_KEY
         },
 
         body: JSON.stringify({
-          systemInstruction: {
-            parts: [
-              {
-                text: SYSTEM_PROMPT
-              }
-            ]
-          },
+          model: MODEL,
 
-          contents:
+          messages:
             buildContents(
               messages,
               memories
             ),
 
-          generationConfig: {
-            maxOutputTokens: 180
-          }
+          stream: false,
+          max_tokens: 180
         })
       }
     );
@@ -662,7 +619,7 @@ async function createFallbackResponse(
       await response.text();
 
     throw new Error(
-      FALLBACK_MODEL +
+      MODEL +
       " HTTP " +
       response.status +
       ": " +
@@ -673,25 +630,12 @@ async function createFallbackResponse(
   const data =
     await response.json();
 
-  const parts =
-    data?.candidates?.[0]?.content?.parts || [];
-
   const text =
-    parts
-      .filter(function(part) {
-        return (
-          part?.thought !== true &&
-          typeof part?.text === "string"
-        );
-      })
-      .map(function(part) {
-        return part.text;
-      })
-      .join("");
+    data?.choices?.[0]?.message?.content || "";
 
   if (!text.trim()) {
     throw new Error(
-      FALLBACK_MODEL +
+      MODEL +
       " respondeu sem texto."
     );
   }
@@ -719,7 +663,7 @@ async function createFallbackResponse(
             "data: " +
             JSON.stringify({
               type: "done",
-              model: FALLBACK_MODEL
+              model: MODEL
             }) +
             "\n\n"
           )
@@ -777,21 +721,11 @@ export async function onRequestPost(
 
   try {
 
-    if (!env.GEMMA_4_31B) {
+    if (!env.API_KEY) {
       return jsonResponse(
         {
           error:
-            "GEMMA_4_31B não configurada no Cloudflare."
-        },
-        500
-      );
-    }
-
-    if (!env.GEMINI_API_KEY) {
-      return jsonResponse(
-        {
-          error:
-            "GEMINI_API_KEY não configurada no Cloudflare."
+            "API_KEY não configurada no Cloudflare."
         },
         500
       );
@@ -912,7 +846,7 @@ export async function onRequestPost(
 
 
     /* =========================
-       GEMMA — PRINCIPAL
+       STREAMING — PRINCIPAL
     ========================= */
 
     const controller =
@@ -922,8 +856,7 @@ export async function onRequestPost(
 
       const response =
         await createModelRequest(
-          PRIMARY_MODEL,
-          env.GEMMA_4_31B,
+          env.API_KEY,
           messages,
           memories,
           controller.signal
@@ -933,7 +866,7 @@ export async function onRequestPost(
       const result =
         await waitForFirstText(
           response,
-          PRIMARY_MODEL
+          MODEL
         );
 
 
@@ -946,10 +879,10 @@ export async function onRequestPost(
         userId,
         userMessage,
         context,
-        PRIMARY_MODEL
+        MODEL
       );
 
-    } catch (gemmaError) {
+    } catch (streamError) {
 
       try {
         controller.abort();
@@ -957,51 +890,17 @@ export async function onRequestPost(
 
 
       /* =========================
-         GEMINI — FALLBACK
+         SEM STREAM — FALLBACK
       ========================= */
 
-      try {
-
-        const response =
-          await createModelRequest(
-            FALLBACK_MODEL,
-            env.GEMINI_API_KEY,
-            messages,
-            memories,
-            null
-          );
-
-
-        const result =
-          await waitForFirstText(
-            response,
-            FALLBACK_MODEL
-          );
-
-
-        return createClientStream(
-          env,
-          result.reader,
-          result.decoder,
-          result.buffer,
-          result.firstText,
-          userId,
-          userMessage,
-          context,
-          FALLBACK_MODEL
-        );
-
-      } catch (geminiError) {
-
-        return createFallbackResponse(
-          env,
-          messages,
-          memories,
-          userId,
-          userMessage,
-          context
-        );
-      }
+      return createFallbackResponse(
+        env,
+        messages,
+        memories,
+        userId,
+        userMessage,
+        context
+      );
     }
 
   } catch (error) {

@@ -1,7 +1,8 @@
-# NEXA + Gemini
+# NEXA + 9Router
 
-Versão da NEXA com chat conectado ao Gemini através de uma Cloudflare Pages Function.
-Sex.
+Versão da NEXA com chat conectado a uma API compatível com OpenAI
+(`https://9router.rcscan.online/v1`) através de uma Cloudflare Pages Function.
+
 Estrutura:
 - index.html
 - style.css
@@ -9,6 +10,6 @@ Estrutura:
 - functions/api/chat.js
 
 Configuração:
-No Cloudflare Pages, crie um Secret chamado `GEMINI_API_KEY` e coloque nele sua chave do Gemini.
+No Cloudflare Pages, crie um Secret chamado `API_KEY` e coloque nele sua chave da API.
 Nunca coloque a chave no `script.js` ou em outro arquivo público.
 Depois faça um novo deploy.
