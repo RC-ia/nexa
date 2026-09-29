@@ -1,7 +1,7 @@
 # NEXA + Gemini
 
 Versão da NEXA com chat conectado ao Gemini através de uma Cloudflare Pages Function.
-
+Sex.
 Estrutura:
 - index.html
 - style.css
