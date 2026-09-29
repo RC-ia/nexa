@@ -89,7 +89,15 @@ A memória de longo prazo usa SQLite local (`nexa.db`), criado automaticamente
 na primeira execução. Se você apagar o arquivo, a memória persistente some
 (as conversas no navegador continuam no `localStorage`).
 
-## Observação
+## Versão
 
-A pasta `functions/` (Cloudflare Pages Function) não é mais usada por este
-modo de execução e pode ser removida.
+O rodapé mostra `NEXA vX.XX`, começando em `0.01`. O `run.py` guarda essa
+versão em `.nexa_version` (fora do git) e a incrementa em `VERSION_STEP`
+(padrão `1`) a cada atualização aplicada — assim dá para ver se o auto-update
+funcionou.
+
+- `VERSION_STEP=1` → `0.01`, `1.01`, `2.01`, ...
+- `VERSION_STEP=0.01` → `0.01`, `0.02`, `0.03`, ...
+
+O servidor expõe a versão em `GET /api/version`, e o `script.js` preenche o
+rodapé ao carregar a página.

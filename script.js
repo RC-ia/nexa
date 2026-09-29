@@ -759,3 +759,43 @@ function restoreConversation() {
 
 loadMemory();
 restoreConversation();
+
+/*
+  ==========================================
+  VERSÃO
+  ==========================================
+*/
+
+async function loadVersion() {
+  try {
+    const response =
+      await fetch("/api/version");
+
+    if (!response.ok) {
+      return;
+    }
+
+    const data =
+      await response.json();
+
+    const versionElement =
+      document.getElementById("nexaVersion");
+
+    if (
+      versionElement &&
+      data &&
+      data.version
+    ) {
+      versionElement.textContent =
+        data.version;
+    }
+
+  } catch (error) {
+    console.error(
+      "Erro ao carregar versão:",
+      error
+    );
+  }
+}
+
+loadVersion();

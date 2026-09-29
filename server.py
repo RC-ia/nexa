@@ -17,6 +17,8 @@ API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip
 MODEL = os.environ.get("MODEL", "nada")
 PORT = int(os.environ.get("PORT", "8000"))
 MEMORY_DB = BASE_DIR / os.environ.get("MEMORY_DB", "nexa.db")
+VERSION_FILE = BASE_DIR / os.environ.get("VERSION_FILE", ".nexa_version")
+DEFAULT_VERSION = "0.01"
 
 MAX_HISTORY_MESSAGES = 12
 MAX_OUTPUT_TOKENS = 180
@@ -395,12 +397,30 @@ def make_blocking_response(user_id, user_message, messages, memories):
 
 
 # =========================
+# VERSÃO
+# =========================
+
+def read_version():
+    try:
+        value = VERSION_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        value = ""
+
+    return value or DEFAULT_VERSION
+
+
+# =========================
 # ROTAS
 # =========================
 
 @app.get("/")
 def index():
     return send_from_directory(BASE_DIR, "index.html")
+
+
+@app.get("/api/version")
+def version():
+    return jsonify({"version": read_version()})
 
 
 @app.get("/<path:filename>")

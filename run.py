@@ -17,6 +17,10 @@ UPDATE_INTERVAL = max(30, int(os.environ.get("UPDATE_INTERVAL", "180")))
 GIT_REMOTE = os.environ.get("GIT_REMOTE", "origin").strip() or "origin"
 GIT_BRANCH = os.environ.get("GIT_BRANCH", "").strip()
 
+VERSION_FILE = BASE_DIR / os.environ.get("VERSION_FILE", ".nexa_version")
+DEFAULT_VERSION = "0.01"
+VERSION_STEP = float(os.environ.get("VERSION_STEP", "1"))
+
 
 def log(message):
     print("[NEXA-updater] " + message, flush=True)
@@ -34,6 +38,34 @@ def git(*args):
 def current_version():
     result = git("rev-parse", "--short", "HEAD")
     return result.stdout.strip() if result.returncode == 0 else "?"
+
+
+def read_version():
+    try:
+        value = VERSION_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        value = ""
+
+    return value or DEFAULT_VERSION
+
+
+def ensure_version_file():
+    if not VERSION_FILE.exists():
+        VERSION_FILE.write_text(DEFAULT_VERSION + "\n", encoding="utf-8")
+
+    return read_version()
+
+
+def bump_version():
+    try:
+        current = float(read_version())
+    except ValueError:
+        current = float(DEFAULT_VERSION)
+
+    new_version = "%.2f" % (current + VERSION_STEP)
+    VERSION_FILE.write_text(new_version + "\n", encoding="utf-8")
+
+    return new_version
 
 
 def upstream_ref():
@@ -88,6 +120,8 @@ def stop_server(process):
 
 
 def main():
+    log("versão local: %s" % ensure_version_file())
+
     server = start_server()
 
     if AUTO_UPDATE:
@@ -113,7 +147,8 @@ def main():
 
                 try:
                     if has_update() and pull_update():
-                        log("nova versão baixada; reiniciando o servidor...")
+                        new_version = bump_version()
+                        log("nova versão baixada (agora %s); reiniciando o servidor..." % new_version)
                         stop_server(server)
                         server = start_server()
 
