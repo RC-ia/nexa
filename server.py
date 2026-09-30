@@ -17,7 +17,7 @@ from auth import auth_bp, current_user, init_auth_db, valid_message_key  # noqa:
 API_KEY = os.environ.get("API_KEY", "").strip()
 API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip("/")
 MODEL = os.environ.get("MODEL", "nada")
-TTS_MODEL = os.environ.get("TTS_MODEL", "el/eleven_multilingual_v2").strip()
+TTS_MODEL = "el/eleven_multilingual_v2"
 PORT = int(os.environ.get("PORT", "8000"))
 MEMORY_DB = BASE_DIR / os.environ.get("MEMORY_DB", "nexa.db")
 VERSION_FILE = BASE_DIR / os.environ.get("VERSION_FILE", ".nexa_version")
@@ -696,11 +696,14 @@ def generate_voice_audio():
             timeout=(10, 90),
         )
     except requests.RequestException as error:
-        print("[NEXA] falha ao gerar áudio:", error)
+        print("[NEXA-TTS] %s falha ao gerar áudio: %s" % (TTS_MODEL, error))
         return jsonify({"error": "Falha ao conectar ao serviço de voz."}), 502
 
     if response.status_code != 200:
-        log_upstream_error(response)
+        print(
+            "[NEXA-TTS] %s HTTP %d (API_BASE=%s): %s"
+            % (TTS_MODEL, response.status_code, API_BASE, response.text[:500])
+        )
         return jsonify({
             "error": "O provedor não conseguiu gerar o áudio (HTTP %d)." % response.status_code
         }), 502
