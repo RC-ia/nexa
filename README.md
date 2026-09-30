@@ -154,8 +154,9 @@ Dentro dela:
 - **Chats anteriores** — a conversa aberta fica destacada, e a lista vem da
   mais recente para a mais antiga. Passando o mouse aparece o **✕** para
   apagar. O título de cada chat é a primeira mensagem que você mandou.
-- **Configurações** — por enquanto é só um aviso; não há nada configurável
-  ali ainda.
+- **Configurações** — reúne Voz, Memória, Instruções, Lembretes e Mais.
+  Instruções e preferências de memória ficam separadas por usuário neste
+  navegador; lembretes são locais e só disparam enquanto a página estiver aberta.
 
 A gaveta fecha pelo **✕**, clicando fora dela ou com `Esc`.
 

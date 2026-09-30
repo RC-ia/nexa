@@ -256,8 +256,15 @@ def log_upstream_error(response):
     )
 
 
-def build_messages(messages, memories):
-    contents = [{"role": "system", "content": SYSTEM_PROMPT}]
+def build_messages(messages, memories, custom_instructions=""):
+    system_prompt = SYSTEM_PROMPT
+    if custom_instructions:
+        system_prompt += (
+            "\n\nInstruções adicionais do usuário (siga quando forem compatíveis "
+            "com as instruções do sistema):\n" + custom_instructions
+        )
+
+    contents = [{"role": "system", "content": system_prompt}]
 
     if memories:
         contents.append({
@@ -308,10 +315,10 @@ def reasoning_payload(level):
     return {REASONING_PARAM: value}
 
 
-def request_body(stream, messages, memories, reasoning):
+def request_body(stream, messages, memories, reasoning, custom_instructions=""):
     body = {
         "model": MODEL,
-        "messages": build_messages(messages, memories),
+        "messages": build_messages(messages, memories, custom_instructions),
         "stream": stream,
         "max_tokens": MAX_OUTPUT_TOKENS,
     }
@@ -454,7 +461,7 @@ def parse_data_line(raw):
         return None
 
 
-def make_stream_response(lines, user_id, user_message):
+def make_stream_response(lines, user_id, user_message, memory_enabled=True):
     # Num modelo com pensamento, o raciocínio chega antes do texto. A sondagem
     # precisa guardar esses pedacos, senao o stream comeca a responder no meio
     # da resposta e todo o raciocinio some.
@@ -530,11 +537,12 @@ def make_stream_response(lines, user_id, user_message):
 
             yield sse({"type": "done", "model": MODEL})
 
-            threading.Thread(
-                target=extract_memory,
-                args=(user_id, user_message, full_text),
-                daemon=True,
-            ).start()
+            if memory_enabled:
+                threading.Thread(
+                    target=extract_memory,
+                    args=(user_id, user_message, full_text),
+                    daemon=True,
+                ).start()
 
         except requests.RequestException as error:
             print("[NEXA] erro durante o stream:", error)
@@ -543,12 +551,17 @@ def make_stream_response(lines, user_id, user_message):
     return Response(stream_with_context(generate()), headers=sse_headers())
 
 
-def make_blocking_response(user_id, user_message, messages, memories, reasoning):
+def make_blocking_response(
+    user_id, user_message, messages, memories, reasoning,
+    custom_instructions="", memory_enabled=True,
+):
     try:
         response = requests.post(
             API_BASE + "/chat/completions",
             headers=auth_headers(),
-            json=request_body(False, messages, memories, reasoning),
+            json=request_body(
+                False, messages, memories, reasoning, custom_instructions
+            ),
             timeout=(10, 60),
         )
 
@@ -587,11 +600,12 @@ def make_blocking_response(user_id, user_message, messages, memories, reasoning)
         yield sse({"type": "text", "text": text})
         yield sse({"type": "done", "model": MODEL})
 
-        threading.Thread(
-            target=extract_memory,
-            args=(user_id, user_message, text),
-            daemon=True,
-        ).start()
+        if memory_enabled:
+            threading.Thread(
+                target=extract_memory,
+                args=(user_id, user_message, text),
+                daemon=True,
+            ).start()
 
     return Response(stream_with_context(generate()), headers=sse_headers())
 
@@ -814,6 +828,14 @@ def chat():
     reasoning = body.get("reasoning")
     reasoning = reasoning.strip() if isinstance(reasoning, str) else ""
 
+    memory_enabled = body.get("memoryEnabled") is not False
+    custom_instructions = body.get("customInstructions", "")
+    custom_instructions = (
+        custom_instructions.strip()[:2000]
+        if isinstance(custom_instructions, str)
+        else ""
+    )
+
     incoming = body.get("messages")
     if not isinstance(incoming, list):
         incoming = body.get("history")
@@ -855,13 +877,15 @@ def chat():
     if not messages:
         return jsonify({"error": "Nenhuma mensagem foi enviada para a NEXA."}), 400
 
-    memories = get_memories(user_id)
+    memories = get_memories(user_id) if memory_enabled else []
 
     try:
         upstream = requests.post(
             API_BASE + "/chat/completions",
             headers=auth_headers(),
-            json=request_body(True, messages, memories, reasoning),
+            json=request_body(
+                True, messages, memories, reasoning, custom_instructions
+            ),
             stream=True,
             timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
         )
@@ -878,6 +902,7 @@ def chat():
             upstream.iter_lines(decode_unicode=False),
             user_id,
             user_message,
+            memory_enabled,
         )
 
         if streamed is not None:
@@ -889,7 +914,81 @@ def chat():
         log_upstream_error(upstream)
         upstream.close()
 
-    return make_blocking_response(user_id, user_message, messages, memories, reasoning)
+    return make_blocking_response(
+        user_id, user_message, messages, memories, reasoning,
+        custom_instructions, memory_enabled,
+    )
+
+
+@app.get("/api/memories")
+def list_memories():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para ver as memórias."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    user_id = "acct_%d" % user["id"]
+    try:
+        with sqlite3.connect(MEMORY_DB, timeout=10) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT id, memory, created_at FROM memories "
+                "WHERE user_id = ? ORDER BY id DESC LIMIT 100",
+                (user_id,),
+            ).fetchall()
+        return jsonify({"memories": [dict(row) for row in rows]})
+    except sqlite3.Error as error:
+        print("[NEXA] falha ao listar memórias:", error)
+        return jsonify({"error": "Não foi possível carregar as memórias."}), 500
+
+
+@app.delete("/api/memories")
+def clear_memories():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para apagar as memórias."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    try:
+        with sqlite3.connect(MEMORY_DB, timeout=10) as conn:
+            conn.execute(
+                "DELETE FROM memories WHERE user_id = ?",
+                ("acct_%d" % user["id"],),
+            )
+        return jsonify({"ok": True})
+    except sqlite3.Error as error:
+        print("[NEXA] falha ao apagar memórias:", error)
+        return jsonify({"error": "Não foi possível apagar as memórias."}), 500
+
+
+@app.delete("/api/memories/<int:memory_id>")
+def delete_memory(memory_id):
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para apagar memórias."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    try:
+        with sqlite3.connect(MEMORY_DB, timeout=10) as conn:
+            cursor = conn.execute(
+                "DELETE FROM memories WHERE id = ? AND user_id = ?",
+                (memory_id, "acct_%d" % user["id"]),
+            )
+        if cursor.rowcount == 0:
+            return jsonify({"error": "Memória não encontrada."}), 404
+        return jsonify({"ok": True})
+    except sqlite3.Error as error:
+        print("[NEXA] falha ao apagar memória:", error)
+        return jsonify({"error": "Não foi possível apagar a memória."}), 500
 
 
 init_db()

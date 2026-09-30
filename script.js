@@ -25,9 +25,29 @@ const drawerChats = document.getElementById("drawerChats");
 const drawerSettings = document.getElementById("drawerSettings");
 const settingsPanel = document.getElementById("settingsPanel");
 const settingsClose = document.getElementById("settingsClose");
+const settingsHome = document.getElementById("settingsHome");
+const settingsTitle = document.getElementById("settingsTitle");
+const settingsViews = {
+  voice: document.getElementById("settingsVoice"),
+  memory: document.getElementById("settingsMemory"),
+  instructions: document.getElementById("settingsInstructions"),
+  reminders: document.getElementById("settingsReminders"),
+  more: document.getElementById("settingsMore")
+};
 const speechToggle = document.getElementById("speechToggle");
 const ttsSpeedSlider = document.getElementById("ttsSpeed");
 const ttsSpeedValue = document.getElementById("ttsSpeedValue");
+const memoryToggle = document.getElementById("memoryToggle");
+const memoryList = document.getElementById("memoryList");
+const memoryStatus = document.getElementById("memoryStatus");
+const customInstructionsInput = document.getElementById("customInstructions");
+const instructionStatus = document.getElementById("instructionStatus");
+const reminderForm = document.getElementById("reminderForm");
+const reminderTextInput = document.getElementById("reminderText");
+const reminderAtInput = document.getElementById("reminderAt");
+const reminderList = document.getElementById("reminderList");
+const reminderStatus = document.getElementById("reminderStatus");
+const reminderNotificationButton = document.getElementById("reminderNotification");
 
 const MEMORY_KEY = "nexa_conversation";
 const MESSAGE_KEY_STORAGE_PREFIX = "nexa_message_key:";
@@ -36,6 +56,9 @@ let ACTIVE_CHAT_KEY = "nexa_active_chat";
 const REASONING_KEY = "nexa_reasoning";
 const SPEECH_KEY = "nexa_speech_enabled";
 const TTS_SPEED_KEY = "nexa_tts_speed";
+const MEMORY_ENABLED_KEY = "nexa_memory_enabled:";
+const INSTRUCTIONS_KEY = "nexa_custom_instructions:";
+const REMINDERS_KEY = "nexa_reminders:";
 
 const REASONING_LABELS = {
   none: "Nenhum",
@@ -1349,7 +1372,9 @@ async function askNexa(text) {
         history:
           history.slice(-12),
 
-        reasoning: reasoningLevel
+        reasoning: reasoningLevel,
+        memoryEnabled,
+        customInstructions
       })
     });
 
@@ -1847,7 +1872,211 @@ function closeDrawer() {
   );
 }
 
+function accountSettingKey(prefix) {
+  return prefix + (currentUser ? currentUser.username : "anonymous");
+}
+
+function loadAccountSettings(user) {
+  try {
+    memoryEnabled = localStorage.getItem(
+      MEMORY_ENABLED_KEY + user.username
+    ) !== "false";
+    customInstructions = localStorage.getItem(
+      INSTRUCTIONS_KEY + user.username
+    ) || "";
+  } catch (error) {
+    memoryEnabled = true;
+    customInstructions = "";
+  }
+
+  memoryToggle.checked = memoryEnabled;
+  customInstructionsInput.value = customInstructions;
+  loadReminders();
+}
+
+function showSettingsView(viewName) {
+  const titles = {
+    home: "Configurações",
+    voice: "Voz",
+    memory: "Memória",
+    instructions: "Instruções",
+    reminders: "Lembretes",
+    more: "Mais"
+  };
+
+  settingsHome.hidden = viewName !== "home";
+  Object.entries(settingsViews).forEach(([name, view]) => {
+    view.hidden = name !== viewName;
+  });
+  settingsTitle.textContent = titles[viewName] || titles.home;
+
+  if (viewName === "memory") {
+    loadMemories();
+  } else if (viewName === "instructions") {
+    customInstructionsInput.value = customInstructions;
+  } else if (viewName === "reminders") {
+    const localNow = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+    reminderAtInput.min = localNow.toISOString().slice(0, 16);
+    renderReminderList();
+  }
+}
+
+async function loadMemories() {
+  memoryList.replaceChildren();
+  memoryStatus.textContent = "Carregando…";
+
+  try {
+    const data = await api("GET", "/api/memories");
+    memoryList.replaceChildren();
+
+    if (!data.memories.length) {
+      const empty = document.createElement("p");
+      empty.className = "settings-status";
+      empty.textContent = "Nenhuma memória salva.";
+      memoryList.appendChild(empty);
+      memoryStatus.textContent = "";
+      return;
+    }
+
+    data.memories.forEach(memory => {
+      const row = document.createElement("div");
+      row.className = "settings-item";
+
+      const copy = document.createElement("div");
+      copy.className = "settings-item-copy";
+      copy.textContent = memory.memory;
+
+      const date = document.createElement("small");
+      date.textContent = memory.created_at || "";
+      copy.appendChild(date);
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "settings-item-delete";
+      remove.textContent = "Apagar";
+      remove.setAttribute("aria-label", "Apagar memória");
+      remove.addEventListener("click", async function () {
+        try {
+          await api("DELETE", `/api/memories/${memory.id}`);
+          await loadMemories();
+        } catch (error) {
+          memoryStatus.textContent = error.message;
+        }
+      });
+
+      row.append(copy, remove);
+      memoryList.appendChild(row);
+    });
+
+    memoryStatus.textContent = `${data.memories.length} memória(s)`;
+  } catch (error) {
+    memoryStatus.textContent = error.message;
+  }
+}
+
+function saveReminderData() {
+  try {
+    localStorage.setItem(
+      accountSettingKey(REMINDERS_KEY),
+      JSON.stringify(reminders)
+    );
+  } catch (error) {
+    reminderStatus.textContent = "Não foi possível salvar os lembretes.";
+  }
+}
+
+function renderReminderList() {
+  reminderList.replaceChildren();
+
+  if (!reminders.length) {
+    const empty = document.createElement("p");
+    empty.className = "settings-status";
+    empty.textContent = "Nenhum lembrete programado.";
+    reminderList.appendChild(empty);
+    return;
+  }
+
+  reminders
+    .slice()
+    .sort((first, second) => first.at - second.at)
+    .forEach(reminder => {
+      const row = document.createElement("div");
+      row.className = "settings-item";
+
+      const copy = document.createElement("div");
+      copy.className = "settings-item-copy";
+      copy.textContent = reminder.text;
+
+      const date = document.createElement("small");
+      date.textContent = new Date(reminder.at).toLocaleString("pt-BR");
+      copy.appendChild(date);
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "settings-item-delete";
+      remove.textContent = "Apagar";
+      remove.addEventListener("click", function () {
+        const timer = reminderTimers.get(reminder.id);
+        if (timer) {
+          clearTimeout(timer);
+          reminderTimers.delete(reminder.id);
+        }
+        reminders = reminders.filter(item => item.id !== reminder.id);
+        saveReminderData();
+        renderReminderList();
+      });
+
+      row.append(copy, remove);
+      reminderList.appendChild(row);
+    });
+}
+
+function scheduleReminder(reminder) {
+  const delay = Math.max(0, reminder.at - Date.now());
+  const timer = setTimeout(function () {
+    reminderTimers.delete(reminder.id);
+
+    if (Date.now() < reminder.at) {
+      scheduleReminder(reminder);
+      return;
+    }
+
+    reminders = reminders.filter(item => item.id !== reminder.id);
+    saveReminderData();
+    renderReminderList();
+
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification("Lembrete da NEXA", { body: reminder.text });
+    } else {
+      addMessage("Lembrete: " + reminder.text, "nexa");
+    }
+  }, Math.min(delay, 2147483000));
+
+  reminderTimers.set(reminder.id, timer);
+}
+
+function loadReminders() {
+  reminderTimers.forEach(timer => clearTimeout(timer));
+  reminderTimers.clear();
+
+  try {
+    const saved = JSON.parse(
+      localStorage.getItem(accountSettingKey(REMINDERS_KEY)) || "[]"
+    );
+    reminders = Array.isArray(saved)
+      ? saved.filter(item => item && typeof item.id === "string" &&
+        typeof item.text === "string" && Number.isFinite(item.at))
+      : [];
+  } catch (error) {
+    reminders = [];
+  }
+
+  reminders.forEach(scheduleReminder);
+  renderReminderList();
+}
+
 function openSettings() {
+  showSettingsView("home");
   closeDrawer();
   settingsPanel.hidden = false;
   settingsClose.focus();
@@ -1855,6 +2084,7 @@ function openSettings() {
 
 function closeSettings() {
   settingsPanel.hidden = true;
+  showSettingsView("home");
   drawerSettings.focus();
 }
 
@@ -2061,6 +2291,121 @@ ttsSpeedSlider.addEventListener(
   "input",
   saveTTSSettings
 );
+
+document.querySelectorAll("[data-settings-open]").forEach(button => {
+  button.addEventListener("click", function () {
+    showSettingsView(button.dataset.settingsOpen);
+  });
+});
+
+document.querySelectorAll("[data-settings-back]").forEach(button => {
+  button.addEventListener("click", function () {
+    showSettingsView("home");
+  });
+});
+
+memoryToggle.addEventListener("change", function () {
+  memoryEnabled = memoryToggle.checked;
+  try {
+    localStorage.setItem(
+      MEMORY_ENABLED_KEY + currentUser.username,
+      String(memoryEnabled)
+    );
+    memoryStatus.textContent = memoryEnabled
+      ? "As memórias serão usadas e novas lembranças poderão ser salvas."
+      : "Memórias não serão usadas nem novas lembranças serão salvas.";
+  } catch (error) {
+    memoryStatus.textContent = "Não foi possível salvar essa preferência.";
+  }
+});
+
+document.getElementById("memoryRefresh").addEventListener("click", loadMemories);
+
+document.getElementById("memoryClear").addEventListener("click", async function () {
+  if (!confirm("Apagar todas as memórias salvas para esta conta?")) {
+    return;
+  }
+
+  try {
+    await api("DELETE", "/api/memories");
+    await loadMemories();
+    memoryStatus.textContent = "Todas as memórias foram apagadas.";
+  } catch (error) {
+    memoryStatus.textContent = error.message;
+  }
+});
+
+document.getElementById("saveInstructions").addEventListener("click", function () {
+  customInstructions = customInstructionsInput.value.trim().slice(0, 2000);
+  customInstructionsInput.value = customInstructions;
+
+  try {
+    localStorage.setItem(
+      INSTRUCTIONS_KEY + currentUser.username,
+      customInstructions
+    );
+    instructionStatus.textContent = "Instruções salvas.";
+  } catch (error) {
+    instructionStatus.textContent = "Não foi possível salvar as instruções.";
+  }
+});
+
+reminderForm.addEventListener("submit", function (event) {
+  event.preventDefault();
+  const text = reminderTextInput.value.trim();
+  const at = new Date(reminderAtInput.value).getTime();
+
+  if (!text || !Number.isFinite(at) || at <= Date.now()) {
+    reminderStatus.textContent = "Escolha uma data e hora futuras.";
+    return;
+  }
+
+  const reminder = { id: makeId(), text, at };
+  reminders.push(reminder);
+  saveReminderData();
+  scheduleReminder(reminder);
+  renderReminderList();
+  reminderForm.reset();
+  reminderStatus.textContent = "Lembrete programado.";
+});
+
+reminderNotificationButton.addEventListener("click", async function () {
+  if (!("Notification" in window)) {
+    reminderStatus.textContent = "Este navegador não oferece notificações.";
+    return;
+  }
+
+  const permission = await Notification.requestPermission();
+  reminderStatus.textContent = permission === "granted"
+    ? "Notificações ativadas."
+    : "Permissão de notificação não concedida.";
+});
+
+document.getElementById("exportChats").addEventListener("click", function () {
+  const file = new Blob(
+    [JSON.stringify({ exportedAt: new Date().toISOString(), chats }, null, 2)],
+    { type: "application/json" }
+  );
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "nexa-conversas.json";
+  link.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById("clearChats").addEventListener("click", function () {
+  if (!confirm("Apagar todas as conversas deste usuário neste navegador?")) {
+    return;
+  }
+
+  chats = [];
+  history.length = 0;
+  activeChatId = "";
+  startNewChat();
+  settingsPanel.hidden = true;
+  input.focus();
+});
 
 function closeLiveCallDialog() {
   releaseLiveCall("Chamada encerrada");
@@ -2286,6 +2631,10 @@ const adminError = document.getElementById("adminError");
 let currentUser = null;
 let appStarted = false;
 let messageKey = "";
+let memoryEnabled = true;
+let customInstructions = "";
+let reminders = [];
+const reminderTimers = new Map();
 let liveCallSocket = null;
 let liveCallStream = null;
 let liveAudioContext = null;
@@ -2312,9 +2661,14 @@ function showAuth() {
 }
 
 async function api(method, path, payload) {
+  const headers = { "Content-Type": "application/json" };
+  if (messageKey) {
+    headers["X-Nexa-Message-Key"] = messageKey;
+  }
+
   const response = await fetch(path, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: payload ? JSON.stringify(payload) : undefined
   });
 
@@ -2358,6 +2712,7 @@ function enterApp(user, issuedMessageKey) {
 
   CHATS_KEY = "nexa_chats" + suffix;
   ACTIVE_CHAT_KEY = "nexa_active_chat" + suffix;
+  loadAccountSettings(user);
 
   /*
     Conversas de antes do login: a primeira conta que entra

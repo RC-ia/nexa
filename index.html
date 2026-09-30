@@ -16,7 +16,7 @@
 
   <title>NEXA</title>
 
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 
 <body>
@@ -375,57 +375,116 @@
     >
 
       <div class="settings-card">
+        <header class="settings-header">
+          <h3 id="settingsTitle">Configurações</h3>
+          <button type="button" id="settingsClose" class="settings-close">
+            Fechar
+          </button>
+        </header>
 
-        <h3>
-          Configurações
-        </h3>
+        <section id="settingsHome" class="settings-view">
+          <p class="settings-description">Escolha o que deseja configurar.</p>
+          <div class="settings-grid">
+            <button type="button" class="settings-category" data-settings-open="voice">
+              <strong>Voz</strong>
+              <span>Resposta falada e velocidade</span>
+            </button>
+            <button type="button" class="settings-category" data-settings-open="memory">
+              <strong>Memória</strong>
+              <span>Preferências lembradas pela NEXA</span>
+            </button>
+            <button type="button" class="settings-category" data-settings-open="instructions">
+              <strong>Instruções</strong>
+              <span>Como a NEXA deve responder</span>
+            </button>
+            <button type="button" class="settings-category" data-settings-open="reminders">
+              <strong>Lembretes</strong>
+              <span>Alertas programados neste navegador</span>
+            </button>
+            <button type="button" class="settings-category" data-settings-open="more">
+              <strong>Mais</strong>
+              <span>Exportação e dados das conversas</span>
+            </button>
+          </div>
+        </section>
 
-        <p class="settings-description">
-          Personalize como a NEXA responde.
-        </p>
-
-        <label class="settings-option" for="speechToggle">
-          <span class="settings-option-copy">
-            <span class="settings-option-title">Resposta por voz</span>
-            <span class="settings-option-description">
-              Ler as respostas da NEXA em voz alta
+        <section id="settingsVoice" class="settings-view" hidden>
+          <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
+          <label class="settings-option" for="speechToggle">
+            <span class="settings-option-copy">
+              <span class="settings-option-title">Resposta por voz</span>
+              <span class="settings-option-description">Ler as respostas da NEXA em voz alta</span>
             </span>
-          </span>
-          <input
-            type="checkbox"
-            id="speechToggle"
-            class="settings-switch"
-            role="switch"
-            aria-label="Resposta por voz"
-            checked
-          >
-        </label>
-
-        <div class="settings-audio-controls">
-          <label class="settings-field" for="ttsSpeed">
-            <span class="settings-speed-heading">
-              Velocidade
-              <output id="ttsSpeedValue" for="ttsSpeed">1,0x</output>
-            </span>
-            <input
-              type="range"
-              id="ttsSpeed"
-              min="0.8"
-              max="1.25"
-              step="0.05"
-              value="1"
-            >
+            <input type="checkbox" id="speechToggle" class="settings-switch" role="switch" aria-label="Resposta por voz" checked>
           </label>
-        </div>
+          <div class="settings-audio-controls">
+            <label class="settings-field" for="ttsSpeed">
+              <span class="settings-speed-heading">Velocidade <output id="ttsSpeedValue" for="ttsSpeed">1,0x</output></span>
+              <input type="range" id="ttsSpeed" min="0.8" max="1.25" step="0.05" value="1">
+            </label>
+          </div>
+        </section>
 
-        <button
-          type="button"
-          id="settingsClose"
-          class="settings-close"
-        >
-          Fechar
-        </button>
+        <section id="settingsMemory" class="settings-view" hidden>
+          <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
+          <label class="settings-option" for="memoryToggle">
+            <span class="settings-option-copy">
+              <span class="settings-option-title">Usar memória</span>
+              <span class="settings-option-description">Personalizar respostas e salvar novas lembranças</span>
+            </span>
+            <input type="checkbox" id="memoryToggle" class="settings-switch" role="switch" checked>
+          </label>
+          <div class="settings-list-heading">
+            <strong>Memórias salvas</strong>
+            <button type="button" id="memoryRefresh" class="settings-inline-button">Atualizar</button>
+          </div>
+          <div id="memoryList" class="settings-item-list" aria-live="polite"></div>
+          <p id="memoryStatus" class="settings-status" role="status"></p>
+          <button type="button" id="memoryClear" class="settings-danger">Apagar todas as memórias</button>
+        </section>
 
+        <section id="settingsInstructions" class="settings-view" hidden>
+          <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
+          <label class="settings-field" for="customInstructions">
+            <span>Instruções adicionais</span>
+            <textarea id="customInstructions" maxlength="2000" rows="6" placeholder="Ex.: prefira respostas curtas e use exemplos em português."></textarea>
+          </label>
+          <p class="settings-description">Estas instruções são aplicadas às conversas de texto desta conta neste navegador.</p>
+          <div class="settings-page-actions">
+            <span id="instructionStatus" class="settings-status" role="status"></span>
+            <button type="button" id="saveInstructions" class="settings-action">Salvar</button>
+          </div>
+        </section>
+
+        <section id="settingsReminders" class="settings-view" hidden>
+          <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
+          <form id="reminderForm" class="settings-reminder-form">
+            <label class="settings-field" for="reminderText">
+              <span>Lembrete</span>
+              <input type="text" id="reminderText" maxlength="180" required placeholder="O que você quer lembrar?">
+            </label>
+            <label class="settings-field" for="reminderAt">
+              <span>Data e hora</span>
+              <input type="datetime-local" id="reminderAt" required>
+            </label>
+            <button type="submit" class="settings-action">Adicionar lembrete</button>
+          </form>
+          <p class="settings-description">Os alertas são locais e só disparam enquanto esta página estiver aberta.</p>
+          <button type="button" id="reminderNotification" class="settings-inline-button">
+            Ativar notificações
+          </button>
+          <p id="reminderStatus" class="settings-status" role="status"></p>
+          <div id="reminderList" class="settings-item-list" aria-live="polite"></div>
+        </section>
+
+        <section id="settingsMore" class="settings-view" hidden>
+          <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
+          <p class="settings-description">Gerencie os dados de conversas salvos neste navegador.</p>
+          <div class="settings-more-actions">
+            <button type="button" id="exportChats" class="settings-action">Exportar conversas</button>
+            <button type="button" id="clearChats" class="settings-danger">Apagar todas as conversas</button>
+          </div>
+        </section>
       </div>
 
     </div>
@@ -546,7 +605,7 @@
 
   </div>
 
-  <script src="script.js?v=15"></script>
+  <script src="script.js?v=17"></script>
 
 </body>
 
