@@ -1276,6 +1276,63 @@ body {
 
 
 /* =========================
+   AVISO DE MEMÓRIA ATUALIZADA
+========================= */
+
+.memory-notice {
+  display: table;
+  margin: 10px 0 0;
+
+  padding: 5px 11px 5px 9px;
+
+  border: 1px solid rgba(134, 229, 209, 0.24);
+  border-radius: 999px;
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(134, 229, 209, 0.12),
+      rgba(168, 120, 255, 0.1)
+    );
+
+  color: #9fd8cd;
+
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+
+  animation: memoryNoticeAppear 0.34s ease-out;
+}
+
+.memory-notice[hidden] {
+  display: none;
+}
+
+.memory-notice-icon {
+  color: #86e5d1;
+
+  font-size: 11px;
+
+  line-height: 1;
+}
+
+.memory-notice-text {
+  white-space: nowrap;
+}
+
+@keyframes memoryNoticeAppear {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+
+/* =========================
    LOGO ORB
 ========================= */
 

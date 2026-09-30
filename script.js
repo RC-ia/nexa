@@ -276,7 +276,8 @@ function cleanMessages(list) {
     .map(item => ({
       role: item.role,
       content: item.content,
-      thinking: item.thinking
+      thinking: item.thinking,
+      memoryUpdated: item.memoryUpdated === true
     }));
 }
 
@@ -520,7 +521,7 @@ function loadChats() {
   ==========================================
 */
 
-function addMessage(text, type, thinkingText) {
+function addMessage(text, type, thinkingText, memoryUpdated) {
   const message =
     document.createElement("div");
 
@@ -559,6 +560,17 @@ function addMessage(text, type, thinkingText) {
 
     message.appendChild(thinking.button);
     message.appendChild(thinking.panel);
+
+    const memoryNotice =
+      createMemoryNotice();
+
+    memoryNotice.restore(
+      memoryUpdated === true
+    );
+
+    message.appendChild(
+      memoryNotice.element
+    );
   }
 
   message.appendChild(paragraph);
@@ -645,6 +657,61 @@ function hideTyping() {
   resposta da NEXA, então o estado vive no próprio
   elemento em vez de uma variável global.
 */
+
+/*
+  ==========================================
+  AVISO DE MEMÓRIA ATUALIZADA
+  ==========================================
+*/
+
+const MEMORY_NOTICE_TEXT =
+  "Memória atualizada com o que você me contou.";
+
+function createMemoryNotice() {
+  const notice =
+    document.createElement("p");
+
+  notice.className = "memory-notice";
+  notice.hidden = true;
+
+  const icon =
+    document.createElement("span");
+
+  icon.className = "memory-notice-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = "✦";
+
+  const text =
+    document.createElement("span");
+
+  text.className = "memory-notice-text";
+  text.textContent = MEMORY_NOTICE_TEXT;
+
+  notice.appendChild(icon);
+  notice.appendChild(text);
+
+  let shown = false;
+
+  return {
+    element: notice,
+
+    show() {
+      if (shown) {
+        return;
+      }
+
+      shown = true;
+      notice.hidden = false;
+    },
+
+    restore(wasShown) {
+      if (wasShown) {
+        shown = true;
+        notice.hidden = false;
+      }
+    }
+  };
+}
 
 function createThinkingBlock() {
   const button =
@@ -777,10 +844,14 @@ function createStreamingMessage() {
   const thinking =
     createThinkingBlock();
 
+  const memoryNotice =
+    createMemoryNotice();
+
   message.appendChild(label);
   message.appendChild(thinking.button);
   message.appendChild(thinking.panel);
   message.appendChild(paragraph);
+  message.appendChild(memoryNotice.element);
 
   chat.appendChild(message);
 
@@ -824,7 +895,8 @@ function createStreamingMessage() {
     message,
     appendText,
     flushText,
-    thinking
+    thinking,
+    memoryNotice
   };
 }
 
@@ -900,7 +972,8 @@ async function askNexa(text) {
   const {
     appendText,
     flushText,
-    thinking
+    thinking,
+    memoryNotice
   } = createStreamingMessage();
 
   const reader =
@@ -913,6 +986,7 @@ async function askNexa(text) {
   let fullReply = "";
   let fullThinking = "";
   let finished = false;
+  let memoryUpdated = false;
 
   /*
     Processa um evento SSE.
@@ -967,6 +1041,16 @@ async function askNexa(text) {
         fullThinking += data.text;
 
         thinking.append(data.text);
+      }
+
+      /*
+        A memória desta conta foi reescrita
+        pela ferramenta chamada pelo modelo.
+      */
+
+      if (data.type === "memory") {
+        memoryUpdated = true;
+        memoryNotice.show();
       }
 
       /*
@@ -1069,7 +1153,8 @@ async function askNexa(text) {
   history.push({
     role: "model",
     content: fullReply,
-    thinking: fullThinking
+    thinking: fullThinking,
+    memoryUpdated
   });
 
   saveMemory();
@@ -2076,7 +2161,8 @@ function restoreConversation() {
       item.role === "user"
         ? "user"
         : "nexa",
-      item.thinking
+      item.thinking,
+      item.memoryUpdated
     );
   });
 }

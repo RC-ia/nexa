@@ -639,11 +639,17 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
     O modelo pediu para salvar a memória. Respondemos à chamada com o
     resultado da ferramenta e pedimos a continuação da resposta, agora com a
     memória já gravada no system prompt.
+
+    Devolve (texto_da_continuacao, memoria_atualizada). O texto pode vir
+    vazio quando a chamada de continuação falha, mas a memória já foi
+    gravada nesse caso.
     """
     result = run_memory_tool(user_id, calls)
 
     if not result:
-        return None
+        return None, False
+
+    memory_saved = True
 
     memory_calls = [
         call for call in calls
@@ -692,20 +698,20 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
         )
     except requests.RequestException as error:
         print("[NEXA] falha ao continuar após salvar memória:", error)
-        return None
+        return None, memory_saved
 
     if response.status_code != 200:
         log_upstream_error(response)
-        return None
+        return None, memory_saved
 
     try:
         payload = response.json()
     except ValueError:
-        return None
+        return None, memory_saved
 
     text = extract_text(payload)
 
-    return text or "Memória salva."
+    return text or "Memória salva.", memory_saved
 
 
 def make_stream_response(lines, user_id, user_message, memory_enabled=True,
@@ -752,6 +758,7 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
     def generate():
         full_text = ""
         reason = None
+        memory_updated = False
 
         try:
             for thinking in reasoning_chunks:
@@ -793,7 +800,7 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
                 )
 
             if memory_enabled and tool_calls:
-                follow_up = finish_stream_with_tools(
+                follow_up, memory_updated = finish_stream_with_tools(
                     user_id,
                     messages or [],
                     memories or [],
@@ -806,6 +813,9 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
 
                 if follow_up:
                     yield sse({"type": "text", "text": follow_up})
+
+                if memory_updated:
+                    yield sse({"type": "memory"})
 
             yield sse({"type": "done", "model": MODEL})
 
@@ -861,11 +871,13 @@ def make_blocking_response(
         return jsonify({"error": "O modelo respondeu sem texto."}), 502
 
     follow_up = ""
+    memory_updated = False
     if calls:
-        follow_up = finish_stream_with_tools(
+        follow_up, memory_updated = finish_stream_with_tools(
             user_id, messages, memories, reasoning,
             custom_instructions, text, calls, memory_enabled,
-        ) or ""
+        )
+        follow_up = follow_up or ""
 
     def generate():
         if thinking:
@@ -876,6 +888,9 @@ def make_blocking_response(
 
         if follow_up:
             yield sse({"type": "text", "text": follow_up})
+
+        if memory_updated:
+            yield sse({"type": "memory"})
 
         yield sse({"type": "done", "model": MODEL})
 
