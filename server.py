@@ -20,6 +20,7 @@ API_GEMA = os.environ.get("API_GEMA", "").strip()
 API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip("/")
 MODEL = os.environ.get("MODEL", "nada")
 LIVE_MODEL = "models/gemini-3.8-live"
+DEFAULT_LIVE_VOICE = "Kore"
 LIVE_VOICES = {
     "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
     "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
@@ -702,6 +703,24 @@ def message_key_error(user):
     }), 401
 
 
+@app.get("/api/live/voices")
+def list_live_voices():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para ver as vozes."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    return jsonify({
+        "voices": sorted(LIVE_VOICES),
+        "default": DEFAULT_LIVE_VOICE,
+        "model": LIVE_MODEL,
+        "enabled": bool(API_GEMA),
+    })
+
+
 @app.post("/api/live/token")
 def create_live_token():
     user = current_user()
@@ -717,7 +736,7 @@ def create_live_token():
         return jsonify({"error": "API_GEMA não configurada no arquivo .env."}), 503
 
     body = request.get_json(force=True, silent=True) or {}
-    voice = body.get("voice", "Kore")
+    voice = body.get("voice", DEFAULT_LIVE_VOICE)
     if voice not in LIVE_VOICES:
         return jsonify({"error": "Voz Gemini inválida."}), 400
 

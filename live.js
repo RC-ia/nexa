@@ -5,7 +5,7 @@ const visual = document.getElementById("liveVisual");
 const voiceSelect = document.getElementById("liveVoice");
 
 const LIVE_VOICE_KEY = "nexa_live_voice";
-const LIVE_VOICES = [
+const FALLBACK_VOICES = [
   "Kore", "Puck", "Charon", "Zephyr", "Fenrir", "Leda", "Orus", "Aoede",
   "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
   "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
@@ -13,46 +13,81 @@ const LIVE_VOICES = [
   "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
 ];
 
-function loadVoicePreference() {
+let availableVoices = FALLBACK_VOICES.slice();
+let voiceListenerAttached = false;
+
+function readSavedVoice() {
+  try {
+    return localStorage.getItem(LIVE_VOICE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function renderVoiceOptions() {
   if (!voiceSelect) {
     return;
   }
 
-  let saved = "";
-  try {
-    saved = localStorage.getItem(LIVE_VOICE_KEY) || "";
-  } catch {
-    saved = "";
-  }
+  const saved = readSavedVoice();
+  const selected = availableVoices.includes(saved)
+    ? saved
+    : availableVoices[0] || "Kore";
 
-  if (!LIVE_VOICES.includes(saved)) {
-    saved = "Kore";
-  }
+  voiceSelect.replaceChildren();
 
-  LIVE_VOICES.forEach(name => {
+  availableVoices.forEach(name => {
     const option = document.createElement("option");
     option.value = name;
     option.textContent = name;
     voiceSelect.appendChild(option);
   });
 
-  voiceSelect.value = saved;
-  voiceSelect.addEventListener("change", () => {
-    try {
-      localStorage.setItem(LIVE_VOICE_KEY, voiceSelect.value);
-    } catch {
-      // Sem armazenamento: mantém a escolha apenas nesta sessão.
-    }
-  });
+  voiceSelect.value = selected;
+
+  if (!voiceListenerAttached) {
+    voiceListenerAttached = true;
+    voiceSelect.addEventListener("change", () => {
+      try {
+        localStorage.setItem(LIVE_VOICE_KEY, voiceSelect.value);
+      } catch {
+        // Sem armazenamento: mantém a escolha apenas nesta sessão.
+      }
+    });
+  }
 }
 
 function selectedVoice() {
-  return voiceSelect && LIVE_VOICES.includes(voiceSelect.value)
+  return voiceSelect && availableVoices.includes(voiceSelect.value)
     ? voiceSelect.value
-    : "Kore";
+    : availableVoices[0] || "Kore";
 }
 
-loadVoicePreference();
+async function loadVoices() {
+  if (!voiceSelect) {
+    return;
+  }
+
+  renderVoiceOptions();
+
+  try {
+    const response = await fetch("/api/live/voices", {
+      headers: { "X-Nexa-Message-Key": accountMessageKey }
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const data = await response.json();
+    if (Array.isArray(data.voices) && data.voices.length) {
+      availableVoices = data.voices;
+      renderVoiceOptions();
+    }
+  } catch {
+    // Mantém a lista local quando o servidor não responde.
+  }
+}
 
 let accountMessageKey = "";
 let socket = null;
@@ -428,6 +463,7 @@ async function initializeLivePage() {
 
     startButton.disabled = false;
     setStatus("Pronto para iniciar", "idle");
+    loadVoices();
   } catch (error) {
     setStatus("Não foi possível verificar sua sessão", "error");
   }

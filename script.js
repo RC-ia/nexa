@@ -22,11 +22,15 @@ const settingsClose = document.getElementById("settingsClose");
 const settingsHome = document.getElementById("settingsHome");
 const settingsTitle = document.getElementById("settingsTitle");
 const settingsViews = {
+  live: document.getElementById("settingsLive"),
   memory: document.getElementById("settingsMemory"),
   instructions: document.getElementById("settingsInstructions"),
   reminders: document.getElementById("settingsReminders"),
   more: document.getElementById("settingsMore")
 };
+const liveVoiceSelect = document.getElementById("liveVoiceSelect");
+const liveVoiceStatus = document.getElementById("liveVoiceStatus");
+const liveCallOpenButton = document.getElementById("liveCallOpen");
 const memoryToggle = document.getElementById("memoryToggle");
 const memoryList = document.getElementById("memoryList");
 const memoryStatus = document.getElementById("memoryStatus");
@@ -1359,9 +1363,79 @@ function loadAccountSettings(user) {
   loadReminders();
 }
 
+let liveVoices = [];
+let liveVoiceSaved = "Kore";
+
+function loadLiveVoicePreference() {
+  try {
+    return localStorage.getItem(LIVE_VOICE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function saveLiveVoicePreference(voice) {
+  try {
+    localStorage.setItem(LIVE_VOICE_KEY, voice);
+  } catch (error) {
+    console.error("Erro ao salvar a voz da chamada:", error);
+  }
+}
+
+function applyLiveVoiceSelection() {
+  const saved = loadLiveVoicePreference();
+  liveVoiceSaved = liveVoices.includes(saved) ? saved : liveVoices[0] || "Kore";
+
+  liveVoiceSelect.replaceChildren();
+
+  liveVoices.forEach(name => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    liveVoiceSelect.appendChild(option);
+  });
+
+  liveVoiceSelect.value = liveVoiceSaved;
+}
+
+async function loadLiveSettings() {
+  liveVoiceStatus.textContent = "Carregando…";
+
+  try {
+    const data = await api("GET", "/api/live/voices");
+    liveVoices = Array.isArray(data.voices) ? data.voices : [];
+    applyLiveVoiceSelection();
+
+    if (!data.enabled) {
+      liveVoiceSelect.disabled = true;
+      liveVoiceStatus.textContent = "API_GEMA não configurada no servidor.";
+      return;
+    }
+
+    liveVoiceSelect.disabled = false;
+    liveVoiceStatus.textContent = "";
+  } catch (error) {
+    console.error("Erro ao carregar as vozes:", error);
+    liveVoices = [];
+    applyLiveVoiceSelection();
+    liveVoiceSelect.disabled = true;
+    liveVoiceStatus.textContent = "Não foi possível carregar as vozes.";
+  }
+}
+
+liveVoiceSelect.addEventListener("change", function () {
+  liveVoiceSaved = liveVoiceSelect.value;
+  saveLiveVoicePreference(liveVoiceSaved);
+});
+
+liveCallOpenButton.addEventListener("click", function () {
+  window.location.assign("/live.html");
+});
+
 function showSettingsView(viewName) {
   const titles = {
     home: "Configurações",
+    live: "Chamada",
     memory: "Memória",
     instructions: "Instruções",
     reminders: "Lembretes",
@@ -1374,7 +1448,9 @@ function showSettingsView(viewName) {
   });
   settingsTitle.textContent = titles[viewName] || titles.home;
 
-  if (viewName === "memory") {
+  if (viewName === "live") {
+    loadLiveSettings();
+  } else if (viewName === "memory") {
     loadMemories();
   } else if (viewName === "instructions") {
     customInstructionsInput.value = customInstructions;

@@ -385,6 +385,10 @@
         <section id="settingsHome" class="settings-view">
           <p class="settings-description">Escolha o que deseja configurar.</p>
           <div class="settings-grid">
+            <button type="button" class="settings-category" data-settings-open="live">
+              <strong>Chamada</strong>
+              <span>Voz e acesso da chamada de voz</span>
+            </button>
             <button type="button" class="settings-category" data-settings-open="memory">
               <strong>Memória</strong>
               <span>Preferências lembradas pela NEXA</span>
@@ -402,6 +406,19 @@
               <span>Exportação e dados das conversas</span>
             </button>
           </div>
+        </section>
+
+        <section id="settingsLive" class="settings-view" hidden>
+          <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
+          <label class="settings-field" for="liveVoiceSelect">
+            <span>Voz da chamada</span>
+            <select id="liveVoiceSelect"></select>
+          </label>
+          <p class="settings-description">Voz usada na chamada com o Gemini Live. O modo de conversa por texto continua sem voz.</p>
+          <div class="settings-page-actions">
+            <span id="liveVoiceStatus" class="settings-status" role="status"></span>
+          </div>
+          <button type="button" id="liveCallOpen" class="settings-action">Abrir chamada</button>
         </section>
 
         <section id="settingsMemory" class="settings-view" hidden>
@@ -540,7 +557,7 @@
 
   </div>
 
-  <script src="script.js?v=23"></script>
+  <script src="script.js?v=24"></script>
 
 </body>
 
