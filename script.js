@@ -1185,8 +1185,16 @@ async function askNexa(text) {
   }
 
   if (!fullReply.trim()) {
+    /*
+      Acontece quando o modelo só pediu ferramenta e a
+      continuação não trouxe texto. Aviso claro, sem
+      quebrar a página.
+    */
+
     throw new Error(
-      "A NEXA não retornou nenhum texto."
+      memoryUpdated || searched
+        ? "A NEXA usou uma ferramenta, mas não respondeu. Tente de novo."
+        : "A NEXA não retornou nenhum texto."
     );
   }
 

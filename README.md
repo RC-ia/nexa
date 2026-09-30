@@ -169,13 +169,38 @@ A busca traz título, trecho e link de até 5 resultados por consulta. O modelo
 pode pesquisar de novo na continuação, com limite de 4 rodadas
 (`MAX_TOOL_ROUNDS`).
 
-O DuckDuckGo limita requisições por IP e responde `202`. Quando isso acontece,
-a NEXA recebe o aviso e responde com o que já sabe, dizendo que não conseguiu
-verificar. O aviso também aparece no log como `[NEXA-PESQUISA] ... (202)`.
+### Tentativas de busca
+
+O DuckDuckGo limita requisições por IP e costuma responder `202` quando está
+saturado. A NEXA não desiste no primeiro erro: ela **tenta de novo durante até
+2 minutos** antes de desistir.
+
+| Variável | Padrão | Para que serve |
+| --- | --- | --- |
+| `SEARCH_PATIENCE` | `120` | Orçamento total de espera, em segundos |
+| `SEARCH_RETRY_DELAY` | `4` | Pausa entre uma tentativa e outra |
+| `SEARCH_MAX_ATTEMPTS` | `12` | Teto de tentativas, para não girar infinito |
+| `SEARCH_HEARTBEAT` | `15` | Intervalo do `ping` que mantém a conexão viva |
+
+Assim que o orçamento acaba, a ferramenta devolve ao modelo uma mensagem
+genérica dizendo que a pesquisa está fora do ar. O modelo responde com o que
+já sabe e explica que **não conseguiu verificar** — ele nunca inventa fatos,
+números, datas ou fontes para compensar. A conversa nunca trava: a resposta
+sempre é entregue.
+
+Como o proxy **Cloudflare** corta conexões ociosas em torno de 100 segundos,
+o servidor não fica parado esperando. As ferramentas rodam em uma thread
+separada e, enquanto a busca não termina, a resposta de streaming emite um
+evento `{"type":"ping"}` a cada `SEARCH_HEARTBEAT` segundos. O navegador ignora
+esses eventos e a conexão continua viva.
+
+Cada tentativa é registrada no log como
+`[NEXA-PESQUISA] ... falhou (motivo); nova tentativa em Xs (restam Ys no orçamento).`
 
 Quando uma ferramenta é usada, a resposta ganha uma pílula embaixo do texto:
 `⌕ Pesquisei na web para responder.` ou `✦ Memória atualizada com o que você
-me contou.`
+me contou.` A pílula de pesquisa **só aparece quando a busca realmente
+trouxe resultados** — se a ferramenta falhou, não existe aviso de pesquisa.
 
 ## Barra lateral
 

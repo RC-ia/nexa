@@ -3,6 +3,7 @@ import json
 import os
 import re
 import threading
+import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -406,6 +407,20 @@ SEARCH_TIMEOUT = (5, 15)
 SEARCH_RESULT_LIMIT = 5
 SEARCH_MAX_RESULTS = 8
 SEARCH_SNIPPET_LIMIT = 400
+# Enquanto o buscador não responder, insistimos dentro deste orçamento de
+# tempo (2 minutos). Assim uma falha passageira não derruba a resposta.
+SEARCH_PATIENCE = int(os.environ.get("SEARCH_PATIENCE", "120"))
+SEARCH_RETRY_DELAY = float(os.environ.get("SEARCH_RETRY_DELAY", "4"))
+SEARCH_MAX_ATTEMPTS = int(os.environ.get("SEARCH_MAX_ATTEMPTS", "12"))
+SEARCH_UNAVAILABLE_MESSAGE = (
+    "A ferramenta de pesquisa está fora do ar no momento. Responda com o que "
+    "você já sabe sobre o assunto e diga claramente que a busca está "
+    "indisponível e que não conseguiu verificar. Não invente fatos, números, "
+    "datas ou fontes para compensar."
+)
+# Enquanto a busca insiste, o proxy (Cloudflare) pode cortar a conexão se
+# ficarmos sem escrever nada. Mandamos um keep-alive no SSE durante a espera.
+SEARCH_HEARTBEAT = int(os.environ.get("SEARCH_HEARTBEAT", "15"))
 
 SEARCH_HEADERS = {
     "User-Agent": (
@@ -461,26 +476,18 @@ def unwrap_duckduckgo_url(url):
     return target[0] if target else url
 
 
-def run_web_search(term, limit=SEARCH_RESULT_LIMIT):
+def search_once(term, limit, deadline):
     """
-    Devolve (resultados, erro). Resultados é uma lista de dicionários com
-    titulo, url e trecho. Erro é uma string pronta para o modelo ler.
-
-    O DuckDuckGo responde 202 quando aperta o limite de requisições, então
-    tentamos de novo com outro endereço antes de desistir.
+    Uma passada pelas tentativas: cada endpoint do buscador é chamado uma
+    vez, alternando entre eles. Devolve (resultados, motivo_da_falha).
     """
-    if not term or not isinstance(term, str):
-        return [], "Informe um termo de busca."
-
-    term = term.strip()[:200]
-
-    if not term:
-        return [], "Informe um termo de busca."
-
-    last_error = "A pesquisa falhou."
     throttled = False
+    last_error = "A pesquisa não retornou nada útil."
 
     for endpoint in SEARCH_ENDPOINTS:
+        if time.monotonic() >= deadline:
+            return [], "tempo_esgotado"
+
         try:
             response = requests.post(
                 endpoint,
@@ -489,8 +496,8 @@ def run_web_search(term, limit=SEARCH_RESULT_LIMIT):
                 timeout=SEARCH_TIMEOUT,
             )
         except requests.RequestException as error:
-            print("[NEXA-PESQUISA] falha de rede em %s: %s" % (endpoint, error))
-            last_error = "A pesquisa falhou por erro de rede."
+            print("[NEXA-PESQUISA] rede falhou em %s: %s" % (endpoint, error))
+            last_error = "rede"
             continue
 
         if response.status_code == 202:
@@ -503,7 +510,7 @@ def run_web_search(term, limit=SEARCH_RESULT_LIMIT):
                 "[NEXA-PESQUISA] %s respondeu HTTP %d"
                 % (endpoint, response.status_code)
             )
-            last_error = "A pesquisa falhou (HTTP %d)." % response.status_code
+            last_error = "http_%d" % response.status_code
             continue
 
         results = parse_search_results(response.text, limit)
@@ -511,20 +518,74 @@ def run_web_search(term, limit=SEARCH_RESULT_LIMIT):
         if results:
             return results, ""
 
-        last_error = "Nenhum resultado encontrado para esse termo."
+        last_error = "vazio"
 
     if throttled:
-        print(
-            "[NEXA-PESQUISA] %r ignorado: o DuckDuckGo limitou este IP (202)."
-            % term
-        )
-        return [], (
-            "A pesquisa está temporariamente indisponível porque o buscador "
-            "limitou o número de consultas. Responda com o que já sabe e "
-            "diga que não conseguiu verificar."
-        )
+        return [], "limitado"
 
     return [], last_error
+
+
+def run_web_search(term, limit=SEARCH_RESULT_LIMIT):
+    """
+    Busca no DuckDuckGo insistindo até conseguir, dentro de SEARCH_PATIENCE
+    segundos (2 minutos por padrão). Se nada voltar nesse tempo, devolve a
+    mensagem genérica de ferramenta fora do ar.
+
+    Devolve (resultados, erro).
+    """
+    if not term or not isinstance(term, str):
+        return [], "Informe um termo de busca."
+
+    term = term.strip()[:200]
+
+    if not term:
+        return [], "Informe um termo de busca."
+
+    deadline = time.monotonic() + SEARCH_PATIENCE
+    attempt = 0
+    last_error = "vazio"
+
+    while True:
+        attempt += 1
+        results, reason = search_once(term, limit, deadline)
+
+        if results:
+            print(
+                "[NEXA-PESQUISA] %r -> %d resultado(s) na tentativa %d."
+                % (term, len(results), attempt)
+            )
+            return results, ""
+
+        last_error = reason
+
+        remaining = deadline - time.monotonic()
+
+        if remaining <= 0:
+            print(
+                "[NEXA-PESQUISA] %r sem resultado apos %d tentativa(s) em %ds "
+                "(ultima: %s). Devolvendo aviso de ferramenta fora do ar."
+                % (term, attempt, SEARCH_PATIENCE, reason)
+            )
+            return [], SEARCH_UNAVAILABLE_MESSAGE
+
+        if attempt >= SEARCH_MAX_ATTEMPTS:
+            print(
+                "[NEXA-PESQUISA] %r parou no limite de %d tentativa(s) "
+                "(ultima: %s)."
+                % (term, attempt, reason)
+            )
+            return [], SEARCH_UNAVAILABLE_MESSAGE
+
+        # Espera curta antes de tentar de novo, sem estourar o orçamento.
+        delay = min(SEARCH_RETRY_DELAY, max(0.5, remaining))
+        print(
+            "[NEXA-PESQUISA] %r falhou (%s); nova tentativa em %.1fs "
+            "(restam %.0fs no orçamento)."
+            % (term, reason, delay, remaining)
+        )
+
+        time.sleep(delay)
 
 
 def parse_search_results(page, limit):
@@ -845,16 +906,21 @@ def run_memory_tool(user_id, calls):
 def run_tools(user_id, calls):
     """
     Executa todas as ferramentas chamadas pelo modelo e devolve
-    (resultados_por_id, memoria_atualizada).
+    (resultados_por_id, memoria_atualizada, pesquisa_realizada).
 
     Cada resultado é o texto que volta para o modelo no papel "tool",
     indexado pelo id da chamada para o OpenAI poder casar tudo.
+
+    "pesquisa_realizada" só é True quando a busca trouxe resultado de
+    verdade. Falha e busca vazia continuam devolvendo texto para o modelo
+    responder, mas não acendem o aviso de pesquisa no chat.
     """
     results = {}
     memory_updated = False
+    searched = False
 
     if not calls:
-        return results, memory_updated
+        return results, memory_updated, searched
 
     for call in calls:
         name = tool_call_name(call)
@@ -877,15 +943,17 @@ def run_tools(user_id, calls):
                 % (term, len(found), " (%s)" % error if error else "")
             )
 
-            if error and not found:
-                results[call_id] = error
-            elif found:
+            if found:
+                searched = True
                 results[call_id] = format_search_results(term, found)
+            elif error:
+                results[call_id] = error
             else:
                 results[call_id] = "A pesquisa não retornou nada útil."
+
             continue
 
-    return results, memory_updated
+    return results, memory_updated, searched
 
 
 # =========================
@@ -943,15 +1011,13 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
     current_text = assistant_text or ""
 
     for _ in range(MAX_TOOL_ROUNDS):
-        results, memory_now = run_tools(user_id, current_calls)
+        results, memory_now, search_now = run_tools(user_id, current_calls)
 
         if not results:
             break
 
         memory_saved = memory_saved or memory_now
-        searched = searched or any(
-            tool_call_name(call) == "pesquisar" for call in current_calls
-        )
+        searched = searched or search_now
 
         follow_up = list(messages) + [
             {"role": "assistant", "content": current_text},
@@ -1009,14 +1075,12 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
         current_calls = extract_tool_calls(payload)
 
         if not current_calls:
-            return (
-                current_text or "Ferramenta usada.",
-                memory_saved,
-                searched,
-            )
+            # Sem texto nem nova ferramenta, não há o que exibir: devolvemos
+            # vazio em vez de uma frase genérica que vaza ao usuário.
+            return current_text, memory_saved, searched
 
     print("[NEXA] limite de rodadas de ferramenta atingido.")
-    return current_text or None, memory_saved, searched
+    return current_text, memory_saved, searched
 
 
 def make_stream_response(lines, user_id, user_message, memory_enabled=True,
@@ -1106,15 +1170,38 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
                 )
 
             if memory_enabled and tool_calls:
-                follow_up, memory_updated, searched = finish_stream_with_tools(
-                    user_id,
-                    messages or [],
-                    memories or [],
-                    reasoning,
-                    custom_instructions,
-                    full_text,
-                    tool_calls,
-                    memory_enabled,
+                # A busca pode insistir por até 2 minutos. Como o gerador
+                # ficaria parado, o proxy cortaria a conexão. Rodamos as
+                # ferramentas numa thread e vamos emitindo keep-alive no SSE
+                # enquanto ela trabalha.
+                box = {}
+
+                def worker():
+                    try:
+                        box["result"] = finish_stream_with_tools(
+                            user_id,
+                            messages or [],
+                            memories or [],
+                            reasoning,
+                            custom_instructions,
+                            full_text,
+                            tool_calls,
+                            memory_enabled,
+                        )
+                    except Exception as error:  # noqa: BLE001
+                        print("[NEXA] falha inesperada nas ferramentas:", error)
+                        box["result"] = (None, False, False)
+
+                pump = threading.Thread(target=worker, daemon=True)
+                pump.start()
+
+                while pump.is_alive():
+                    pump.join(timeout=SEARCH_HEARTBEAT)
+                    if pump.is_alive():
+                        yield sse({"type": "ping"})
+
+                follow_up, memory_updated, searched = box.get(
+                    "result", (None, False, False)
                 )
 
                 if follow_up:
