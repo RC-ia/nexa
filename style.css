@@ -24,6 +24,12 @@
   /* Tamanho do ornamento do topo. As peças do núcleo derivam dele,
      então as media queries só precisam mexer neste valor. */
   --core-size: 145px;
+
+  /* Margem lateral do app: cresce com a largura da tela.
+     O app ocupa a tela inteira; só as bolhas de conversa têm
+     limite de largura, para o texto continuar legível. */
+  --gutter: clamp(18px, 4vw, 72px);
+  --bubble-max: 1000px;
 }
 
 
@@ -163,19 +169,30 @@ body {
   position: relative;
   z-index: 1;
 
-  width: min(760px, 100%);
+  width: 100%;
 
   height: 100vh;
   height: 100dvh;
 
-  margin: auto;
+  margin: 0;
 
   display: flex;
   flex-direction: column;
 
-  padding: 18px;
+  /* A margem lateral fica nos filhos (topbar, feed e campo de envio),
+     assim a barra de rolagem do feed encosta na borda da tela. */
+  padding: 18px 0;
 
   overflow: hidden;
+}
+
+.topbar,
+.composer {
+  margin-inline: var(--gutter);
+}
+
+.feed {
+  padding-inline: var(--gutter);
 }
 
 
@@ -1484,7 +1501,7 @@ body {
 ========================= */
 
 .message {
-  max-width: 90%;
+  max-width: min(90%, var(--bubble-max));
 
   padding: 13px 15px;
 
@@ -2112,10 +2129,11 @@ footer {
 
   :root {
     --core-size: 125px;
+    --gutter: 14px;
   }
 
   .app {
-    padding: 14px;
+    padding: 14px 0;
   }
 
   .topbar {
