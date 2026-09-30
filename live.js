@@ -2,6 +2,57 @@ const startButton = document.getElementById("liveStart");
 const endButton = document.getElementById("liveEnd");
 const statusLabel = document.getElementById("liveStatus");
 const visual = document.getElementById("liveVisual");
+const voiceSelect = document.getElementById("liveVoice");
+
+const LIVE_VOICE_KEY = "nexa_live_voice";
+const LIVE_VOICES = [
+  "Kore", "Puck", "Charon", "Zephyr", "Fenrir", "Leda", "Orus", "Aoede",
+  "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
+  "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+  "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
+  "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+];
+
+function loadVoicePreference() {
+  if (!voiceSelect) {
+    return;
+  }
+
+  let saved = "";
+  try {
+    saved = localStorage.getItem(LIVE_VOICE_KEY) || "";
+  } catch {
+    saved = "";
+  }
+
+  if (!LIVE_VOICES.includes(saved)) {
+    saved = "Kore";
+  }
+
+  LIVE_VOICES.forEach(name => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    voiceSelect.appendChild(option);
+  });
+
+  voiceSelect.value = saved;
+  voiceSelect.addEventListener("change", () => {
+    try {
+      localStorage.setItem(LIVE_VOICE_KEY, voiceSelect.value);
+    } catch {
+      // Sem armazenamento: mantém a escolha apenas nesta sessão.
+    }
+  });
+}
+
+function selectedVoice() {
+  return voiceSelect && LIVE_VOICES.includes(voiceSelect.value)
+    ? voiceSelect.value
+    : "Kore";
+}
+
+loadVoicePreference();
 
 let accountMessageKey = "";
 let socket = null;
@@ -181,6 +232,9 @@ function endCall(message) {
   startButton.hidden = false;
   startButton.disabled = false;
   endButton.hidden = true;
+  if (voiceSelect) {
+    voiceSelect.disabled = false;
+  }
   setStatus(message || "Chamada encerrada", "idle");
 }
 
@@ -227,6 +281,9 @@ async function startCall() {
   const generation = ++callGeneration;
   startButton.disabled = true;
   endButton.hidden = false;
+  if (voiceSelect) {
+    voiceSelect.disabled = true;
+  }
   setStatus("Solicitando acesso ao microfone…", "connecting");
 
   try {
@@ -264,7 +321,7 @@ async function startCall() {
         "X-Nexa-Message-Key": accountMessageKey
       },
       body: JSON.stringify({
-        voice: localStorage.getItem("nexa_live_voice") || "Kore"
+        voice: selectedVoice()
       }),
       signal: tokenRequest.signal
     });

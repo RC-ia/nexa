@@ -385,10 +385,6 @@
         <section id="settingsHome" class="settings-view">
           <p class="settings-description">Escolha o que deseja configurar.</p>
           <div class="settings-grid">
-            <button type="button" class="settings-category" data-settings-open="voice">
-              <strong>Voz</strong>
-              <span>Resposta falada e velocidade</span>
-            </button>
             <button type="button" class="settings-category" data-settings-open="memory">
               <strong>Memória</strong>
               <span>Preferências lembradas pela NEXA</span>
@@ -405,43 +401,6 @@
               <strong>Mais</strong>
               <span>Exportação e dados das conversas</span>
             </button>
-          </div>
-        </section>
-
-        <section id="settingsVoice" class="settings-view" hidden>
-          <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
-          <label class="settings-field" for="ttsEngine">
-            <span>Voz das respostas de texto</span>
-            <select id="ttsEngine">
-              <option value="gemini-live">Gemini 3.8 Live</option>
-              <option value="elevenlabs">ElevenLabs via 9Router</option>
-            </select>
-          </label>
-          <label class="settings-field" for="ttsVoice">
-            <span>Voz Gemini</span>
-            <select id="ttsVoice">
-              <option value="Kore">Kore</option>
-              <option value="Puck">Puck</option>
-              <option value="Aoede">Aoede</option>
-              <option value="Zephyr">Zephyr</option>
-              <option value="Charon">Charon</option>
-              <option value="Fenrir">Fenrir</option>
-              <option value="Leda">Leda</option>
-              <option value="Orus">Orus</option>
-            </select>
-          </label>
-          <label class="settings-option" for="speechToggle">
-            <span class="settings-option-copy">
-              <span class="settings-option-title">Resposta por voz</span>
-              <span class="settings-option-description">Ler as respostas da NEXA em voz alta</span>
-            </span>
-            <input type="checkbox" id="speechToggle" class="settings-switch" role="switch" aria-label="Resposta por voz" checked>
-          </label>
-          <div class="settings-audio-controls">
-            <label class="settings-field" for="ttsSpeed">
-              <span class="settings-speed-heading">Velocidade <output id="ttsSpeedValue" for="ttsSpeed">1,0x</output></span>
-              <input type="range" id="ttsSpeed" min="0.8" max="1.25" step="0.05" value="1">
-            </label>
           </div>
         </section>
 
@@ -506,70 +465,6 @@
           </div>
         </section>
       </div>
-          <label class="settings-field" for="ttsEngine">
-            <span>Motor de voz para respostas</span>
-            <select id="ttsEngine">
-              <option value="gemini-live">Gemini 3.8 Live</option>
-              <option value="elevenlabs">ElevenLabs via 9Router</option>
-            </select>
-          </label>
-          <label class="settings-field" for="ttsVoice">
-            <span>Voz Gemini</span>
-            <select id="ttsVoice">
-              <option value="Kore">Kore</option>
-              <option value="Puck">Puck</option>
-              <option value="Aoede">Aoede</option>
-              <option value="Zephyr">Zephyr</option>
-              <option value="Charon">Charon</option>
-              <option value="Fenrir">Fenrir</option>
-              <option value="Leda">Leda</option>
-              <option value="Orus">Orus</option>
-            </select>
-          </label>
-
-    </div>
-
-    <div
-      class="live-call"
-      id="liveCallPanel"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="liveCallTitle"
-      hidden
-    >
-      <section class="live-call-card">
-        <header class="live-call-header">
-          <div>
-            <h3 id="liveCallTitle">Chamada Gemini Live</h3>
-            <p id="liveCallStatus" role="status">Pronto para iniciar</p>
-          </div>
-          <button
-            type="button"
-            id="liveCallClose"
-            class="live-call-close"
-            aria-label="Fechar chamada"
-            title="Fechar"
-          >
-            ✕
-          </button>
-        </header>
-
-        <div
-          class="live-call-transcript"
-          id="liveCallTranscript"
-          aria-live="polite"
-          aria-label="Transcrição da chamada"
-        ></div>
-
-        <div class="live-call-controls">
-          <button type="button" id="liveCallStart" class="live-call-start">
-            Iniciar chamada
-          </button>
-          <button type="button" id="liveCallEnd" class="live-call-end" hidden>
-            Encerrar chamada
-          </button>
-        </div>
-      </section>
     </div>
 
   </main>
@@ -645,7 +540,7 @@
 
   </div>
 
-  <script src="script.js?v=22"></script>
+  <script src="script.js?v=23"></script>
 
 </body>
 

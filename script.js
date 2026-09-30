@@ -7,12 +7,6 @@ const feed = document.querySelector(".feed");
 
 const micButton = document.getElementById("micButton");
 const liveCallButton = document.getElementById("liveCallButton");
-const liveCallPanel = document.getElementById("liveCallPanel");
-const liveCallStatus = document.getElementById("liveCallStatus");
-const liveCallTranscript = document.getElementById("liveCallTranscript");
-const liveCallStartButton = document.getElementById("liveCallStart");
-const liveCallEndButton = document.getElementById("liveCallEnd");
-const liveCallCloseButton = document.getElementById("liveCallClose");
 const sendButton = composer.querySelector('button[type="submit"]');
 const newChatButton = document.getElementById("newChatButton");
 
@@ -28,17 +22,11 @@ const settingsClose = document.getElementById("settingsClose");
 const settingsHome = document.getElementById("settingsHome");
 const settingsTitle = document.getElementById("settingsTitle");
 const settingsViews = {
-  voice: document.getElementById("settingsVoice"),
   memory: document.getElementById("settingsMemory"),
   instructions: document.getElementById("settingsInstructions"),
   reminders: document.getElementById("settingsReminders"),
   more: document.getElementById("settingsMore")
 };
-const speechToggle = document.getElementById("speechToggle");
-const ttsEngineSelect = document.getElementById("ttsEngine");
-const ttsVoiceSelect = document.getElementById("ttsVoice");
-const ttsSpeedSlider = document.getElementById("ttsSpeed");
-const ttsSpeedValue = document.getElementById("ttsSpeedValue");
 const memoryToggle = document.getElementById("memoryToggle");
 const memoryList = document.getElementById("memoryList");
 const memoryStatus = document.getElementById("memoryStatus");
@@ -56,10 +44,7 @@ const MESSAGE_KEY_STORAGE_PREFIX = "nexa_message_key:";
 let CHATS_KEY = "nexa_chats";
 let ACTIVE_CHAT_KEY = "nexa_active_chat";
 const REASONING_KEY = "nexa_reasoning";
-const SPEECH_KEY = "nexa_speech_enabled";
-const TTS_ENGINE_KEY = "nexa_tts_engine";
 const LIVE_VOICE_KEY = "nexa_live_voice";
-const TTS_SPEED_KEY = "nexa_tts_speed";
 const MEMORY_ENABLED_KEY = "nexa_memory_enabled:";
 const INSTRUCTIONS_KEY = "nexa_custom_instructions:";
 const REMINDERS_KEY = "nexa_reminders:";
@@ -82,839 +67,6 @@ const REASONING_LEVELS = {
 };
 
 const history = [];
-
-/*
-  ==========================================
-  VOZ DA NEXA
-  ==========================================
-*/
-
-let speechEnabled = true;
-let ttsEngine = "gemini-live";
-let liveVoice = "Kore";
-let ttsSpeed = 1;
-let activeAudio = null;
-let activeAudioRequest = null;
-let activeGeminiSpeech = null;
-let preparedSpeechContext = null;
-
-function prepareGeminiSpeechContext() {
-  if (!speechEnabled || ttsEngine !== "gemini-live") {
-    return;
-  }
-
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextClass) {
-    return;
-  }
-
-  if (!preparedSpeechContext || preparedSpeechContext.state === "closed") {
-    preparedSpeechContext = new AudioContextClass();
-  }
-
-  preparedSpeechContext.resume().catch(error => {
-    console.error("Não foi possível preparar o áudio Gemini:", error);
-  });
-}
-
-function stopGeminiSpeech() {
-  const session = activeGeminiSpeech;
-  if (!session) {
-    return;
-  }
-
-  activeGeminiSpeech = null;
-  session.cancelled = true;
-  clearTimeout(session.timeout);
-  if (session.controller) {
-    session.controller.abort();
-  }
-  if (session.socket && session.socket.readyState < WebSocket.CLOSING) {
-    session.socket.close(1000, "Speech stopped");
-  }
-  session.sources.forEach(source => {
-    try {
-      source.stop();
-    } catch {
-      // O bloco pode já ter terminado.
-    }
-  });
-  session.sources.clear();
-  if (session.context && session.context.state !== "closed") {
-    session.context.close();
-  }
-}
-
-function queueGeminiSpeech(session, base64Data, mimeType) {
-  if (!session.context || !base64Data || session.cancelled) {
-    return;
-  }
-
-  const binary = atob(base64Data);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-
-  const sampleCount = Math.floor(bytes.byteLength / 2);
-  if (!sampleCount) {
-    return;
-  }
-
-  const rateMatch = /rate=(\d+)/i.exec(mimeType || "");
-  const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const buffer = session.context.createBuffer(1, sampleCount, sampleRate);
-  const channel = buffer.getChannelData(0);
-  for (let index = 0; index < sampleCount; index += 1) {
-    channel[index] = view.getInt16(index * 2, true) / 32768;
-  }
-
-  const source = session.context.createBufferSource();
-  source.buffer = buffer;
-  source.playbackRate.value = ttsSpeed;
-  source.connect(session.context.destination);
-  source.onended = () => {
-    session.sources.delete(source);
-    if (session.turnComplete && session.sources.size === 0) {
-      session.finish();
-    }
-  };
-
-  const startAt = Math.max(session.context.currentTime + 0.02, session.playbackTime);
-  source.start(startAt);
-  session.playbackTime = startAt + buffer.duration / ttsSpeed;
-  session.sources.add(source);
-}
-
-async function speakNexaWithGemini(text) {
-  stopGeminiSpeech();
-
-  const session = {
-    cancelled: false,
-    completed: false,
-    turnComplete: false,
-    controller: new AbortController(),
-    socket: null,
-    context: null,
-    sources: new Set(),
-    playbackTime: 0,
-    timeout: null,
-    finish: null
-  };
-  activeGeminiSpeech = session;
-
-  let resolveSession;
-  let rejectSession;
-  const completion = new Promise((resolve, reject) => {
-    resolveSession = resolve;
-    rejectSession = reject;
-  });
-  session.finish = error => {
-    if (session.completed) {
-      return;
-    }
-    session.completed = true;
-    clearTimeout(session.timeout);
-    if (error) {
-      rejectSession(error);
-    } else {
-      resolveSession();
-    }
-  };
-
-  try {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) {
-      throw new Error("Este navegador não oferece suporte à síntese Gemini.");
-    }
-    session.context = preparedSpeechContext || new AudioContextClass();
-    preparedSpeechContext = null;
-    await session.context.resume();
-
-    const response = await fetch("/api/live/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Nexa-Message-Key": messageKey
-      },
-      body: JSON.stringify({ voice: liveVoice }),
-      signal: session.controller.signal
-    });
-    const tokenData = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      if (response.status === 401) {
-        showAuth();
-      }
-      throw new Error(tokenData.error || `Falha ao gerar voz (HTTP ${response.status}).`);
-    }
-
-    const socketUrl = "wss://generativelanguage.googleapis.com/ws/" +
-      "google.ai.generativelanguage.v1beta.GenerativeService." +
-      "BidiGenerateContentConstrained?access_token=" +
-      encodeURIComponent(tokenData.token);
-    const socket = new WebSocket(socketUrl);
-    socket.binaryType = "arraybuffer";
-    session.socket = socket;
-
-    socket.onopen = () => {
-      socket.send(JSON.stringify({
-        setup: {
-          model: tokenData.model || "models/gemini-3.8-live",
-          generationConfig: {
-            responseModalities: ["AUDIO"],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: tokenData.voice || liveVoice }
-              }
-            }
-          },
-          systemInstruction: {
-            parts: [{ text: tokenData.systemInstruction }]
-          }
-        }
-      }));
-    };
-
-    socket.onmessage = async event => {
-      try {
-        let payload = event.data;
-        if (typeof Blob !== "undefined" && payload instanceof Blob) {
-          payload = await payload.text();
-        } else if (payload instanceof ArrayBuffer) {
-          payload = new TextDecoder().decode(payload);
-        }
-        if (socket !== session.socket || typeof payload !== "string") {
-          return;
-        }
-
-        const message = JSON.parse(payload);
-        if (message.setupComplete) {
-          socket.send(JSON.stringify({
-            clientContent: {
-              turns: [{ role: "user", parts: [{ text }] }],
-              turnComplete: true
-            }
-          }));
-          return;
-        }
-
-        if (message.error) {
-          throw new Error(message.error.message || "Falha na síntese Gemini.");
-        }
-
-        const content = message.serverContent;
-        if (!content) {
-          return;
-        }
-
-        for (const part of content.modelTurn?.parts || []) {
-          if (part.inlineData?.data) {
-            queueGeminiSpeech(session, part.inlineData.data, part.inlineData.mimeType);
-          }
-        }
-
-        if (content.interrupted) {
-          session.finish(new Error("A síntese de voz foi interrompida."));
-        } else if (content.turnComplete) {
-          session.turnComplete = true;
-          if (session.sources.size === 0) {
-            session.finish();
-          }
-        }
-      } catch (error) {
-        session.finish(error);
-      }
-    };
-
-    socket.onerror = () => session.finish(new Error("Falha na conexão de voz Gemini."));
-    socket.onclose = () => {
-      if (!session.completed) {
-        session.finish(new Error("A conexão de voz Gemini foi encerrada."));
-      }
-    };
-    session.timeout = setTimeout(
-      () => session.finish(new Error("A síntese Gemini demorou demais.")),
-      30000
-    );
-
-    await completion;
-  } catch (error) {
-    if (error.name !== "AbortError") {
-      console.error("Erro na voz Gemini:", error);
-    }
-  } finally {
-    clearTimeout(session.timeout);
-    if (session.socket && session.socket.readyState < WebSocket.CLOSING) {
-      session.socket.close(1000, "Speech finished");
-    }
-    session.sources.forEach(source => {
-      try {
-        source.stop();
-      } catch {
-        // O áudio pode já ter terminado.
-      }
-    });
-    session.sources.clear();
-    if (session.context && session.context.state !== "closed") {
-      session.context.close();
-    }
-    if (activeGeminiSpeech === session) {
-      activeGeminiSpeech = null;
-    }
-  }
-}
-
-function stopSpeaking() {
-  stopGeminiSpeech();
-  if (preparedSpeechContext) {
-    if (preparedSpeechContext.state !== "closed") {
-      preparedSpeechContext.close();
-    }
-    preparedSpeechContext = null;
-  }
-  if (activeAudioRequest) {
-    activeAudioRequest.abort();
-    activeAudioRequest = null;
-  }
-
-  if (activeAudio) {
-    const audioUrl = activeAudio.src;
-    activeAudio.pause();
-    activeAudio.removeAttribute("src");
-    activeAudio.load();
-    if (audioUrl.startsWith("blob:")) {
-      URL.revokeObjectURL(audioUrl);
-    }
-    activeAudio = null;
-  }
-}
-
-async function speakNexa(text) {
-  if (!speechEnabled || !text) {
-    return;
-  }
-
-  stopSpeaking();
-
-  const cleanText = text
-    .replace(/[*_`#]/g, "")
-    .replace(/\n+/g, " ")
-    .trim();
-
-  if (!cleanText) {
-    return;
-  }
-
-  if (ttsEngine === "gemini-live") {
-    await speakNexaWithGemini(cleanText);
-    return;
-  }
-
-  const controller = new AbortController();
-  activeAudioRequest = controller;
-
-  try {
-    const response = await fetch("/api/voice", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Nexa-Message-Key": messageKey
-      },
-      body: JSON.stringify({
-        text: cleanText
-      }),
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      let data = {};
-      try {
-        data = await response.json();
-      } catch {
-        // Resposta sem JSON.
-      }
-
-      if (response.status === 401) {
-        showAuth();
-      }
-
-      throw new Error(data.error || `Falha no áudio (HTTP ${response.status}).`);
-    }
-
-    const audioUrl = URL.createObjectURL(await response.blob());
-    if (!speechEnabled || controller.signal.aborted) {
-      URL.revokeObjectURL(audioUrl);
-      return;
-    }
-
-    const audio = new Audio(audioUrl);
-    audio.playbackRate = ttsSpeed;
-    activeAudio = audio;
-
-    function releaseAudio() {
-      URL.revokeObjectURL(audioUrl);
-      if (activeAudio === audio) {
-        activeAudio = null;
-      }
-    }
-
-    audio.addEventListener("ended", releaseAudio, { once: true });
-    audio.addEventListener("error", releaseAudio, { once: true });
-    await audio.play();
-  } catch (error) {
-    if (error.name !== "AbortError") {
-      console.error("Erro ao reproduzir voz da NEXA:", error);
-    }
-  } finally {
-    if (activeAudioRequest === controller) {
-      activeAudioRequest = null;
-    }
-  }
-}
-
-function loadSpeechSetting() {
-  try {
-    speechEnabled = localStorage.getItem(SPEECH_KEY) !== "false";
-  } catch (error) {
-    speechEnabled = true;
-  }
-
-  try {
-    const savedEngine = localStorage.getItem(TTS_ENGINE_KEY);
-    ttsEngine = savedEngine === "elevenlabs" ? "elevenlabs" : "gemini-live";
-
-    const savedVoice = localStorage.getItem(LIVE_VOICE_KEY);
-    const voiceExists = Array.from(ttsVoiceSelect.options).some(
-      option => option.value === savedVoice
-    );
-    liveVoice = voiceExists ? savedVoice : "Kore";
-
-    const savedSpeed = Number(localStorage.getItem(TTS_SPEED_KEY));
-    ttsSpeed = Number.isFinite(savedSpeed) && savedSpeed >= 0.8 && savedSpeed <= 1.25
-      ? savedSpeed
-      : 1;
-  } catch (error) {
-    ttsSpeed = 1;
-  }
-
-  speechToggle.checked = speechEnabled;
-  ttsEngineSelect.value = ttsEngine;
-  ttsVoiceSelect.value = liveVoice;
-  ttsSpeedSlider.value = String(ttsSpeed);
-  ttsEngineSelect.disabled = !speechEnabled;
-  ttsVoiceSelect.disabled = !speechEnabled || ttsEngine !== "gemini-live";
-  ttsSpeedSlider.disabled = !speechEnabled;
-  ttsSpeedValue.value = `${ttsSpeed.toFixed(1).replace(".", ",")}x`;
-}
-
-function saveSpeechSetting() {
-  speechEnabled = speechToggle.checked;
-
-  try {
-    localStorage.setItem(SPEECH_KEY, String(speechEnabled));
-  } catch (error) {
-    console.error("Erro ao salvar configuração de voz:", error);
-  }
-
-  ttsSpeedSlider.disabled = !speechEnabled;
-  ttsEngineSelect.disabled = !speechEnabled;
-  ttsVoiceSelect.disabled = !speechEnabled || ttsEngine !== "gemini-live";
-
-  if (!speechEnabled) {
-    stopSpeaking();
-  }
-}
-
-function saveTTSSettings() {
-  ttsEngine = ttsEngineSelect.value;
-  liveVoice = ttsVoiceSelect.value;
-  ttsSpeed = Number(ttsSpeedSlider.value);
-
-  try {
-    localStorage.setItem(TTS_ENGINE_KEY, ttsEngine);
-    localStorage.setItem(LIVE_VOICE_KEY, liveVoice);
-    localStorage.setItem(TTS_SPEED_KEY, String(ttsSpeed));
-  } catch (error) {
-    console.error("Erro ao salvar configuração de voz:", error);
-  }
-
-  ttsVoiceSelect.disabled = !speechEnabled || ttsEngine !== "gemini-live";
-  ttsSpeedValue.value = `${ttsSpeed.toFixed(1).replace(".", ",")}x`;
-}
-
-function setLiveCallStatus(message) {
-  liveCallStatus.textContent = message;
-}
-
-function addLiveTranscript(speaker, text) {
-  if (!text || !text.trim()) {
-    return;
-  }
-
-  const line = document.createElement("div");
-  line.className = "live-call-line";
-
-  const label = document.createElement("strong");
-  label.textContent = speaker;
-
-  const content = document.createElement("span");
-  content.textContent = text.trim();
-
-  line.append(label, content);
-  liveCallTranscript.appendChild(line);
-  liveCallTranscript.scrollTop = liveCallTranscript.scrollHeight;
-}
-
-function pcm16FromFloat(input, sampleRate) {
-  const ratio = sampleRate / 16000;
-  const outputLength = Math.floor(input.length / ratio);
-  const pcm = new Int16Array(outputLength);
-
-  for (let index = 0; index < outputLength; index += 1) {
-    const start = Math.floor(index * ratio);
-    const end = Math.min(Math.floor((index + 1) * ratio), input.length);
-    let sum = 0;
-
-    for (let sample = start; sample < end; sample += 1) {
-      sum += input[sample];
-    }
-
-    const value = Math.max(-1, Math.min(1, sum / Math.max(1, end - start)));
-    pcm[index] = value < 0 ? value * 0x8000 : value * 0x7fff;
-  }
-
-  return pcm;
-}
-
-function bytesToBase64(bytes) {
-  let binary = "";
-
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  }
-
-  return btoa(binary);
-}
-
-function stopLivePlayback() {
-  livePlaybackSources.forEach(source => {
-    try {
-      source.stop();
-    } catch {
-      // O áudio pode já ter terminado.
-    }
-  });
-
-  livePlaybackSources.clear();
-  livePlaybackTime = 0;
-}
-
-function queueLiveAudio(base64Data, mimeType) {
-  if (!liveAudioContext || !base64Data) {
-    return;
-  }
-
-  const binary = atob(base64Data);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-
-  const sampleCount = Math.floor(bytes.byteLength / 2);
-  if (!sampleCount) {
-    return;
-  }
-
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const rateMatch = /rate=(\d+)/i.exec(mimeType || "");
-  const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
-  const audioBuffer = liveAudioContext.createBuffer(1, sampleCount, sampleRate);
-  const channel = audioBuffer.getChannelData(0);
-
-  for (let index = 0; index < sampleCount; index += 1) {
-    channel[index] = view.getInt16(index * 2, true) / 32768;
-  }
-
-  const source = liveAudioContext.createBufferSource();
-  source.buffer = audioBuffer;
-  source.connect(liveAudioContext.destination);
-  source.onended = () => livePlaybackSources.delete(source);
-
-  const startAt = Math.max(liveAudioContext.currentTime + 0.02, livePlaybackTime);
-  source.start(startAt);
-  livePlaybackTime = startAt + audioBuffer.duration;
-  livePlaybackSources.add(source);
-}
-
-function startLiveMicrophone(socket) {
-  if (!liveAudioContext || !liveCallStream) {
-    throw new Error("O microfone não está disponível.");
-  }
-
-  liveMicSource = liveAudioContext.createMediaStreamSource(liveCallStream);
-  liveMicProcessor = liveAudioContext.createScriptProcessor(4096, 1, 1);
-  liveMicMute = liveAudioContext.createGain();
-  liveMicMute.gain.value = 0;
-
-  liveMicProcessor.onaudioprocess = event => {
-    if (!liveCallReady || socket.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    const samples = pcm16FromFloat(
-      event.inputBuffer.getChannelData(0),
-      liveAudioContext.sampleRate
-    );
-
-    if (samples.length) {
-      socket.send(JSON.stringify({
-        realtimeInput: {
-          audio: {
-            data: bytesToBase64(new Uint8Array(samples.buffer)),
-            mimeType: "audio/pcm;rate=16000"
-          }
-        }
-      }));
-    }
-  };
-
-  liveMicSource.connect(liveMicProcessor);
-  liveMicProcessor.connect(liveMicMute);
-  liveMicMute.connect(liveAudioContext.destination);
-}
-
-function releaseLiveCall(status) {
-  liveCallGeneration += 1;
-  liveCallReady = false;
-
-  if (liveCallSetupTimer) {
-    clearTimeout(liveCallSetupTimer);
-    liveCallSetupTimer = null;
-  }
-
-  if (liveTokenRequest) {
-    liveTokenRequest.abort();
-    liveTokenRequest = null;
-  }
-
-  const socket = liveCallSocket;
-  liveCallSocket = null;
-  if (socket && socket.readyState < WebSocket.CLOSING) {
-    socket.close(1000, "Call ended");
-  }
-
-  if (liveMicProcessor) {
-    liveMicProcessor.disconnect();
-    liveMicProcessor.onaudioprocess = null;
-    liveMicProcessor = null;
-  }
-  if (liveMicSource) {
-    liveMicSource.disconnect();
-    liveMicSource = null;
-  }
-  if (liveMicMute) {
-    liveMicMute.disconnect();
-    liveMicMute = null;
-  }
-
-  if (liveCallStream) {
-    liveCallStream.getTracks().forEach(track => track.stop());
-    liveCallStream = null;
-  }
-
-  stopLivePlayback();
-  if (liveAudioContext && liveAudioContext.state !== "closed") {
-    liveAudioContext.close();
-  }
-  liveAudioContext = null;
-
-  liveCallStartButton.hidden = false;
-  liveCallStartButton.disabled = false;
-  liveCallEndButton.hidden = true;
-  liveCallButton.setAttribute("aria-pressed", "false");
-  setLiveCallStatus(status || "Chamada encerrada");
-}
-
-function handleLiveServerMessage(socket, message) {
-  if (message.setupComplete) {
-    if (liveCallSetupTimer) {
-      clearTimeout(liveCallSetupTimer);
-      liveCallSetupTimer = null;
-    }
-    liveCallReady = true;
-    liveCallStartButton.hidden = true;
-    liveCallEndButton.hidden = false;
-    liveCallButton.setAttribute("aria-pressed", "true");
-    setLiveCallStatus("Conectado · pode falar");
-    startLiveMicrophone(socket);
-    return;
-  }
-
-  const content = message.serverContent;
-  if (!content) {
-    if (message.error) {
-      throw new Error(message.error.message || "Erro na sessão Gemini Live.");
-    }
-    return;
-  }
-
-  if (content.inputTranscription?.text) {
-    addLiveTranscript("Você", content.inputTranscription.text);
-  }
-
-  if (content.outputTranscription?.text) {
-    addLiveTranscript("Gemini", content.outputTranscription.text);
-  }
-
-  if (content.interrupted) {
-    stopLivePlayback();
-  }
-
-  const parts = content.modelTurn?.parts || [];
-  for (const part of parts) {
-    if (part.inlineData?.data) {
-      queueLiveAudio(part.inlineData.data, part.inlineData.mimeType);
-    }
-    if (part.text) {
-      addLiveTranscript("Gemini", part.text);
-    }
-  }
-}
-
-async function startLiveCall() {
-  const generation = ++liveCallGeneration;
-  stopSpeaking();
-  liveCallStartButton.disabled = true;
-  liveCallEndButton.hidden = false;
-  setLiveCallStatus("Solicitando acesso ao microfone…");
-
-  try {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) {
-      throw new Error("Este navegador não oferece suporte à reprodução de áudio.");
-    }
-
-    liveAudioContext = new AudioContextClass();
-    await liveAudioContext.resume();
-
-    if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error("O navegador não oferece acesso ao microfone nesta conexão.");
-    }
-
-    liveCallStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      }
-    });
-
-    if (generation !== liveCallGeneration) {
-      liveCallStream.getTracks().forEach(track => track.stop());
-      liveCallStream = null;
-      return;
-    }
-
-    setLiveCallStatus("Conectando ao Gemini Live…");
-    liveTokenRequest = new AbortController();
-    const tokenResponse = await fetch("/api/live/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Nexa-Message-Key": messageKey
-      },
-      body: "{}",
-      signal: liveTokenRequest.signal
-    });
-
-    const tokenData = await tokenResponse.json().catch(() => ({}));
-    if (!tokenResponse.ok) {
-      if (tokenResponse.status === 401) {
-        showAuth();
-      }
-      throw new Error(tokenData.error || `Erro ao preparar chamada (HTTP ${tokenResponse.status}).`);
-    }
-
-    if (generation !== liveCallGeneration) {
-      return;
-    }
-
-    const socketUrl = "wss://generativelanguage.googleapis.com/ws/" +
-      "google.ai.generativelanguage.v1beta.GenerativeService." +
-      "BidiGenerateContentConstrained?access_token=" +
-      encodeURIComponent(tokenData.token);
-    const socket = new WebSocket(socketUrl);
-    socket.binaryType = "arraybuffer";
-    liveCallSocket = socket;
-
-    socket.onopen = () => {
-      socket.send(JSON.stringify({
-        setup: {
-          model: tokenData.model || "models/gemini-3.8-live",
-          generationConfig: { responseModalities: ["AUDIO"] },
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-          systemInstruction: {
-            parts: [{ text: tokenData.systemInstruction }]
-          }
-        }
-      }));
-    };
-
-    socket.onmessage = async event => {
-      try {
-        let payload = event.data;
-        if (typeof Blob !== "undefined" && payload instanceof Blob) {
-          payload = await payload.text();
-        } else if (payload instanceof ArrayBuffer) {
-          payload = new TextDecoder().decode(payload);
-        }
-
-        if (socket !== liveCallSocket) {
-          return;
-        }
-
-        if (typeof payload !== "string") {
-          throw new Error("O Gemini Live enviou um frame em formato desconhecido.");
-        }
-
-        handleLiveServerMessage(socket, JSON.parse(payload));
-      } catch (error) {
-        console.error("Erro ao processar Gemini Live:", error);
-        if (liveCallSocket === socket) {
-          releaseLiveCall(error.message || "Erro na chamada Gemini Live.");
-        }
-      }
-    };
-
-    socket.onerror = () => {
-      setLiveCallStatus("Falha na conexão com o Gemini Live");
-    };
-
-    socket.onclose = event => {
-      if (liveCallSocket === socket) {
-        releaseLiveCall(event.reason || "Conexão encerrada");
-      }
-    };
-
-    liveCallSetupTimer = setTimeout(() => {
-      if (generation === liveCallGeneration && !liveCallReady) {
-        releaseLiveCall("Tempo esgotado ao conectar ao Gemini Live");
-      }
-    }, 20000);
-
-    setLiveCallStatus("Aguardando conexão segura…");
-  } catch (error) {
-    if (generation === liveCallGeneration) {
-      releaseLiveCall(error.name === "AbortError" ? "Chamada cancelada" : error.message);
-    }
-  } finally {
-    liveTokenRequest = null;
-  }
-}
-
 
 /*
   ==========================================
@@ -1918,13 +1070,6 @@ async function askNexa(text) {
 
   saveMemory();
 
-  /*
-    A voz só começa depois que
-    todo o streaming terminou.
-  */
-
-  speakNexa(fullReply);
-
   return {
     reply: fullReply,
     finished
@@ -1967,7 +1112,6 @@ function renderChat() {
 
 function startNewChat() {
   stashCurrent();
-  stopSpeaking();
 
   const fresh = makeChat();
 
@@ -1999,7 +1143,6 @@ function openChat(id) {
   }
 
   stashCurrent();
-  stopSpeaking();
 
   activeChatId = target.id;
   history.length = 0;
@@ -2051,7 +1194,6 @@ function deleteChat(id) {
       history.push(...next.messages);
     }
 
-    stopSpeaking();
     renderChat();
   }
 
@@ -2220,7 +1362,6 @@ function loadAccountSettings(user) {
 function showSettingsView(viewName) {
   const titles = {
     home: "Configurações",
-    voice: "Voz",
     memory: "Memória",
     instructions: "Instruções",
     reminders: "Lembretes",
@@ -2498,13 +1639,6 @@ composer.addEventListener(
     }
 
     /*
-      Para qualquer fala anterior.
-    */
-
-    stopSpeaking();
-    prepareGeminiSpeechContext();
-
-    /*
       Verifica se é a primeira mensagem do chat (histórico vazio antes de adicionar)
     */
     const isFirstMessage = history.length === 0;
@@ -2644,19 +1778,6 @@ settingsClose.addEventListener(
   closeSettings
 );
 
-speechToggle.addEventListener(
-  "change",
-  saveSpeechSetting
-);
-
-ttsEngineSelect.addEventListener("change", saveTTSSettings);
-ttsVoiceSelect.addEventListener("change", saveTTSSettings);
-
-ttsSpeedSlider.addEventListener(
-  "input",
-  saveTTSSettings
-);
-
 document.querySelectorAll("[data-settings-open]").forEach(button => {
   button.addEventListener("click", function () {
     showSettingsView(button.dataset.settingsOpen);
@@ -2758,26 +1879,8 @@ document.getElementById("clearChats").addEventListener("click", function () {
   input.focus();
 });
 
-function closeLiveCallDialog() {
-  releaseLiveCall("Chamada encerrada");
-  liveCallPanel.hidden = true;
-  liveCallButton.focus();
-}
-
 liveCallButton.addEventListener("click", function () {
   window.location.assign("/live.html");
-});
-
-liveCallStartButton.addEventListener("click", startLiveCall);
-liveCallEndButton.addEventListener("click", function () {
-  releaseLiveCall("Chamada encerrada");
-});
-liveCallCloseButton.addEventListener("click", closeLiveCallDialog);
-
-liveCallPanel.addEventListener("click", function (event) {
-  if (event.target === liveCallPanel) {
-    closeLiveCallDialog();
-  }
 });
 
 settingsPanel.addEventListener(
@@ -2793,11 +1896,6 @@ document.addEventListener(
   "keydown",
   function (event) {
     if (event.key !== "Escape") {
-      return;
-    }
-
-    if (!liveCallPanel.hidden) {
-      closeLiveCallDialog();
       return;
     }
 
@@ -2911,7 +2009,6 @@ function bootApp() {
   loadChats();
   renderChat();
   renderChatList();
-  loadSpeechSetting();
   loadReasoning();
   setupReasoningUI();
   renderReasoning();
@@ -2983,18 +2080,6 @@ let memoryEnabled = true;
 let customInstructions = "";
 let reminders = [];
 const reminderTimers = new Map();
-let liveCallSocket = null;
-let liveCallStream = null;
-let liveAudioContext = null;
-let liveMicProcessor = null;
-let liveMicSource = null;
-let liveMicMute = null;
-let liveTokenRequest = null;
-let liveCallGeneration = 0;
-let liveCallReady = false;
-let livePlaybackTime = 0;
-let livePlaybackSources = new Set();
-let liveCallSetupTimer = null;
 
 function showMessage(element, message) {
   element.textContent = message || "";

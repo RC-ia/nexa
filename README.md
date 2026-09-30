@@ -126,10 +126,9 @@ que aponta para o servidor local.
 
 ## Voz da NEXA
 
-Em **Configurações > Voz**, escolha o mecanismo, a voz Gemini e a velocidade.
-As respostas de texto usam Gemini 3.8 Live por padrão, em uma sessão curta de
-áudio; a opção ElevenLabs via 9Router mantém o endpoint e modelo já existentes.
-A voz Gemini usa `API_GEMA`, e a chave permanece no servidor.
+O chat normal é **apenas texto**: não há leitura das respostas em voz alta nem
+motor de TTS. A única experiência de voz é a chamada Gemini Live em
+`/live.html`, que escolhe a voz direto na própria página.
 
 ## Chamadas Gemini Live
 
@@ -168,7 +167,7 @@ Dentro dela:
 - **Chats anteriores** — a conversa aberta fica destacada, e a lista vem da
   mais recente para a mais antiga. Passando o mouse aparece o **✕** para
   apagar. O título de cada chat é a primeira mensagem que você mandou.
-- **Configurações** — reúne Voz, Memória, Instruções, Lembretes e Mais.
+- **Configurações** — reúne Memória, Instruções, Lembretes e Mais.
   Instruções e preferências de memória ficam separadas por usuário neste
   navegador; lembretes são locais e só disparam enquanto a página estiver aberta.
 

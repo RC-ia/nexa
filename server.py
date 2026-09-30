@@ -32,8 +32,6 @@ LIVE_SYSTEM_PROMPT = (
     "Fale naturalmente em português brasileiro, com respostas diretas, "
     "curiosas e amigáveis. Não diga que é uma pessoa real."
 )
-TTS_MODEL = "el/eleven_flash_v2_5/SAz9YHcvj6GT2YYXdXww"
-TTS_URL = "https://9router.rcscan.online/v1/audio/speech"
 PORT = int(os.environ.get("PORT", "8000"))
 MEMORY_DIR = BASE_DIR / os.environ.get("MEMORY_DIR", "memoria")
 VERSION_FILE = BASE_DIR / os.environ.get("VERSION_FILE", ".nexa_version")
@@ -820,60 +818,6 @@ def chat_title():
 
     fallback = message[:42] + ("…" if len(message) > 42 else "")
     return jsonify({"title": fallback})
-
-
-@app.post("/api/voice")
-def generate_voice_audio():
-    user = current_user()
-
-    if user is None:
-        return jsonify({"error": "Faça login para conversar com a NEXA."}), 401
-
-    key_error = message_key_error(user)
-    if key_error:
-        return key_error
-
-    if not API_KEY:
-        return jsonify({"error": "API_KEY não configurada no arquivo .env."}), 500
-
-    body = request.get_json(force=True, silent=True) or {}
-    text = body.get("text", "")
-    if not isinstance(text, str) or not text.strip():
-        return jsonify({"error": "Texto não fornecido para gerar áudio."}), 400
-    if len(text) > 12000:
-        return jsonify({"error": "O texto para áudio excede o limite de 12.000 caracteres."}), 413
-
-    try:
-        response = requests.post(
-            TTS_URL,
-            headers=auth_headers(),
-            json={
-                "model": TTS_MODEL,
-                "input": text.strip(),
-            },
-            timeout=(10, 90),
-        )
-    except requests.RequestException as error:
-        print("[NEXA-TTS] %s falha ao gerar áudio: %s" % (TTS_MODEL, error))
-        return jsonify({"error": "Falha ao conectar ao serviço de voz."}), 502
-
-    if response.status_code != 200:
-        print(
-            "[NEXA-TTS] %s HTTP %d (API_BASE=%s): %s"
-            % (TTS_MODEL, response.status_code, API_BASE, response.text[:500])
-        )
-        return jsonify({
-            "error": "O provedor não conseguiu gerar o áudio (HTTP %d)." % response.status_code
-        }), 502
-
-    if not response.content:
-        return jsonify({"error": "O provedor retornou um áudio vazio."}), 502
-
-    return Response(
-        response.content,
-        content_type=response.headers.get("Content-Type", "audio/mpeg"),
-        headers={"Cache-Control": "no-store"},
-    )
 
 
 @app.post("/api/chat")
