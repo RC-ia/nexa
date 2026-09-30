@@ -1473,6 +1473,9 @@ composer.addEventListener(
       Verifica se é a primeira mensagem do chat (histórico vazio antes de adicionar)
     */
     const isFirstMessage = history.length === 0;
+    const titleChatId = isFirstMessage
+      ? activeChatId
+      : null;
 
     /*
       Mostra a mensagem do usuário.
@@ -1506,9 +1509,10 @@ composer.addEventListener(
       if (isFirstMessage) {
         const aiTitle = await generateChatTitle(text);
         if (aiTitle) {
-          const chat = currentChat();
+          const chat = findChat(titleChatId);
           if (chat) {
             chat.title = aiTitle;
+            chat.updatedAt = Date.now();
             saveChats();
             renderChatList();
           }
