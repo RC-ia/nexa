@@ -225,13 +225,13 @@ body {
 ========================= */
 
 .thinking-toggle {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 5px;
 
-  align-self: flex-start;
+  width: fit-content;
 
-  margin-top: 6px;
+  margin-top: 7px;
 
   border: 1px solid var(--line);
 
@@ -332,15 +332,15 @@ body {
 ========================= */
 
 .thinking-panel {
-  margin: 14px 0 0;
+  margin: 9px 0 0;
 
-  padding: 12px 14px;
+  padding: 10px 12px;
 
   border: 1px solid var(--line);
 
   border-left: 2px solid var(--accent);
 
-  border-radius: 12px;
+  border-radius: 10px;
 
   background:
     linear-gradient(
@@ -361,6 +361,11 @@ body {
   display: none;
 }
 
+/* Sem painel aberto, a resposta sobe para perto do botão. */
+.thinking-panel[hidden] + p {
+  margin-top: 2px;
+}
+
 @keyframes thinkingAppear {
   from {
     opacity: 0;
@@ -373,24 +378,10 @@ body {
   }
 }
 
-.thinking-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.thinking-state {
-  color: #665d70;
-
-  font-size: 10px;
-  font-style: italic;
-}
-
 .thinking-text {
-  margin: 8px 0 0;
+  margin: 0;
 
-  max-height: 240px;
+  max-height: 220px;
 
   overflow-y: auto;
 
@@ -1075,6 +1066,8 @@ body {
 }
 
 .label {
+  display: block;
+
   color: var(--accent-light);
 
   font-size: 10px;

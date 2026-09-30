@@ -349,7 +349,7 @@ function loadMemory() {
   ==========================================
 */
 
-function addMessage(text, type) {
+function addMessage(text, type, thinkingText) {
   const message =
     document.createElement("div");
 
@@ -372,6 +372,24 @@ function addMessage(text, type) {
   paragraph.textContent = text;
 
   message.appendChild(label);
+
+  /*
+    Mensagens da NEXA ganham um
+    botão de pensamento próprio.
+  */
+
+  if (type !== "user") {
+    const thinking =
+      createThinkingBlock();
+
+    thinking.setContent(
+      thinkingText || ""
+    );
+
+    message.appendChild(thinking.button);
+    message.appendChild(thinking.panel);
+  }
+
   message.appendChild(paragraph);
 
   chat.appendChild(message);
@@ -447,104 +465,117 @@ function hideTyping() {
 
 /*
   ==========================================
-  PENSAMENTO DA NEXA
+  PENSAMENTO (POR MENSAGEM)
   ==========================================
 */
 
-let thinkingText = "";
+/*
+  O painel de pensamento é criado junto de cada
+  resposta da NEXA, então o estado vive no próprio
+  elemento em vez de uma variável global.
+*/
 
-function getThinkingElements() {
-  return {
-    toggle: document.getElementById("thinkingToggle"),
-    panel: document.getElementById("thinkingPanel"),
-    text: document.getElementById("thinkingText"),
-    state: document.getElementById("thinkingState"),
-    label: document.querySelector(".thinking-toggle-text"),
-  };
-}
+function createThinkingBlock() {
+  const button =
+    document.createElement("button");
 
-function setThinkingOpen(isOpen) {
-  const elements = getThinkingElements();
+  button.type = "button";
+  button.className = "thinking-toggle";
+  button.setAttribute("aria-expanded", "false");
 
-  if (!elements.toggle || !elements.panel) {
-    return;
+  const dot =
+    document.createElement("span");
+
+  dot.className = "thinking-dot";
+  dot.setAttribute("aria-hidden", "true");
+
+  const label =
+    document.createElement("span");
+
+  label.className = "thinking-toggle-text";
+  label.textContent = "Pensamento";
+
+  const caret =
+    document.createElement("span");
+
+  caret.className = "thinking-caret";
+  caret.setAttribute("aria-hidden", "true");
+  caret.textContent = "▾";
+
+  button.appendChild(dot);
+  button.appendChild(label);
+  button.appendChild(caret);
+
+  const panel =
+    document.createElement("div");
+
+  panel.className = "thinking-panel";
+  panel.hidden = true;
+
+  const text =
+    document.createElement("p");
+
+  text.className = "thinking-text";
+
+  panel.appendChild(text);
+
+  let content = "";
+  let open = false;
+
+  function render(state) {
+    text.textContent = content;
+
+    button.classList.toggle(
+      "has-thinking",
+      content.length > 0
+    );
+
+    button.classList.toggle(
+      "is-thinking",
+      state === "thinking"
+    );
+
+    button.setAttribute(
+      "aria-expanded",
+      open ? "true" : "false"
+    );
+
+    panel.hidden = !open;
   }
 
-  elements.panel.hidden = !isOpen;
-
-  elements.toggle.setAttribute(
-    "aria-expanded",
-    isOpen ? "true" : "false"
-  );
-
-  if (elements.label) {
-    elements.label.textContent =
-      isOpen
-        ? "Ocultar pensamento"
-        : "Ver pensamento";
-  }
-}
-
-function renderThinking(state) {
-  const elements = getThinkingElements();
-
-  if (!elements.toggle) {
-    return;
-  }
-
-  elements.toggle.classList.toggle(
-    "has-thinking",
-    thinkingText.length > 0
-  );
-
-  elements.toggle.classList.toggle(
-    "is-thinking",
-    state === "thinking"
-  );
-
-  if (elements.text) {
-    elements.text.textContent = thinkingText;
-  }
-
-  if (elements.state) {
-    if (state === "thinking") {
-      elements.state.textContent = "processando...";
-    } else if (thinkingText) {
-      elements.state.textContent = "concluído";
-    }
-  }
-}
-
-function resetThinking() {
-  thinkingText = "";
-  renderThinking("idle");
-}
-
-function appendThinking(chunk) {
-  thinkingText += chunk;
-  renderThinking("thinking");
-}
-
-function setupThinkingUI() {
-  const elements = getThinkingElements();
-
-  if (!elements.toggle || !elements.panel) {
-    return;
-  }
-
-  setThinkingOpen(false);
-  renderThinking("idle");
-
-  elements.toggle.addEventListener(
+  button.addEventListener(
     "click",
     function (event) {
       event.stopPropagation();
 
-      setThinkingOpen(
-        elements.panel.hidden
-      );
+      open = !open;
+      render();
     }
   );
+
+  render("idle");
+
+  return {
+    button,
+    panel,
+
+    append(chunk) {
+      content += chunk;
+      render("thinking");
+    },
+
+    done() {
+      render("done");
+    },
+
+    setContent(value) {
+      content = typeof value === "string"
+        ? value
+        : "";
+
+      render("done");
+    },
+  };
 }
 
 
@@ -572,7 +603,12 @@ function createStreamingMessage() {
 
   paragraph.textContent = "";
 
+  const thinking =
+    createThinkingBlock();
+
   message.appendChild(label);
+  message.appendChild(thinking.button);
+  message.appendChild(thinking.panel);
   message.appendChild(paragraph);
 
   chat.appendChild(message);
@@ -584,7 +620,8 @@ function createStreamingMessage() {
 
   return {
     message,
-    paragraph
+    paragraph,
+    thinking
   };
 }
 
@@ -610,8 +647,6 @@ function updateStreamingMessage(
 */
 
 async function askNexa(text) {
-  resetThinking();
-
   const response =
     await fetch("/api/chat", {
       method: "POST",
@@ -667,7 +702,8 @@ async function askNexa(text) {
   hideTyping();
 
   const {
-    paragraph
+    paragraph,
+    thinking
   } = createStreamingMessage();
 
   const reader =
@@ -678,6 +714,7 @@ async function askNexa(text) {
 
   let buffer = "";
   let fullReply = "";
+  let fullThinking = "";
   let finished = false;
 
   /*
@@ -734,7 +771,9 @@ async function askNexa(text) {
         data.type === "reasoning" &&
         typeof data.text === "string"
       ) {
-        appendThinking(data.text);
+        fullThinking += data.text;
+
+        thinking.append(data.text);
       }
 
       /*
@@ -746,7 +785,7 @@ async function askNexa(text) {
       ) {
         finished = true;
 
-        renderThinking("done");
+        thinking.done();
       }
 
       /*
@@ -766,49 +805,55 @@ async function askNexa(text) {
   }
 
   /*
-    Lê o stream até terminar.
+    Lê o stream até terminar. O painel
+    fecha o estado "pensando" mesmo
+    se o stream quebrar no meio.
   */
 
-  while (true) {
-    const {
-      value,
-      done
-    } = await reader.read();
-
-    if (done) {
-      break;
-    }
-
-    buffer +=
-      decoder.decode(
+  try {
+    while (true) {
+      const {
         value,
-        {
-          stream: true
-        }
-      );
+        done
+      } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      buffer +=
+        decoder.decode(
+          value,
+          {
+            stream: true
+          }
+        );
+
+      /*
+        Eventos SSE são separados
+        por uma linha vazia.
+      */
+
+      const events =
+        buffer.split(/\r?\n\r?\n/);
+
+      buffer =
+        events.pop() || "";
+
+      for (const event of events) {
+        processEvent(event);
+      }
+    }
 
     /*
-      Eventos SSE são separados
-      por uma linha vazia.
+      Processa qualquer resto do buffer.
     */
 
-    const events =
-      buffer.split(/\r?\n\r?\n/);
-
-    buffer =
-      events.pop() || "";
-
-    for (const event of events) {
-      processEvent(event);
+    if (buffer.trim()) {
+      processEvent(buffer);
     }
-  }
-
-  /*
-    Processa qualquer resto do buffer.
-  */
-
-  if (buffer.trim()) {
-    processEvent(buffer);
+  } finally {
+    thinking.done();
   }
 
   if (!fullReply.trim()) {
@@ -829,7 +874,8 @@ async function askNexa(text) {
 
   history.push({
     role: "model",
-    content: fullReply
+    content: fullReply,
+    thinking: fullThinking
   });
 
   saveMemory();
@@ -863,9 +909,6 @@ function clearConversation() {
   localStorage.removeItem(
     MEMORY_KEY
   );
-
-  resetThinking();
-  setThinkingOpen(false);
 
   hideTyping();
 
@@ -939,9 +982,6 @@ composer.addEventListener(
         "NEXA error:",
         error
       );
-
-      renderThinking("idle");
-      setThinkingOpen(false);
 
       hideTyping();
 
@@ -1063,7 +1103,8 @@ function restoreConversation() {
       item.content,
       item.role === "user"
         ? "user"
-        : "nexa"
+        : "nexa",
+      item.thinking
     );
   });
 }
@@ -1073,7 +1114,6 @@ restoreConversation();
 loadReasoning();
 setupReasoningUI();
 renderReasoning();
-setupThinkingUI();
 
 /*
   ==========================================

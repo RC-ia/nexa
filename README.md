@@ -124,12 +124,16 @@ vazio (desliga o recurso).
 
 ## Ver o pensamento
 
-Abaixo do nome NEXA há um botão **Ver pensamento** que abre um painel com o
-raciocínio do modelo enquanto ele responde. Começa fechado, e o ponto ao lado
-do botão pulsa durante o processamento.
+Cada resposta da NEXA tem o seu próprio botão **Pensamento**, logo abaixo do
+nome `NEXA` da mensagem. Clicar abre um painel com o raciocínio do modelo
+naquela resposta. Todos começam fechados, e o ponto ao lado do botão pulsa
+enquanto o modelo pensa.
 
-O painel é preenchido em tempo real, conforme o raciocínio chega no stream.
-Ele é limpo a cada nova pergunta e ao usar "Nova conversa".
+O painel é preenchido em tempo real, conforme o raciocínio chega no stream,
+e cada mensagem é independente: abrir ou fechar uma não mexe nas outras. O
+raciocínio também é salvo junto da conversa no `localStorage`, então as
+mensagens antigas continuam com o botão funcionando depois de recarregar a
+página.
 
 O raciocínio só aparece se o modelo realmente o enviar: o backend lê
 `reasoning_content` (o campo mais comum), `reasoning` ou `thinking` — tanto
