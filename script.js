@@ -19,6 +19,8 @@ const drawerSettings = document.getElementById("drawerSettings");
 const settingsPanel = document.getElementById("settingsPanel");
 const settingsClose = document.getElementById("settingsClose");
 const speechToggle = document.getElementById("speechToggle");
+const ttsSpeedSlider = document.getElementById("ttsSpeed");
+const ttsSpeedValue = document.getElementById("ttsSpeedValue");
 
 const MEMORY_KEY = "nexa_conversation";
 const MESSAGE_KEY_STORAGE_PREFIX = "nexa_message_key:";
@@ -26,6 +28,7 @@ let CHATS_KEY = "nexa_chats";
 let ACTIVE_CHAT_KEY = "nexa_active_chat";
 const REASONING_KEY = "nexa_reasoning";
 const SPEECH_KEY = "nexa_speech_enabled";
+const TTS_SPEED_KEY = "nexa_tts_speed";
 
 const REASONING_LABELS = {
   none: "Nenhum",
@@ -53,43 +56,34 @@ const history = [];
 */
 
 let speechEnabled = true;
-let selectedVoice = null;
+let ttsSpeed = 1;
+let activeAudio = null;
+let activeAudioRequest = null;
 
-function loadNexaVoice() {
-  if (!("speechSynthesis" in window)) {
-    return;
+function stopSpeaking() {
+  if (activeAudioRequest) {
+    activeAudioRequest.abort();
+    activeAudioRequest = null;
   }
 
-  const voices = window.speechSynthesis.getVoices();
-
-  if (!voices.length) {
-    return;
+  if (activeAudio) {
+    const audioUrl = activeAudio.src;
+    activeAudio.pause();
+    activeAudio.removeAttribute("src");
+    activeAudio.load();
+    if (audioUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(audioUrl);
+    }
+    activeAudio = null;
   }
-
-  selectedVoice =
-    voices.find(
-      voice =>
-        voice.lang &&
-        voice.lang.toLowerCase() === "pt-br"
-    ) ||
-    voices.find(
-      voice =>
-        voice.lang &&
-        voice.lang.toLowerCase().startsWith("pt")
-    ) ||
-    null;
 }
 
-function speakNexa(text) {
-  if (
-    !speechEnabled ||
-    !("speechSynthesis" in window) ||
-    !text
-  ) {
+async function speakNexa(text) {
+  if (!speechEnabled || !text) {
     return;
   }
 
-  window.speechSynthesis.cancel();
+  stopSpeaking();
 
   const cleanText = text
     .replace(/[*_`#]/g, "")
@@ -100,20 +94,66 @@ function speakNexa(text) {
     return;
   }
 
-  const utterance =
-    new SpeechSynthesisUtterance(cleanText);
+  const controller = new AbortController();
+  activeAudioRequest = controller;
 
-  utterance.lang = "pt-BR";
+  try {
+    const response = await fetch("/api/voice", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Nexa-Message-Key": messageKey
+      },
+      body: JSON.stringify({
+        text: cleanText
+      }),
+      signal: controller.signal
+    });
 
-  if (selectedVoice) {
-    utterance.voice = selectedVoice;
+    if (!response.ok) {
+      let data = {};
+      try {
+        data = await response.json();
+      } catch {
+        // Resposta sem JSON.
+      }
+
+      if (response.status === 401) {
+        showAuth();
+      }
+
+      throw new Error(data.error || `Falha no áudio (HTTP ${response.status}).`);
+    }
+
+    const audioUrl = URL.createObjectURL(await response.blob());
+    if (!speechEnabled || controller.signal.aborted) {
+      URL.revokeObjectURL(audioUrl);
+      return;
+    }
+
+    const audio = new Audio(audioUrl);
+    audio.playbackRate = ttsSpeed;
+    activeAudio = audio;
+
+    function releaseAudio() {
+      URL.revokeObjectURL(audioUrl);
+      if (activeAudio === audio) {
+        activeAudio = null;
+      }
+    }
+
+    audio.addEventListener("ended", releaseAudio, { once: true });
+    audio.addEventListener("error", releaseAudio, { once: true });
+    await audio.play();
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      console.error("Erro ao reproduzir voz da NEXA:", error);
+    }
+  } finally {
+    if (activeAudioRequest === controller) {
+      activeAudioRequest = null;
+    }
   }
-
-  utterance.rate = 1.02;
-  utterance.pitch = 1;
-  utterance.volume = 1;
-
-  window.speechSynthesis.speak(utterance);
 }
 
 function loadSpeechSetting() {
@@ -123,8 +163,19 @@ function loadSpeechSetting() {
     speechEnabled = true;
   }
 
+  try {
+    const savedSpeed = Number(localStorage.getItem(TTS_SPEED_KEY));
+    ttsSpeed = Number.isFinite(savedSpeed) && savedSpeed >= 0.8 && savedSpeed <= 1.25
+      ? savedSpeed
+      : 1;
+  } catch (error) {
+    ttsSpeed = 1;
+  }
+
   speechToggle.checked = speechEnabled;
-  speechToggle.disabled = !("speechSynthesis" in window);
+  ttsSpeedSlider.value = String(ttsSpeed);
+  ttsSpeedSlider.disabled = !speechEnabled;
+  ttsSpeedValue.value = `${ttsSpeed.toFixed(1).replace(".", ",")}x`;
 }
 
 function saveSpeechSetting() {
@@ -136,16 +187,23 @@ function saveSpeechSetting() {
     console.error("Erro ao salvar configuração de voz:", error);
   }
 
-  if (!speechEnabled && "speechSynthesis" in window) {
-    window.speechSynthesis.cancel();
+  ttsSpeedSlider.disabled = !speechEnabled;
+
+  if (!speechEnabled) {
+    stopSpeaking();
   }
 }
 
-if ("speechSynthesis" in window) {
-  loadNexaVoice();
+function saveTTSSettings() {
+  ttsSpeed = Number(ttsSpeedSlider.value);
 
-  window.speechSynthesis.onvoiceschanged =
-    loadNexaVoice;
+  try {
+    localStorage.setItem(TTS_SPEED_KEY, String(ttsSpeed));
+  } catch (error) {
+    console.error("Erro ao salvar configuração de voz:", error);
+  }
+
+  ttsSpeedValue.value = `${ttsSpeed.toFixed(1).replace(".", ",")}x`;
 }
 
 
@@ -1184,12 +1242,6 @@ function stashCurrent() {
   chat.updatedAt = Date.now();
 }
 
-function stopSpeaking() {
-  if ("speechSynthesis" in window) {
-    window.speechSynthesis.cancel();
-  }
-}
-
 function renderChat() {
   if (history.length === 0) {
     chat.innerHTML = "";
@@ -1495,9 +1547,7 @@ composer.addEventListener(
       Para qualquer fala anterior.
     */
 
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
+    stopSpeaking();
 
     /*
       Verifica se é a primeira mensagem do chat (histórico vazio antes de adicionar)
@@ -1642,6 +1692,11 @@ settingsClose.addEventListener(
 speechToggle.addEventListener(
   "change",
   saveSpeechSetting
+);
+
+ttsSpeedSlider.addEventListener(
+  "input",
+  saveTTSSettings
 );
 
 settingsPanel.addEventListener(

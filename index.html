@@ -16,7 +16,7 @@
 
   <title>NEXA</title>
 
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 
 <body>
@@ -392,6 +392,23 @@
           >
         </label>
 
+        <div class="settings-audio-controls">
+          <label class="settings-field" for="ttsSpeed">
+            <span class="settings-speed-heading">
+              Velocidade
+              <output id="ttsSpeedValue" for="ttsSpeed">1,0x</output>
+            </span>
+            <input
+              type="range"
+              id="ttsSpeed"
+              min="0.8"
+              max="1.25"
+              step="0.05"
+              value="1"
+            >
+          </label>
+        </div>
+
         <button
           type="button"
           id="settingsClose"
@@ -477,7 +494,7 @@
 
   </div>
 
-  <script src="script.js?v=12"></script>
+  <script src="script.js?v=14"></script>
 
 </body>
 

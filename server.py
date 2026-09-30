@@ -1,4 +1,3 @@
-from auth import auth_bp, current_user, init_auth_db, valid_message_key
 import json
 import os
 import sqlite3
@@ -13,11 +12,12 @@ BASE_DIR = Path(__file__).resolve().parent
 
 load_dotenv(BASE_DIR / ".env")
 
-from auth import auth_bp, current_user, init_auth_db  # noqa: E402  (precisa do .env já carregado)
+from auth import auth_bp, current_user, init_auth_db, valid_message_key  # noqa: E402  (precisa do .env já carregado)
 
 API_KEY = os.environ.get("API_KEY", "").strip()
 API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip("/")
 MODEL = os.environ.get("MODEL", "nada")
+TTS_MODEL = os.environ.get("TTS_MODEL", "el/eleven_multilingual_v2").strip()
 PORT = int(os.environ.get("PORT", "8000"))
 MEMORY_DB = BASE_DIR / os.environ.get("MEMORY_DB", "nexa.db")
 VERSION_FILE = BASE_DIR / os.environ.get("VERSION_FILE", ".nexa_version")
@@ -662,6 +662,57 @@ def chat_title():
 
     fallback = message[:42] + ("…" if len(message) > 42 else "")
     return jsonify({"title": fallback})
+
+
+@app.post("/api/voice")
+def generate_voice_audio():
+    user = current_user()
+
+    if user is None:
+        return jsonify({"error": "Faça login para conversar com a NEXA."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    if not API_KEY:
+        return jsonify({"error": "API_KEY não configurada no arquivo .env."}), 500
+
+    body = request.get_json(force=True, silent=True) or {}
+    text = body.get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        return jsonify({"error": "Texto não fornecido para gerar áudio."}), 400
+    if len(text) > 12000:
+        return jsonify({"error": "O texto para áudio excede o limite de 12.000 caracteres."}), 413
+
+    try:
+        response = requests.post(
+            API_BASE + "/audio/speech",
+            headers=auth_headers(),
+            json={
+                "model": TTS_MODEL,
+                "input": text.strip(),
+            },
+            timeout=(10, 90),
+        )
+    except requests.RequestException as error:
+        print("[NEXA] falha ao gerar áudio:", error)
+        return jsonify({"error": "Falha ao conectar ao serviço de voz."}), 502
+
+    if response.status_code != 200:
+        log_upstream_error(response)
+        return jsonify({
+            "error": "O provedor não conseguiu gerar o áudio (HTTP %d)." % response.status_code
+        }), 502
+
+    if not response.content:
+        return jsonify({"error": "O provedor retornou um áudio vazio."}), 502
+
+    return Response(
+        response.content,
+        content_type=response.headers.get("Content-Type", "audio/mpeg"),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.post("/api/chat")

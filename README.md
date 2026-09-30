@@ -30,7 +30,8 @@ Copie `.env.example` para `.env` e preencha a chave:
 API_KEY=sua-chave-aqui
 ```
 
-Opcionais (já têm padrão): `API_BASE`, `MODEL`, `PORT`, `MAX_OUTPUT_TOKENS`, `MEMORY_DB`.
+Opcionais (já têm padrão): `API_BASE`, `MODEL`, `TTS_MODEL`, `PORT`,
+`MAX_OUTPUT_TOKENS`, `MEMORY_DB`.
 Nunca versione o `.env` (ele já está no `.gitignore`).
 
 ## Login e painel admin
@@ -117,6 +118,15 @@ que aponta para o servidor local.
 
 - Base URL: `https://9router.rcscan.online/v1`
 - Modelo: `nada`
+
+## Voz da NEXA
+
+A voz usa o endpoint compatível com OpenAI `POST /audio/speech` do `API_BASE`
+(por padrão, `https://9router.rcscan.online/v1/audio/speech`). O modelo TTS
+padrão é `el/eleven_multilingual_v2`; se ele não estiver disponível na sua
+conta 9Router, defina `TTS_MODEL` no `.env` para um modelo de áudio habilitado
+nela. **Configurações** permite ligar/desligar a voz e ajustar a velocidade de
+reprodução. A chave do provedor fica somente no servidor.
 
 ## Memória
 
