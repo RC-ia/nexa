@@ -18,11 +18,13 @@ const drawerChats = document.getElementById("drawerChats");
 const drawerSettings = document.getElementById("drawerSettings");
 const settingsPanel = document.getElementById("settingsPanel");
 const settingsClose = document.getElementById("settingsClose");
+const speechToggle = document.getElementById("speechToggle");
 
 const MEMORY_KEY = "nexa_conversation";
 let CHATS_KEY = "nexa_chats";
 let ACTIVE_CHAT_KEY = "nexa_active_chat";
 const REASONING_KEY = "nexa_reasoning";
+const SPEECH_KEY = "nexa_speech_enabled";
 
 const REASONING_LABELS = {
   none: "Nenhum",
@@ -111,6 +113,31 @@ function speakNexa(text) {
   utterance.volume = 1;
 
   window.speechSynthesis.speak(utterance);
+}
+
+function loadSpeechSetting() {
+  try {
+    speechEnabled = localStorage.getItem(SPEECH_KEY) !== "false";
+  } catch (error) {
+    speechEnabled = true;
+  }
+
+  speechToggle.checked = speechEnabled;
+  speechToggle.disabled = !("speechSynthesis" in window);
+}
+
+function saveSpeechSetting() {
+  speechEnabled = speechToggle.checked;
+
+  try {
+    localStorage.setItem(SPEECH_KEY, String(speechEnabled));
+  } catch (error) {
+    console.error("Erro ao salvar configuração de voz:", error);
+  }
+
+  if (!speechEnabled && "speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
 }
 
 if ("speechSynthesis" in window) {
@@ -1609,6 +1636,11 @@ settingsClose.addEventListener(
   closeSettings
 );
 
+speechToggle.addEventListener(
+  "change",
+  saveSpeechSetting
+);
+
 settingsPanel.addEventListener(
   "click",
   function (event) {
@@ -1735,6 +1767,7 @@ function bootApp() {
   loadChats();
   renderChat();
   renderChatList();
+  loadSpeechSetting();
   loadReasoning();
   setupReasoningUI();
   renderReasoning();
