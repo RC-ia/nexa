@@ -4,7 +4,7 @@ cookie e painel admin para criar/remover usuários. Não há cadastro aberto.
 
 - Senhas: hash scrypt (werkzeug), nunca em texto.
 - Sessão: token aleatório em cookie HttpOnly; no banco fica só o hash do token.
-- Banco separado (auth.db) para não misturar contas com o nexa.db versionado.
+- Banco separado (auth.db) para não misturar contas com a memória em Markdown.
 - No primeiro start cria o admin (ADMIN_USER / ADMIN_PASSWORD do .env).
 """
 

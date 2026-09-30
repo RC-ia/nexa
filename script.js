@@ -2250,46 +2250,84 @@ async function loadMemories() {
     const data = await api("GET", "/api/memories");
     memoryList.replaceChildren();
 
-    if (!data.memories.length) {
+    const document = data.memories[0]?.memory || "";
+    const limit = data.limit || 10000;
+
+    if (!document) {
       const empty = document.createElement("p");
       empty.className = "settings-status";
-      empty.textContent = "Nenhuma memória salva.";
+      empty.textContent = "Nenhuma memória salva ainda.";
       memoryList.appendChild(empty);
       memoryStatus.textContent = "";
       return;
     }
 
-    data.memories.forEach(memory => {
-      const row = document.createElement("div");
-      row.className = "settings-item";
+    const row = document.createElement("div");
+    row.className = "settings-item settings-item-stack";
 
-      const copy = document.createElement("div");
-      copy.className = "settings-item-copy";
-      copy.textContent = memory.memory;
+    const copy = document.createElement("div");
+    copy.className = "settings-item-copy";
 
-      const date = document.createElement("small");
-      date.textContent = memory.created_at || "";
-      copy.appendChild(date);
+    const heading = document.createElement("strong");
+    heading.textContent = "Documento de memória";
+    copy.appendChild(heading);
 
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "settings-item-delete";
-      remove.textContent = "Apagar";
-      remove.setAttribute("aria-label", "Apagar memória");
-      remove.addEventListener("click", async function () {
-        try {
-          await api("DELETE", `/api/memories/${memory.id}`);
-          await loadMemories();
-        } catch (error) {
-          memoryStatus.textContent = error.message;
-        }
-      });
+    const editor = document.createElement("textarea");
+    editor.className = "settings-field";
+    editor.setAttribute("aria-label", "Memória da NEXA");
+    editor.value = document;
+    copy.appendChild(editor);
 
-      row.append(copy, remove);
-      memoryList.appendChild(row);
+    const date = document.createElement("small");
+    date.textContent = data.memories[0].created_at || "";
+    copy.appendChild(date);
+
+    const actions = document.createElement("div");
+    actions.className = "settings-more-actions";
+
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "settings-action";
+    save.textContent = "Salvar documento";
+
+    save.addEventListener("click", async function () {
+      save.disabled = true;
+      try {
+        await api("PUT", "/api/memories", { document: editor.value });
+        await loadMemories();
+        memoryStatus.textContent = "Documento de memória salvo.";
+      } catch (error) {
+        memoryStatus.textContent = error.message;
+      } finally {
+        save.disabled = false;
+      }
     });
 
-    memoryStatus.textContent = `${data.memories.length} memória(s)`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "settings-danger";
+    remove.textContent = "Apagar memória";
+
+    remove.addEventListener("click", async function () {
+      if (!confirm("Apagar a memória desta conta?")) {
+        return;
+      }
+      try {
+        await api("DELETE", "/api/memories");
+        await loadMemories();
+        memoryStatus.textContent = "Memória apagada.";
+      } catch (error) {
+        memoryStatus.textContent = error.message;
+      }
+    });
+
+    actions.append(save, remove);
+    row.append(copy, actions);
+    memoryList.appendChild(row);
+
+    const used = document.length;
+    memoryStatus.textContent =
+      `${used} de ${limit} caracteres usados.`;
   } catch (error) {
     memoryStatus.textContent = error.message;
   }
@@ -2645,20 +2683,6 @@ memoryToggle.addEventListener("change", function () {
 });
 
 document.getElementById("memoryRefresh").addEventListener("click", loadMemories);
-
-document.getElementById("memoryClear").addEventListener("click", async function () {
-  if (!confirm("Apagar todas as memórias salvas para esta conta?")) {
-    return;
-  }
-
-  try {
-    await api("DELETE", "/api/memories");
-    await loadMemories();
-    memoryStatus.textContent = "Todas as memórias foram apagadas.";
-  } catch (error) {
-    memoryStatus.textContent = error.message;
-  }
-});
 
 document.getElementById("saveInstructions").addEventListener("click", function () {
   customInstructions = customInstructionsInput.value.trim().slice(0, 2000);

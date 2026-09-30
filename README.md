@@ -8,10 +8,11 @@ Estrutura:
 - `server.py` — servidor Flask (serve o site + `/api/chat` com streaming SSE)
 - `auth.py` — login, sessões e painel admin
 - `run.py` — supervisor: roda o servidor e aplica auto-update via git
-- `index.html`, `style.css`, `script.js` — frontend (inalterado)
+- `index.html`, `style.css`, `script.js` — frontend do chat
+- `live.html`, `live.css`, `live.js` — página da chamada Gemini Live
 - `requirements.txt` — dependências Python
 - `.env.example` — modelo de configuração
-- `nexa.db` — banco SQLite de memória (criado automaticamente)
+- `memoria/` — um arquivo `.md` por conta com a memória consolidada (criado automaticamente)
 - `auth.db` — contas, cadastros pendentes e sessões (criado automaticamente, **não versionar**)
 
 ## 1. Instalar as dependências
@@ -32,7 +33,7 @@ API_GEMA=sua-chave-gemini-aqui
 ```
 
 Opcionais (já têm padrão): `API_BASE`, `MODEL`, `PORT`, `MAX_OUTPUT_TOKENS`,
-`MEMORY_DB`.
+`MEMORY_DIR`.
 Nunca versione o `.env` (ele já está no `.gitignore`).
 
 ## Login e painel admin
@@ -138,9 +139,19 @@ em tempo real. O navegador precisa permitir acesso ao microfone; fora de
 
 ## Memória
 
-A memória de longo prazo usa SQLite local (`nexa.db`), criado automaticamente
-na primeira execução. Se você apagar o arquivo, a memória persistente some
-(as conversas no navegador continuam no `localStorage`).
+A memória de longo prazo é um **único arquivo Markdown por conta**, dentro de
+`memoria/`. Não há pedaços acumulando: a cada conversa relevante, o modelo
+recebe o documento inteiro e devolve o documento **já consolidado**, que
+sobrescreve o arquivo anterior. Assim o modelo sempre lê o contexto completo,
+não fragmentos soltos.
+
+O prompt pede explicitamente que sistemas com vários arquivos, números ou etapas
+sejam guardados como uma ideia única (por exemplo, "o usuário está criando um
+sistema X"), removendo o que ficou obsoleto. O arquivo é limitado a 10.000
+caracteres e pode ser editado à mão em **Configurações > Memória**.
+
+Apagar a pasta `memoria/` remove a memória persistente (as conversas do
+navegador continuam no `localStorage`).
 
 ## Barra lateral
 
@@ -164,8 +175,8 @@ O botão **Nova conversa** do topo continua funcionando igual: os dois botões
 fazem a mesma coisa.
 
 Tudo isso fica no `localStorage`, em `nexa_chats` (a lista de conversas) e
-`nexa_active_chat` (qual está aberta). A memória de longo prazo do
-`nexa.db` é outra coisa e não é afetada.
+`nexa_active_chat` (qual está aberta). A memória de longo prazo fica nos
+arquivos `.md` da pasta `memoria/` e não é afetada.
 
 > **Nota sobre versões antigas:** antes da barra lateral a NEXA guardava uma
 > conversa só, em `nexa_conversation`. Na primeira abertura depois dessa
