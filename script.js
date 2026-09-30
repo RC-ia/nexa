@@ -9,7 +9,19 @@ const micButton = document.getElementById("micButton");
 const sendButton = composer.querySelector('button[type="submit"]');
 const newChatButton = document.getElementById("newChatButton");
 
+const app = document.querySelector(".app");
+const drawerToggle = document.getElementById("drawerToggle");
+const drawerClose = document.getElementById("drawerClose");
+const drawerScrim = document.getElementById("drawerScrim");
+const drawerNewChat = document.getElementById("drawerNewChat");
+const drawerChats = document.getElementById("drawerChats");
+const drawerSettings = document.getElementById("drawerSettings");
+const settingsPanel = document.getElementById("settingsPanel");
+const settingsClose = document.getElementById("settingsClose");
+
 const MEMORY_KEY = "nexa_conversation";
+const CHATS_KEY = "nexa_chats";
+const ACTIVE_CHAT_KEY = "nexa_active_chat";
 const USER_ID_KEY = "nexa_user_id";
 const REASONING_KEY = "nexa_reasoning";
 
@@ -303,48 +315,281 @@ const userId = getUserId();
 
 /*
   ==========================================
-  MEMÓRIA LOCAL DA CONVERSA
+  MEMÓRIA LOCAL DAS CONVERSAS
+  `history` continua sendo a conversa aberta; `chats` guarda
+  todas. A primeira versão guardava uma conversa só em
+  nexa_conversation, e a migração abaixo traz ela para cá.
   ==========================================
 */
 
-function saveMemory() {
-  localStorage.setItem(
-    MEMORY_KEY,
-    JSON.stringify(history)
+const WELCOME_HTML = `
+  <div class="message nexa">
+    <span class="label">NEXA</span>
+    <p>E aí. Sou a NEXA. Já tô online — manda a boa.</p>
+  </div>
+`;
+
+let chats = [];
+let activeChatId = null;
+let drawerOpen = false;
+
+function makeId() {
+  return (
+    "chat_" +
+    Date.now().toString(36) +
+    "_" +
+    Math.random()
+      .toString(36)
+      .slice(2, 7)
   );
 }
 
-function loadMemory() {
+function cleanMessages(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+
+  return list
+    .filter(
+      item =>
+        item &&
+        typeof item.role === "string" &&
+        typeof item.content === "string"
+    )
+    .map(item => ({
+      role: item.role,
+      content: item.content,
+      thinking: item.thinking
+    }));
+}
+
+function chatTitle(messages) {
+  const first = messages.find(
+    item =>
+      item.role === "user" &&
+      item.content.trim()
+  );
+
+  if (!first) {
+    return "Nova conversa";
+  }
+
+  const single = first.content
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return single.length > 42
+    ? single.slice(0, 42) + "…"
+    : single;
+}
+
+function formatWhen(timestamp) {
+  const date = new Date(timestamp);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const now = new Date();
+
+  const sameDay =
+    date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear();
+
+  const yesterday = new Date(now);
+  yesterday.setDate(
+    yesterday.getDate() - 1
+  );
+
+  const dayBefore =
+    date.getDate() === yesterday.getDate() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getFullYear() === yesterday.getFullYear();
+
+  const hour = date
+    .toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+
+  if (sameDay) {
+    return hour;
+  }
+
+  if (dayBefore) {
+    return "Ontem, " + hour;
+  }
+
+  const day = date
+    .toLocaleDateString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit"
+    });
+
+  return day + " " + hour;
+}
+
+function makeChat() {
+  return {
+    id: makeId(),
+    title: "Nova conversa",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    messages: []
+  };
+}
+
+function normalizeChat(raw) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const messages = cleanMessages(raw.messages);
+
+  return {
+    id:
+      typeof raw.id === "string" &&
+      raw.id
+        ? raw.id
+        : makeId(),
+
+    title:
+      typeof raw.title === "string" &&
+      raw.title
+        ? raw.title
+        : chatTitle(messages),
+
+    createdAt:
+      Number(raw.createdAt) ||
+      Date.now(),
+
+    updatedAt:
+      Number(raw.updatedAt) ||
+      Date.now(),
+
+    messages
+  };
+}
+
+function findChat(id) {
+  if (!id) {
+    return null;
+  }
+
+  return (
+    chats.find(item => item.id === id) ||
+    null
+  );
+}
+
+function currentChat() {
+  return findChat(activeChatId);
+}
+
+function saveChats() {
+  localStorage.setItem(
+    CHATS_KEY,
+    JSON.stringify(chats)
+  );
+
+  localStorage.setItem(
+    ACTIVE_CHAT_KEY,
+    activeChatId || ""
+  );
+}
+
+/* Esvazia `history` dentro do chat aberto e grava. */
+function saveMemory() {
+  const chat = currentChat();
+
+  if (!chat) {
+    return;
+  }
+
+  chat.messages = history.slice();
+  chat.title = chatTitle(chat.messages);
+  chat.updatedAt = Date.now();
+
+  saveChats();
+  renderChatList();
+}
+
+function loadChats() {
   try {
-    const saved =
-      localStorage.getItem(MEMORY_KEY);
+    const saved = localStorage.getItem(CHATS_KEY);
 
-    if (!saved) {
-      return;
+    if (saved) {
+      const parsed = JSON.parse(saved);
+
+      if (Array.isArray(parsed)) {
+        chats = parsed
+          .map(normalizeChat)
+          .filter(Boolean);
+      }
     }
-
-    const savedHistory =
-      JSON.parse(saved);
-
-    if (!Array.isArray(savedHistory)) {
-      return;
-    }
-
-    history.push(
-      ...savedHistory.filter(
-        item =>
-          item &&
-          typeof item.role === "string" &&
-          typeof item.content === "string"
-      )
-    );
 
   } catch (error) {
     console.error(
-      "Erro ao carregar memória:",
+      "Erro ao carregar conversas:",
       error
     );
   }
+
+  /*
+    Primeira execução depois da migração: a conversa antiga
+    morava sozinha em nexa_conversation.
+  */
+
+  if (chats.length === 0) {
+    const legacy =
+      localStorage.getItem(MEMORY_KEY);
+
+    if (legacy) {
+      try {
+        const messages = cleanMessages(
+          JSON.parse(legacy)
+        );
+
+        if (messages.length > 0) {
+          chats.push({
+            id: makeId(),
+            title: chatTitle(messages),
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            messages
+          });
+        }
+
+        localStorage.removeItem(MEMORY_KEY);
+
+      } catch (error) {
+        console.error(
+          "Erro ao migrar conversa antiga:",
+          error
+        );
+      }
+    }
+  }
+
+  if (chats.length === 0) {
+    chats.push(makeChat());
+  }
+
+  const saved = localStorage.getItem(
+    ACTIVE_CHAT_KEY
+  );
+
+  activeChatId = findChat(saved)
+    ? saved
+    : chats[0].id;
+
+  const chat = currentChat();
+
+  history.length = 0;
+  history.push(...chat.messages);
+
+  saveChats();
 }
 
 /*
@@ -900,36 +1145,280 @@ async function askNexa(text) {
 
 /*
   ==========================================
-  NOVA CONVERSA
+  NAVEGAÇÃO ENTRE CONVERSAS
   ==========================================
 */
 
-function clearConversation() {
+/* Joga o que está em `history` de volta no chat que estava aberto. */
+function stashCurrent() {
+  const chat = currentChat();
+
+  if (!chat) {
+    return;
+  }
+
+  chat.messages = history.slice();
+  chat.title = chatTitle(chat.messages);
+  chat.updatedAt = Date.now();
+}
+
+function stopSpeaking() {
   if ("speechSynthesis" in window) {
     window.speechSynthesis.cancel();
   }
+}
 
-  history.length = 0;
-
-  localStorage.removeItem(
-    MEMORY_KEY
-  );
-
-  hideTyping();
-
-  chat.innerHTML = `
-    <div class="message nexa">
-      <span class="label">NEXA</span>
-      <p>Conversa limpa. Minha memória dessa conversa foi apagada. O que eu já aprendi sobre você continua guardado.</p>
-    </div>
-  `;
+function renderChat() {
+  if (history.length === 0) {
+    chat.innerHTML = WELCOME_HTML;
+  } else {
+    restoreConversation();
+  }
 
   if (feed) {
-    feed.scrollTop = 0;
+    feed.scrollTop = feed.scrollHeight;
   }
+}
+
+function startNewChat() {
+  stashCurrent();
+  stopSpeaking();
+
+  const fresh = makeChat();
+
+  chats.unshift(fresh);
+  activeChatId = fresh.id;
+  history.length = 0;
+
+  hideTyping();
+  saveChats();
+  renderChat();
+  renderChatList();
+  closeDrawer();
 
   input.value = "";
   input.focus();
+}
+
+function openChat(id) {
+  if (id === activeChatId) {
+    closeDrawer();
+    input.focus();
+    return;
+  }
+
+  const target = findChat(id);
+
+  if (!target) {
+    return;
+  }
+
+  stashCurrent();
+  stopSpeaking();
+
+  activeChatId = target.id;
+  history.length = 0;
+  history.push(...target.messages);
+
+  hideTyping();
+  saveChats();
+  renderChat();
+  renderChatList();
+  closeDrawer();
+
+  input.value = "";
+  input.focus();
+}
+
+function deleteChat(id) {
+  const index = chats.findIndex(
+    item => item.id === id
+  );
+
+  if (index === -1) {
+    return;
+  }
+
+  const wasActive = chats[index].id === activeChatId;
+
+  chats.splice(index, 1);
+
+  if (wasActive) {
+    if (chats.length === 0) {
+      const fresh = makeChat();
+
+      chats.push(fresh);
+      activeChatId = fresh.id;
+      history.length = 0;
+    } else {
+      /*
+        Chat removido era o aberto: entra o que ficou
+        logo depois dele, ou o último da lista.
+      */
+
+      const next =
+        chats[
+          Math.min(index, chats.length - 1)
+        ];
+
+      activeChatId = next.id;
+      history.length = 0;
+      history.push(...next.messages);
+    }
+
+    stopSpeaking();
+    renderChat();
+  }
+
+  saveChats();
+  renderChatList();
+}
+
+
+/*
+  ==========================================
+  LISTA DE CHATS ANTERIORES
+  ==========================================
+*/
+
+function renderChatList() {
+  if (!drawerChats) {
+    return;
+  }
+
+  drawerChats.innerHTML = "";
+
+  if (chats.length === 0) {
+    const empty = document.createElement("p");
+
+    empty.className = "drawer-empty";
+    empty.textContent =
+      "Nenhuma conversa ainda.";
+
+    drawerChats.appendChild(empty);
+
+    return;
+  }
+
+  const ordered = chats
+    .slice()
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+
+  ordered.forEach(chat => {
+    const row = document.createElement("div");
+
+    row.className =
+      "drawer-chat" +
+      (chat.id === activeChatId
+        ? " is-active"
+        : "");
+
+    row.dataset.id = chat.id;
+
+    const open = document.createElement("button");
+
+    open.type = "button";
+    open.className = "drawer-chat-open";
+
+    const title = document.createElement("span");
+
+    title.className = "drawer-chat-title";
+    title.textContent = chat.title;
+    title.title = chat.title;
+
+    const when = document.createElement("span");
+
+    when.className = "drawer-chat-when";
+    when.textContent = formatWhen(
+      chat.updatedAt
+    );
+
+    open.append(title, when);
+    open.addEventListener(
+      "click",
+      () => openChat(chat.id)
+    );
+
+    const remove = document.createElement("button");
+
+    remove.type = "button";
+    remove.className = "drawer-chat-delete";
+    remove.setAttribute(
+      "aria-label",
+      "Apagar conversa: " + chat.title
+    );
+
+    remove.textContent = "✕";
+
+    remove.addEventListener(
+      "click",
+      () => deleteChat(chat.id)
+    );
+
+    row.append(open, remove);
+    drawerChats.appendChild(row);
+  });
+}
+
+
+/*
+  ==========================================
+  GAVETA E CONFIGURAÇÕES
+  ==========================================
+*/
+
+function openDrawer() {
+  if (drawerOpen) {
+    return;
+  }
+
+  drawerOpen = true;
+  app.classList.add("drawer-open");
+  drawerScrim.hidden = false;
+
+  drawerToggle.setAttribute(
+    "aria-expanded",
+    "true"
+  );
+
+  drawerToggle.setAttribute(
+    "aria-label",
+    "Fechar menu"
+  );
+
+  renderChatList();
+  drawerClose.focus();
+}
+
+function closeDrawer() {
+  if (!drawerOpen) {
+    return;
+  }
+
+  drawerOpen = false;
+  app.classList.remove("drawer-open");
+  drawerScrim.hidden = true;
+
+  drawerToggle.setAttribute(
+    "aria-expanded",
+    "false"
+  );
+
+  drawerToggle.setAttribute(
+    "aria-label",
+    "Abrir menu"
+  );
+}
+
+function openSettings() {
+  closeDrawer();
+  settingsPanel.hidden = false;
+  settingsClose.focus();
+}
+
+function closeSettings() {
+  settingsPanel.hidden = true;
+  drawerSettings.focus();
 }
 
 /*
@@ -975,6 +1464,7 @@ composer.addEventListener(
     sendButton.disabled = true;
     micButton.disabled = true;
     newChatButton.disabled = true;
+    drawerNewChat.disabled = true;
 
     /*
       Indicador enquanto o primeiro
@@ -1007,6 +1497,7 @@ composer.addEventListener(
       sendButton.disabled = false;
       micButton.disabled = false;
       newChatButton.disabled = false;
+      drawerNewChat.disabled = false;
 
       input.focus();
     }
@@ -1021,7 +1512,86 @@ composer.addEventListener(
 
 newChatButton.addEventListener(
   "click",
-  clearConversation
+  startNewChat
+);
+
+drawerNewChat.addEventListener(
+  "click",
+  startNewChat
+);
+
+
+/*
+  ==========================================
+  GAVETA E CONFIGURAÇÕES
+  ==========================================
+*/
+
+drawerToggle.addEventListener(
+  "click",
+  function () {
+    if (drawerOpen) {
+      closeDrawer();
+      drawerToggle.focus();
+      return;
+    }
+
+    openDrawer();
+  }
+);
+
+drawerClose.addEventListener(
+  "click",
+  function () {
+    closeDrawer();
+    drawerToggle.focus();
+  }
+);
+
+drawerScrim.addEventListener(
+  "click",
+  function () {
+    closeDrawer();
+    drawerToggle.focus();
+  }
+);
+
+drawerSettings.addEventListener(
+  "click",
+  openSettings
+);
+
+settingsClose.addEventListener(
+  "click",
+  closeSettings
+);
+
+settingsPanel.addEventListener(
+  "click",
+  function (event) {
+    if (event.target === settingsPanel) {
+      closeSettings();
+    }
+  }
+);
+
+document.addEventListener(
+  "keydown",
+  function (event) {
+    if (event.key !== "Escape") {
+      return;
+    }
+
+    if (!settingsPanel.hidden) {
+      closeSettings();
+      return;
+    }
+
+    if (drawerOpen) {
+      closeDrawer();
+      drawerToggle.focus();
+    }
+  }
 );
 
 /*
@@ -1118,8 +1688,9 @@ function restoreConversation() {
   });
 }
 
-loadMemory();
-restoreConversation();
+loadChats();
+renderChat();
+renderChatList();
 loadReasoning();
 setupReasoningUI();
 renderReasoning();

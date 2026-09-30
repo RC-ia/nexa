@@ -34,15 +34,31 @@
 
     <header class="topbar">
 
-      <div class="brand">
+      <div class="topbar-left">
 
-        <div class="orb">
-          <div class="orb-inner"></div>
-        </div>
+        <button
+          type="button"
+          id="drawerToggle"
+          class="drawer-toggle"
+          aria-label="Abrir menu"
+          aria-controls="drawer"
+          aria-expanded="false"
+          title="Menu"
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
 
-        <div class="brand-info">
-          <h1>NEXA</h1>
-          <span>Assistente pessoal</span>
+        <div class="brand">
+
+          <div class="orb">
+            <div class="orb-inner"></div>
+          </div>
+
+          <div class="brand-info">
+            <h1>NEXA</h1>
+            <span>Assistente pessoal</span>
+          </div>
+
         </div>
 
       </div>
@@ -65,6 +81,67 @@
       </div>
 
     </header>
+
+
+    <div
+      class="drawer-scrim"
+      id="drawerScrim"
+      hidden
+    ></div>
+
+    <aside
+      class="drawer"
+      id="drawer"
+      aria-label="Menu lateral"
+    >
+
+      <div class="drawer-head">
+
+        <span class="drawer-brand">
+          NEXA
+        </span>
+
+        <button
+          type="button"
+          id="drawerClose"
+          class="drawer-close"
+          aria-label="Fechar menu"
+          title="Fechar"
+        >
+          <span aria-hidden="true">✕</span>
+        </button>
+
+      </div>
+
+      <button
+        type="button"
+        id="drawerNewChat"
+        class="drawer-new-chat"
+      >
+        <span class="drawer-icon" aria-hidden="true">+</span>
+        Nova conversa
+      </button>
+
+      <span class="drawer-section">
+        Chats anteriores
+      </span>
+
+      <nav
+        class="drawer-chats"
+        id="drawerChats"
+        aria-label="Chats anteriores"
+      ></nav>
+
+      <button
+        type="button"
+        id="drawerSettings"
+        class="drawer-settings"
+      >
+        <span class="drawer-icon" aria-hidden="true">⚙</span>
+        Configurações
+      </button>
+
+    </aside>
 
 
     <div class="feed">
@@ -273,9 +350,43 @@
       NEXA v<span id="nexaVersion">0.01</span> • IA conectada via Cloudflare
     </footer>
 
+
+    <div
+      class="settings"
+      id="settingsPanel"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Configurações"
+      hidden
+    >
+
+      <div class="settings-card">
+
+        <h3>
+          Configurações
+        </h3>
+
+        <p>
+          Ainda não tem nada aqui. Por enquanto o
+          reforço de raciocínio e a voz continuam
+          ajustados pelo campo de envio.
+        </p>
+
+        <button
+          type="button"
+          id="settingsClose"
+          class="settings-close"
+        >
+          Fechar
+        </button>
+
+      </div>
+
+    </div>
+
   </main>
 
-  <script src="script.js?v=7"></script>
+  <script src="script.js?v=8"></script>
 
 </body>
 

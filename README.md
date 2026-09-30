@@ -89,6 +89,35 @@ A memória de longo prazo usa SQLite local (`nexa.db`), criado automaticamente
 na primeira execução. Se você apagar o arquivo, a memória persistente some
 (as conversas no navegador continuam no `localStorage`).
 
+## Barra lateral
+
+O botão **☰** no canto esquerdo abre a gaveta de menu, que desliza por cima
+da conversa — ela não empurra o conteúdo, então a largura da conversa
+continua a mesma com a gaveta aberta ou fechada.
+
+Dentro dela:
+
+- **Nova conversa** — começa um chat em branco e guarda o anterior na lista.
+- **Chats anteriores** — a conversa aberta fica destacada, e a lista vem da
+  mais recente para a mais antiga. Passando o mouse aparece o **✕** para
+  apagar. O título de cada chat é a primeira mensagem que você mandou.
+- **Configurações** — por enquanto é só um aviso; não há nada configurável
+  ali ainda.
+
+A gaveta fecha pelo **✕**, clicando fora dela ou com `Esc`.
+
+O botão **Nova conversa** do topo continua funcionando igual: os dois botões
+fazem a mesma coisa.
+
+Tudo isso fica no `localStorage`, em `nexa_chats` (a lista de conversas) e
+`nexa_active_chat` (qual está aberta). A memória de longo prazo do
+`nexa.db` é outra coisa e não é afetada.
+
+> **Nota sobre versões antigas:** antes da barra lateral a NEXA guardava uma
+> conversa só, em `nexa_conversation`. Na primeira abertura depois dessa
+> mudança, essa conversa é migrada sozinha para a lista e a chave antiga é
+> apagada. Não é preciso fazer nada manualmente.
+
 ## Versão
 
 O rodapé mostra `NEXA vX.XX`, começando em `0.01`. O `run.py` guarda essa
