@@ -730,11 +730,13 @@ def create_live_token():
         "newSessionExpireTime": (now + timedelta(seconds=55)).isoformat().replace("+00:00", "Z"),
         "bidiGenerateContentSetup": {
             "model": LIVE_MODEL,
-            "generationConfig": {"responseModalities": ["AUDIO"]},
-            "speechConfig": {
-                "voiceConfig": {
-                    "prebuiltVoiceConfig": {"voiceName": voice}
-                }
+            "generationConfig": {
+                "responseModalities": ["AUDIO"],
+                "speechConfig": {
+                    "voiceConfig": {
+                        "prebuiltVoiceConfig": {"voiceName": voice}
+                    }
+                },
             },
             "systemInstruction": {"parts": [{"text": LIVE_SYSTEM_PROMPT}]},
         },

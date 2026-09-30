@@ -5,6 +5,7 @@ com OpenAI (`https://9router.rcscan.online/v1`), pensada para rodar em uma
 máquina e ser exposta com o túnel do Cloudflare (`cloudflared`).
 
 Estrutura:
+
 - `server.py` — servidor Flask (serve o site + `/api/chat` com streaming SSE)
 - `auth.py` — login, sessões e painel admin
 - `run.py` — supervisor: roda o servidor e aplica auto-update via git
@@ -27,7 +28,7 @@ pip install -r requirements.txt
 
 Copie `.env.example` para `.env` e preencha a chave:
 
-```
+```env
 API_KEY=sua-chave-aqui
 API_GEMA=sua-chave-gemini-aqui
 ```
@@ -92,12 +93,14 @@ O `run.py` verifica o repositório a cada `UPDATE_INTERVAL` segundos (padrão
 reinicia o servidor automaticamente.
 
 Configurações no `.env`:
+
 - `AUTO_UPDATE=1` — liga/desliga (`0` desliga).
 - `UPDATE_INTERVAL=180` — intervalo das checagens, em segundos (mínimo 30).
 - `GIT_REMOTE=origin` — remoto usado.
 - `GIT_BRANCH=` — branch; vazio usa o upstream da branch atual.
 
 Observações:
+
 - Usa `--ff-only`, então **não** sobrescreve mudanças locais: se houver
   alterações não commitadas em arquivos versionados, o pull falha e é
   registrado no log (sem reiniciar).

@@ -294,10 +294,12 @@ async function startCall() {
       activeSocket.send(JSON.stringify({
         setup: {
           model: tokenData.model || "models/gemini-3.8-live",
-          generationConfig: { responseModalities: ["AUDIO"] },
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: tokenData.voice || "Kore" }
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: tokenData.voice || "Kore" }
+              }
             }
           },
           systemInstruction: { parts: [{ text: tokenData.systemInstruction }] }

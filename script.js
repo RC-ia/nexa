@@ -261,10 +261,12 @@ async function speakNexaWithGemini(text) {
       socket.send(JSON.stringify({
         setup: {
           model: tokenData.model || "models/gemini-3.8-live",
-          generationConfig: { responseModalities: ["AUDIO"] },
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: tokenData.voice || liveVoice }
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: tokenData.voice || liveVoice }
+              }
             }
           },
           systemInstruction: {
