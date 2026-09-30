@@ -16,7 +16,7 @@
 
   <title>NEXA</title>
 
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 
 <body>
@@ -341,6 +341,15 @@
       </button>
 
       <button
+        type="button"
+        id="liveCallButton"
+        aria-label="Iniciar chamada com Gemini Live"
+        title="Chamada Gemini Live"
+      >
+        ☎
+      </button>
+
+      <button
         type="submit"
         aria-label="Enviar"
         title="Enviar mensagem"
@@ -421,6 +430,49 @@
 
     </div>
 
+    <div
+      class="live-call"
+      id="liveCallPanel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="liveCallTitle"
+      hidden
+    >
+      <section class="live-call-card">
+        <header class="live-call-header">
+          <div>
+            <h3 id="liveCallTitle">Chamada Gemini Live</h3>
+            <p id="liveCallStatus" role="status">Pronto para iniciar</p>
+          </div>
+          <button
+            type="button"
+            id="liveCallClose"
+            class="live-call-close"
+            aria-label="Fechar chamada"
+            title="Fechar"
+          >
+            ✕
+          </button>
+        </header>
+
+        <div
+          class="live-call-transcript"
+          id="liveCallTranscript"
+          aria-live="polite"
+          aria-label="Transcrição da chamada"
+        ></div>
+
+        <div class="live-call-controls">
+          <button type="button" id="liveCallStart" class="live-call-start">
+            Iniciar chamada
+          </button>
+          <button type="button" id="liveCallEnd" class="live-call-end" hidden>
+            Encerrar chamada
+          </button>
+        </div>
+      </section>
+    </div>
+
   </main>
 
   <div
@@ -494,7 +546,7 @@
 
   </div>
 
-  <script src="script.js?v=14"></script>
+  <script src="script.js?v=15"></script>
 
 </body>
 

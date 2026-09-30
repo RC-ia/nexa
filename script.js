@@ -6,6 +6,13 @@ const chat = document.getElementById("chat");
 const feed = document.querySelector(".feed");
 
 const micButton = document.getElementById("micButton");
+const liveCallButton = document.getElementById("liveCallButton");
+const liveCallPanel = document.getElementById("liveCallPanel");
+const liveCallStatus = document.getElementById("liveCallStatus");
+const liveCallTranscript = document.getElementById("liveCallTranscript");
+const liveCallStartButton = document.getElementById("liveCallStart");
+const liveCallEndButton = document.getElementById("liveCallEnd");
+const liveCallCloseButton = document.getElementById("liveCallClose");
 const sendButton = composer.querySelector('button[type="submit"]');
 const newChatButton = document.getElementById("newChatButton");
 
@@ -204,6 +211,362 @@ function saveTTSSettings() {
   }
 
   ttsSpeedValue.value = `${ttsSpeed.toFixed(1).replace(".", ",")}x`;
+}
+
+function setLiveCallStatus(message) {
+  liveCallStatus.textContent = message;
+}
+
+function addLiveTranscript(speaker, text) {
+  if (!text || !text.trim()) {
+    return;
+  }
+
+  const line = document.createElement("div");
+  line.className = "live-call-line";
+
+  const label = document.createElement("strong");
+  label.textContent = speaker;
+
+  const content = document.createElement("span");
+  content.textContent = text.trim();
+
+  line.append(label, content);
+  liveCallTranscript.appendChild(line);
+  liveCallTranscript.scrollTop = liveCallTranscript.scrollHeight;
+}
+
+function pcm16FromFloat(input, sampleRate) {
+  const ratio = sampleRate / 16000;
+  const outputLength = Math.floor(input.length / ratio);
+  const pcm = new Int16Array(outputLength);
+
+  for (let index = 0; index < outputLength; index += 1) {
+    const start = Math.floor(index * ratio);
+    const end = Math.min(Math.floor((index + 1) * ratio), input.length);
+    let sum = 0;
+
+    for (let sample = start; sample < end; sample += 1) {
+      sum += input[sample];
+    }
+
+    const value = Math.max(-1, Math.min(1, sum / Math.max(1, end - start)));
+    pcm[index] = value < 0 ? value * 0x8000 : value * 0x7fff;
+  }
+
+  return pcm;
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+
+  return btoa(binary);
+}
+
+function stopLivePlayback() {
+  livePlaybackSources.forEach(source => {
+    try {
+      source.stop();
+    } catch {
+      // O áudio pode já ter terminado.
+    }
+  });
+
+  livePlaybackSources.clear();
+  livePlaybackTime = 0;
+}
+
+function queueLiveAudio(base64Data, mimeType) {
+  if (!liveAudioContext || !base64Data) {
+    return;
+  }
+
+  const binary = atob(base64Data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  const sampleCount = Math.floor(bytes.byteLength / 2);
+  if (!sampleCount) {
+    return;
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const rateMatch = /rate=(\d+)/i.exec(mimeType || "");
+  const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
+  const audioBuffer = liveAudioContext.createBuffer(1, sampleCount, sampleRate);
+  const channel = audioBuffer.getChannelData(0);
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    channel[index] = view.getInt16(index * 2, true) / 32768;
+  }
+
+  const source = liveAudioContext.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(liveAudioContext.destination);
+  source.onended = () => livePlaybackSources.delete(source);
+
+  const startAt = Math.max(liveAudioContext.currentTime + 0.02, livePlaybackTime);
+  source.start(startAt);
+  livePlaybackTime = startAt + audioBuffer.duration;
+  livePlaybackSources.add(source);
+}
+
+function startLiveMicrophone(socket) {
+  if (!liveAudioContext || !liveCallStream) {
+    throw new Error("O microfone não está disponível.");
+  }
+
+  liveMicSource = liveAudioContext.createMediaStreamSource(liveCallStream);
+  liveMicProcessor = liveAudioContext.createScriptProcessor(4096, 1, 1);
+  liveMicMute = liveAudioContext.createGain();
+  liveMicMute.gain.value = 0;
+
+  liveMicProcessor.onaudioprocess = event => {
+    if (!liveCallReady || socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const samples = pcm16FromFloat(
+      event.inputBuffer.getChannelData(0),
+      liveAudioContext.sampleRate
+    );
+
+    if (samples.length) {
+      socket.send(JSON.stringify({
+        realtimeInput: {
+          audio: {
+            data: bytesToBase64(new Uint8Array(samples.buffer)),
+            mimeType: "audio/pcm;rate=16000"
+          }
+        }
+      }));
+    }
+  };
+
+  liveMicSource.connect(liveMicProcessor);
+  liveMicProcessor.connect(liveMicMute);
+  liveMicMute.connect(liveAudioContext.destination);
+}
+
+function releaseLiveCall(status) {
+  liveCallGeneration += 1;
+  liveCallReady = false;
+
+  if (liveCallSetupTimer) {
+    clearTimeout(liveCallSetupTimer);
+    liveCallSetupTimer = null;
+  }
+
+  if (liveTokenRequest) {
+    liveTokenRequest.abort();
+    liveTokenRequest = null;
+  }
+
+  const socket = liveCallSocket;
+  liveCallSocket = null;
+  if (socket && socket.readyState < WebSocket.CLOSING) {
+    socket.close(1000, "Call ended");
+  }
+
+  if (liveMicProcessor) {
+    liveMicProcessor.disconnect();
+    liveMicProcessor.onaudioprocess = null;
+    liveMicProcessor = null;
+  }
+  if (liveMicSource) {
+    liveMicSource.disconnect();
+    liveMicSource = null;
+  }
+  if (liveMicMute) {
+    liveMicMute.disconnect();
+    liveMicMute = null;
+  }
+
+  if (liveCallStream) {
+    liveCallStream.getTracks().forEach(track => track.stop());
+    liveCallStream = null;
+  }
+
+  stopLivePlayback();
+  if (liveAudioContext && liveAudioContext.state !== "closed") {
+    liveAudioContext.close();
+  }
+  liveAudioContext = null;
+
+  liveCallStartButton.hidden = false;
+  liveCallStartButton.disabled = false;
+  liveCallEndButton.hidden = true;
+  liveCallButton.setAttribute("aria-pressed", "false");
+  setLiveCallStatus(status || "Chamada encerrada");
+}
+
+function handleLiveServerMessage(socket, message) {
+  if (message.setupComplete) {
+    if (liveCallSetupTimer) {
+      clearTimeout(liveCallSetupTimer);
+      liveCallSetupTimer = null;
+    }
+    liveCallReady = true;
+    liveCallStartButton.hidden = true;
+    liveCallEndButton.hidden = false;
+    liveCallButton.setAttribute("aria-pressed", "true");
+    setLiveCallStatus("Conectado · pode falar");
+    startLiveMicrophone(socket);
+    return;
+  }
+
+  const content = message.serverContent;
+  if (!content) {
+    if (message.error) {
+      throw new Error(message.error.message || "Erro na sessão Gemini Live.");
+    }
+    return;
+  }
+
+  if (content.inputTranscription?.text) {
+    addLiveTranscript("Você", content.inputTranscription.text);
+  }
+
+  if (content.outputTranscription?.text) {
+    addLiveTranscript("Gemini", content.outputTranscription.text);
+  }
+
+  if (content.interrupted) {
+    stopLivePlayback();
+  }
+
+  const parts = content.modelTurn?.parts || [];
+  for (const part of parts) {
+    if (part.inlineData?.data) {
+      queueLiveAudio(part.inlineData.data, part.inlineData.mimeType);
+    }
+    if (part.text) {
+      addLiveTranscript("Gemini", part.text);
+    }
+  }
+}
+
+async function startLiveCall() {
+  const generation = ++liveCallGeneration;
+  stopSpeaking();
+  liveCallStartButton.disabled = true;
+  liveCallEndButton.hidden = false;
+  setLiveCallStatus("Solicitando acesso ao microfone…");
+
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      throw new Error("Este navegador não oferece suporte à reprodução de áudio.");
+    }
+
+    liveAudioContext = new AudioContextClass();
+    await liveAudioContext.resume();
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("O navegador não oferece acesso ao microfone nesta conexão.");
+    }
+
+    liveCallStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+
+    if (generation !== liveCallGeneration) {
+      liveCallStream.getTracks().forEach(track => track.stop());
+      liveCallStream = null;
+      return;
+    }
+
+    setLiveCallStatus("Conectando ao Gemini Live…");
+    liveTokenRequest = new AbortController();
+    const tokenResponse = await fetch("/api/live/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Nexa-Message-Key": messageKey
+      },
+      body: "{}",
+      signal: liveTokenRequest.signal
+    });
+
+    const tokenData = await tokenResponse.json().catch(() => ({}));
+    if (!tokenResponse.ok) {
+      if (tokenResponse.status === 401) {
+        showAuth();
+      }
+      throw new Error(tokenData.error || `Erro ao preparar chamada (HTTP ${tokenResponse.status}).`);
+    }
+
+    if (generation !== liveCallGeneration) {
+      return;
+    }
+
+    const socketUrl = "wss://generativelanguage.googleapis.com/ws/" +
+      "google.ai.generativelanguage.v1beta.GenerativeService." +
+      "BidiGenerateContentConstrained?access_token=" +
+      encodeURIComponent(tokenData.token);
+    const socket = new WebSocket(socketUrl);
+    liveCallSocket = socket;
+
+    socket.onopen = () => {
+      socket.send(JSON.stringify({
+        setup: {
+          model: tokenData.model || "models/gemini-3.8-live",
+          generationConfig: { responseModalities: ["AUDIO"] },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
+          systemInstruction: {
+            parts: [{ text: tokenData.systemInstruction }]
+          }
+        }
+      }));
+    };
+
+    socket.onmessage = event => {
+      try {
+        handleLiveServerMessage(socket, JSON.parse(event.data));
+      } catch (error) {
+        console.error("Erro ao processar Gemini Live:", error);
+        if (liveCallSocket === socket) {
+          releaseLiveCall(error.message || "Erro na chamada Gemini Live.");
+        }
+      }
+    };
+
+    socket.onerror = () => {
+      setLiveCallStatus("Falha na conexão com o Gemini Live");
+    };
+
+    socket.onclose = event => {
+      if (liveCallSocket === socket) {
+        releaseLiveCall(event.reason || "Conexão encerrada");
+      }
+    };
+
+    liveCallSetupTimer = setTimeout(() => {
+      if (generation === liveCallGeneration && !liveCallReady) {
+        releaseLiveCall("Tempo esgotado ao conectar ao Gemini Live");
+      }
+    }, 20000);
+
+    setLiveCallStatus("Aguardando conexão segura…");
+  } catch (error) {
+    if (generation === liveCallGeneration) {
+      releaseLiveCall(error.name === "AbortError" ? "Chamada cancelada" : error.message);
+    }
+  } finally {
+    liveTokenRequest = null;
+  }
 }
 
 
@@ -1699,6 +2062,31 @@ ttsSpeedSlider.addEventListener(
   saveTTSSettings
 );
 
+function closeLiveCallDialog() {
+  releaseLiveCall("Chamada encerrada");
+  liveCallPanel.hidden = true;
+  liveCallButton.focus();
+}
+
+liveCallButton.addEventListener("click", function () {
+  liveCallTranscript.replaceChildren();
+  setLiveCallStatus("Pronto para iniciar");
+  liveCallPanel.hidden = false;
+  liveCallStartButton.focus();
+});
+
+liveCallStartButton.addEventListener("click", startLiveCall);
+liveCallEndButton.addEventListener("click", function () {
+  releaseLiveCall("Chamada encerrada");
+});
+liveCallCloseButton.addEventListener("click", closeLiveCallDialog);
+
+liveCallPanel.addEventListener("click", function (event) {
+  if (event.target === liveCallPanel) {
+    closeLiveCallDialog();
+  }
+});
+
 settingsPanel.addEventListener(
   "click",
   function (event) {
@@ -1712,6 +2100,11 @@ document.addEventListener(
   "keydown",
   function (event) {
     if (event.key !== "Escape") {
+      return;
+    }
+
+    if (!liveCallPanel.hidden) {
+      closeLiveCallDialog();
       return;
     }
 
@@ -1893,6 +2286,18 @@ const adminError = document.getElementById("adminError");
 let currentUser = null;
 let appStarted = false;
 let messageKey = "";
+let liveCallSocket = null;
+let liveCallStream = null;
+let liveAudioContext = null;
+let liveMicProcessor = null;
+let liveMicSource = null;
+let liveMicMute = null;
+let liveTokenRequest = null;
+let liveCallGeneration = 0;
+let liveCallReady = false;
+let livePlaybackTime = 0;
+let livePlaybackSources = new Set();
+let liveCallSetupTimer = null;
 
 function showMessage(element, message) {
   element.textContent = message || "";

@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -15,8 +16,15 @@ load_dotenv(BASE_DIR / ".env")
 from auth import auth_bp, current_user, init_auth_db, valid_message_key  # noqa: E402  (precisa do .env já carregado)
 
 API_KEY = os.environ.get("API_KEY", "").strip()
+API_GEMA = os.environ.get("API_GEMA", "").strip()
 API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip("/")
 MODEL = os.environ.get("MODEL", "nada")
+LIVE_MODEL = "models/gemini-3.8-live"
+LIVE_SYSTEM_PROMPT = (
+    "Você é NEXA, uma assistente em uma chamada de voz. "
+    "Fale naturalmente em português brasileiro, com respostas diretas, "
+    "curiosas e amigáveis. Não diga que é uma pessoa real."
+)
 TTS_MODEL = "el/eleven_flash_v2_5/SAz9YHcvj6GT2YYXdXww"
 TTS_URL = "https://9router.rcscan.online/v1/audio/speech"
 PORT = int(os.environ.get("PORT", "8000"))
@@ -632,6 +640,68 @@ def message_key_error(user):
         "error": "A credencial de mensagem expirou. Entre novamente.",
         "code": "message_key_expired",
     }), 401
+
+
+@app.post("/api/live/token")
+def create_live_token():
+    user = current_user()
+
+    if user is None:
+        return jsonify({"error": "Faça login para iniciar uma chamada."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    if not API_GEMA:
+        return jsonify({"error": "API_GEMA não configurada no arquivo .env."}), 503
+
+    now = datetime.now(timezone.utc)
+    token_config = {
+        "uses": 1,
+        "expireTime": (now + timedelta(minutes=30)).isoformat().replace("+00:00", "Z"),
+        "newSessionExpireTime": (now + timedelta(seconds=55)).isoformat().replace("+00:00", "Z"),
+        "bidiGenerateContentSetup": {
+            "model": LIVE_MODEL,
+            "generationConfig": {"responseModalities": ["AUDIO"]},
+            "systemInstruction": {"parts": [{"text": LIVE_SYSTEM_PROMPT}]},
+            "inputAudioTranscription": {},
+            "outputAudioTranscription": {},
+        },
+    }
+
+    try:
+        response = requests.post(
+            "https://generativelanguage.googleapis.com/v1alpha/authTokens",
+            headers={"x-goog-api-key": API_GEMA},
+            json={"authToken": token_config},
+            timeout=(10, 20),
+        )
+    except requests.RequestException as error:
+        print("[NEXA-LIVE] falha ao emitir token: %s" % error)
+        return jsonify({"error": "Não foi possível iniciar a chamada Gemini Live."}), 502
+
+    if response.status_code not in (200, 201):
+        print(
+            "[NEXA-LIVE] emissão de token HTTP %d: %s"
+            % (response.status_code, response.text[:500])
+        )
+        return jsonify({"error": "O Gemini não autorizou uma chamada Live."}), 502
+
+    try:
+        token_name = response.json().get("name", "")
+    except ValueError:
+        token_name = ""
+
+    if not token_name:
+        print("[NEXA-LIVE] resposta de token sem campo name.")
+        return jsonify({"error": "O Gemini retornou uma credencial inválida."}), 502
+
+    return jsonify({
+        "token": token_name,
+        "model": LIVE_MODEL,
+        "systemInstruction": LIVE_SYSTEM_PROMPT,
+    })
 
 
 @app.post("/api/chat/title")
