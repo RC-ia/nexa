@@ -1,3 +1,4 @@
+from auth import auth_bp, current_user, init_auth_db, valid_message_key
 import json
 import os
 import sqlite3
@@ -621,12 +622,27 @@ def static_file(filename):
     return send_from_directory(BASE_DIR, filename)
 
 
+def message_key_error(user):
+    message_key = request.headers.get("X-Nexa-Message-Key", "")
+    if valid_message_key(user["id"], message_key):
+        return None
+
+    return jsonify({
+        "error": "A credencial de mensagem expirou. Entre novamente.",
+        "code": "message_key_expired",
+    }), 401
+
+
 @app.post("/api/chat/title")
 def chat_title():
     user = current_user()
 
     if user is None:
         return jsonify({"error": "Faça login para conversar com a NEXA."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
 
     if not API_KEY:
         return jsonify({"error": "API_KEY não configurada no arquivo .env."}), 500
@@ -641,13 +657,11 @@ def chat_title():
         return jsonify({"error": "Mensagem não fornecida."}), 400
 
     title = generate_chat_title(message)
-    
     if title:
         return jsonify({"title": title})
-    else:
-        # Fallback: truncar a mensagem
-        fallback = message[:42] + ("…" if len(message) > 42 else "")
-        return jsonify({"title": fallback})
+
+    fallback = message[:42] + ("…" if len(message) > 42 else "")
+    return jsonify({"title": fallback})
 
 
 @app.post("/api/chat")
@@ -656,6 +670,10 @@ def chat():
 
     if user is None:
         return jsonify({"error": "Faça login para conversar com a NEXA."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
 
     if not API_KEY:
         return jsonify({"error": "API_KEY não configurada no arquivo .env."}), 500

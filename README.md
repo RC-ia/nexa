@@ -52,6 +52,10 @@ Como funciona:
 - A sessão é um cookie `HttpOnly` (`SameSite=Lax`, `Secure` quando o acesso é
   por HTTPS, como no túnel do Cloudflare) e dura `SESSION_DAYS` (padrão 30).
   Trocar a senha ou apagar um usuário derruba as sessões dele.
+- No login, o servidor emite uma credencial aleatória de 64 caracteres,
+  válida por 24 horas. O navegador a envia automaticamente nas mensagens;
+  ao expirar, é necessário entrar novamente com a senha da conta. O servidor
+  confere o horário apenas quando recebe uma requisição protegida.
 - A memória de longo prazo é ligada à conta. As conversas do `localStorage`
   ficam separadas por usuário; as de antes do login vão para a primeira conta
   que entrar naquele navegador.

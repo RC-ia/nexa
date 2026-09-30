@@ -21,6 +21,7 @@ const settingsClose = document.getElementById("settingsClose");
 const speechToggle = document.getElementById("speechToggle");
 
 const MEMORY_KEY = "nexa_conversation";
+const MESSAGE_KEY_STORAGE_PREFIX = "nexa_message_key:";
 let CHATS_KEY = "nexa_chats";
 let ACTIVE_CHAT_KEY = "nexa_active_chat";
 const REASONING_KEY = "nexa_reasoning";
@@ -917,7 +918,8 @@ async function askNexa(text) {
 
       headers: {
         "Content-Type":
-          "application/json"
+          "application/json",
+        "X-Nexa-Message-Key": messageKey
       },
 
       body: JSON.stringify({
@@ -1452,7 +1454,8 @@ async function generateChatTitle(message) {
     const response = await fetch("/api/chat/title", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "X-Nexa-Message-Key": messageKey
       },
       body: JSON.stringify({ message })
     });
@@ -1834,6 +1837,7 @@ const adminError = document.getElementById("adminError");
 
 let currentUser = null;
 let appStarted = false;
+let messageKey = "";
 
 function showMessage(element, message) {
   element.textContent = message || "";
@@ -1871,8 +1875,23 @@ async function api(method, path, payload) {
   return data;
 }
 
-function enterApp(user) {
+function enterApp(user, issuedMessageKey) {
   currentUser = user;
+
+  const messageKeyStorageKey =
+    MESSAGE_KEY_STORAGE_PREFIX + user.username;
+
+  if (typeof issuedMessageKey === "string" && issuedMessageKey.length === 64) {
+    messageKey = issuedMessageKey;
+    localStorage.setItem(messageKeyStorageKey, messageKey);
+  } else {
+    messageKey = localStorage.getItem(messageKeyStorageKey) || "";
+  }
+
+  if (!messageKey) {
+    showAuth();
+    return;
+  }
 
   const suffix = ":" + user.username;
   const legacyChats = localStorage.getItem("nexa_chats");
@@ -1927,7 +1946,7 @@ loginForm.addEventListener("submit", async function (event) {
     });
 
     loginForm.reset();
-    enterApp(data.user);
+    enterApp(data.user, data.messageKey);
 
   } catch (error) {
     showMessage(authError, error.message);
@@ -1943,6 +1962,13 @@ drawerLogout.addEventListener("click", async function () {
   } catch {
     // Sem rede: recarregar já cai no login se o cookie expirar.
   }
+
+  if (currentUser) {
+    localStorage.removeItem(
+      MESSAGE_KEY_STORAGE_PREFIX + currentUser.username
+    );
+  }
+  messageKey = "";
 
   location.reload();
 });

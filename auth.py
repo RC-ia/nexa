@@ -25,6 +25,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 AUTH_DB = BASE_DIR / os.environ.get("AUTH_DB", "auth.db")
 SESSION_TTL = int(os.environ.get("SESSION_DAYS", "30")) * 86400
+MESSAGE_KEY_TTL = 24 * 60 * 60
 
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin").strip().lower() or "admin"
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
@@ -82,8 +83,20 @@ def init_auth_db():
             "CREATE TABLE IF NOT EXISTS sessions ("
             "token_hash TEXT PRIMARY KEY, "
             "user_id INTEGER NOT NULL, "
-            "expires_at INTEGER NOT NULL)"
+            "expires_at INTEGER NOT NULL, "
+            "message_key_hash TEXT, "
+            "message_key_created_at INTEGER)"
         )
+
+        session_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(sessions)")
+        }
+        if "message_key_hash" not in session_columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN message_key_hash TEXT")
+        if "message_key_created_at" not in session_columns:
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN message_key_created_at INTEGER"
+            )
 
         has_admin = conn.execute(
             "SELECT 1 FROM users WHERE is_admin = 1"
@@ -195,12 +208,20 @@ def is_https():
     return request.is_secure or request.headers.get("X-Forwarded-Proto", "") == "https"
 
 
-def start_session(conn, user_id, response):
+def start_session(conn, user_id, response, message_key):
     token = secrets.token_urlsafe(32)
+    created_at = int(time.time())
 
     conn.execute(
-        "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
-        (hash_token(token), user_id, int(time.time()) + SESSION_TTL),
+        "INSERT INTO sessions (token_hash, user_id, expires_at, "
+        "message_key_hash, message_key_created_at) VALUES (?, ?, ?, ?, ?)",
+        (
+            hash_token(token),
+            user_id,
+            created_at + SESSION_TTL,
+            hash_token(message_key),
+            created_at,
+        ),
     )
 
     response.set_cookie(
@@ -236,6 +257,37 @@ def current_user():
         return None
 
     return dict(row) if row else None
+
+
+def valid_message_key(user_id, message_key):
+    if not isinstance(message_key, str) or len(message_key) != 64:
+        return False
+
+    session_token = request.cookies.get(COOKIE_NAME, "")
+    if not session_token:
+        return False
+
+    now = int(time.time())
+
+    try:
+        with db() as conn:
+            row = conn.execute(
+                "SELECT message_key_hash, message_key_created_at FROM sessions "
+                "WHERE token_hash = ? AND user_id = ? AND expires_at > ?",
+                (hash_token(session_token), user_id, now),
+            ).fetchone()
+    except sqlite3.Error as err:
+        print("[NEXA-auth] falha ao validar credencial de mensagem:", err)
+        return False
+
+    if not row or not row["message_key_hash"] or row["message_key_created_at"] is None:
+        return False
+
+    created_at = row["message_key_created_at"]
+    return (
+        created_at <= now < created_at + MESSAGE_KEY_TTL
+        and secrets.compare_digest(row["message_key_hash"], hash_token(message_key))
+    )
 
 
 def admin_required(view):
@@ -298,7 +350,12 @@ def login():
             if not user or not valid:
                 return error(failed, 401)
 
-            return start_session(conn, user["id"], jsonify({"user": user_json(user)}))
+            message_key = secrets.token_hex(32)
+            response = jsonify({
+                "user": user_json(user),
+                "messageKey": message_key,
+            })
+            return start_session(conn, user["id"], response, message_key)
 
     except sqlite3.Error as err:
         print("[NEXA-auth] erro no banco:", err)
