@@ -144,15 +144,14 @@ em tempo real. O navegador precisa permitir acesso ao microfone; fora de
 ## Memória
 
 A memória de longo prazo é um **único arquivo Markdown por conta**, dentro de
-`memoria/`. Não há pedaços acumulando: a cada conversa relevante, o modelo
-recebe o documento inteiro e devolve o documento **já consolidado**, que
-sobrescreve o arquivo anterior. Assim o modelo sempre lê o contexto completo,
-não fragmentos soltos.
+`memoria/`. Ela entra no **system prompt** e quem salva é o **próprio modelo,
+durante a conversa**, pela ferramenta `salvar_memoria` — não existe mais uma
+passada separada de extração depois da resposta.
 
-O prompt pede explicitamente que sistemas com vários arquivos, números ou etapas
-sejam guardados como uma ideia única (por exemplo, "o usuário está criando um
-sistema X"), removendo o que ficou obsoleto. O arquivo é limitado a 10.000
-caracteres e pode ser editado à mão em **Configurações > Memória**.
+Quando o modelo chama a ferramenta, o servidor grava o documento, responde à
+chamada com o resultado e pede a continuação da resposta, que já sai com a
+memória atualizada no system prompt. O arquivo é limitado a 10.000 caracteres
+e pode ser editado à mão em **Configurações > Memória**.
 
 Apagar a pasta `memoria/` remove a memória persistente (as conversas do
 navegador continuam no `localStorage`).
