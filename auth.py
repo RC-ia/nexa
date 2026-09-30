@@ -50,8 +50,26 @@ def db():
     return conn
 
 
+def migrate_old_schema(conn):
+    """Banco da versão anterior (login por email): mantém as contas existentes."""
+    columns = [row["name"] for row in conn.execute("PRAGMA table_info(users)")]
+
+    if not columns:
+        return
+
+    if "username" not in columns and "email" in columns:
+        conn.execute("ALTER TABLE users RENAME COLUMN email TO username")
+
+    if "is_admin" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+
+    conn.execute("DROP TABLE IF EXISTS pending_signups")
+
+
 def init_auth_db():
     with db() as conn:
+        migrate_old_schema(conn)
+
         conn.execute(
             "CREATE TABLE IF NOT EXISTS users ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
