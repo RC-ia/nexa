@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#07050b">
+  <title>Chamada Gemini Live | NEXA</title>
+  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="live.css?v=1">
+</head>
+<body class="live-body">
+  <main class="live-page">
+    <header class="live-topbar">
+      <a class="live-back" href="/" aria-label="Voltar para a conversa">
+        <span aria-hidden="true">‹</span>
+        <strong>NEXA</strong>
+      </a>
+      <span class="live-model-label">GEMINI LIVE</span>
+    </header>
+
+    <section class="live-main" aria-labelledby="liveTitle">
+      <div class="live-visual" id="liveVisual" data-state="idle" aria-hidden="true">
+        <div class="live-orbit live-orbit-one"></div>
+        <div class="live-orbit live-orbit-two"></div>
+        <div class="live-orbit live-orbit-three"></div>
+        <div class="live-core"></div>
+      </div>
+
+      <div class="live-heading">
+        <h1 id="liveTitle">Chamada de voz</h1>
+        <p id="liveStatus" role="status" aria-live="polite">Verificando sessão…</p>
+      </div>
+
+      <div class="live-transcript" id="liveTranscript" role="log" aria-live="polite" aria-relevant="additions"></div>
+
+      <div class="live-controls">
+        <button type="button" id="liveStart" class="live-start" disabled>
+          <span aria-hidden="true">☎</span>
+          Iniciar chamada
+        </button>
+        <button type="button" id="liveEnd" class="live-end" hidden>
+          <span aria-hidden="true">■</span>
+          Encerrar chamada
+        </button>
+      </div>
+    </section>
+  </main>
+  <script src="live.js?v=1"></script>
+</body>
+</html>

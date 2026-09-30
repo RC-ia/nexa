@@ -129,8 +129,8 @@ fica somente no servidor.
 
 ## Chamadas Gemini Live
 
-O botão de telefone no composer inicia uma chamada separada com o modelo
-`gemini-3.8-live`. Configure `API_GEMA` com uma chave da Gemini API no `.env`.
+O botão de telefone no composer abre a página própria `/live.html`, que inicia
+uma chamada com o modelo `gemini-3.8-live`. Configure `API_GEMA` com uma chave da Gemini API no `.env`.
 O servidor emite um token efêmero de uso único; a chave permanente não é enviada
 ao navegador. O modo de chamada usa microfone e áudio em tempo real e não altera
 a geração de texto nem a síntese ElevenLabs. O navegador precisa permitir acesso

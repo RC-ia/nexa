@@ -49,7 +49,10 @@ REASONING_VALUES = [
     for value in os.environ.get("REASONING_VALUES", ",low,medium,high,xhigh").split(",")
 ]
 
-STATIC_FILES = {"index.html", "style.css", "script.js"}
+STATIC_FILES = {
+    "index.html", "style.css", "script.js",
+    "live.html", "live.css", "live.js",
+}
 
 SYSTEM_PROMPT = "\n".join([
     "Você é NEXA.",

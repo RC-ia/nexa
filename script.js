@@ -2430,10 +2430,7 @@ function closeLiveCallDialog() {
 }
 
 liveCallButton.addEventListener("click", function () {
-  liveCallTranscript.replaceChildren();
-  setLiveCallStatus("Pronto para iniciar");
-  liveCallPanel.hidden = false;
-  liveCallStartButton.focus();
+  window.location.assign("/live.html");
 });
 
 liveCallStartButton.addEventListener("click", startLiveCall);
