@@ -395,7 +395,11 @@ def parse_data_line(raw):
 
 
 def make_stream_response(lines, user_id, user_message):
-    first_texts = []
+    # Num modelo com pensamento, o raciocínio chega antes do texto. A sondagem
+    # precisa guardar esses pedacos, senao o stream comeca a responder no meio
+    # da resposta e todo o raciocinio some.
+    reasoning_chunks = []
+    first_text = None
 
     try:
         for raw in lines:
@@ -404,10 +408,15 @@ def make_stream_response(lines, user_id, user_message):
             if not data:
                 continue
 
+            thinking = extract_reasoning(data)
+
+            if thinking:
+                reasoning_chunks.append(thinking)
+
             text = extract_text(data)
 
             if text:
-                first_texts.append(text)
+                first_text = text
                 break
 
     except requests.RequestException as error:
@@ -417,16 +426,19 @@ def make_stream_response(lines, user_id, user_message):
         )
         return None
 
-    if not first_texts:
+    if first_text is None:
         return None
 
     def generate():
-        full_text = "".join(first_texts)
+        full_text = ""
         reason = None
 
         try:
-            for text in first_texts:
-                yield sse({"type": "text", "text": text})
+            for thinking in reasoning_chunks:
+                yield sse({"type": "reasoning", "text": thinking})
+
+            full_text = first_text
+            yield sse({"type": "text", "text": first_text})
 
             for raw in lines:
                 data = parse_data_line(raw)
