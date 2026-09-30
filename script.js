@@ -35,6 +35,8 @@ const settingsViews = {
   more: document.getElementById("settingsMore")
 };
 const speechToggle = document.getElementById("speechToggle");
+const ttsEngineSelect = document.getElementById("ttsEngine");
+const ttsVoiceSelect = document.getElementById("ttsVoice");
 const ttsSpeedSlider = document.getElementById("ttsSpeed");
 const ttsSpeedValue = document.getElementById("ttsSpeedValue");
 const memoryToggle = document.getElementById("memoryToggle");
@@ -55,6 +57,8 @@ let CHATS_KEY = "nexa_chats";
 let ACTIVE_CHAT_KEY = "nexa_active_chat";
 const REASONING_KEY = "nexa_reasoning";
 const SPEECH_KEY = "nexa_speech_enabled";
+const TTS_ENGINE_KEY = "nexa_tts_engine";
+const LIVE_VOICE_KEY = "nexa_live_voice";
 const TTS_SPEED_KEY = "nexa_tts_speed";
 const MEMORY_ENABLED_KEY = "nexa_memory_enabled:";
 const INSTRUCTIONS_KEY = "nexa_custom_instructions:";
@@ -86,11 +90,287 @@ const history = [];
 */
 
 let speechEnabled = true;
+let ttsEngine = "gemini-live";
+let liveVoice = "Kore";
 let ttsSpeed = 1;
 let activeAudio = null;
 let activeAudioRequest = null;
+let activeGeminiSpeech = null;
+let preparedSpeechContext = null;
+
+function prepareGeminiSpeechContext() {
+  if (!speechEnabled || ttsEngine !== "gemini-live") {
+    return;
+  }
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    return;
+  }
+
+  if (!preparedSpeechContext || preparedSpeechContext.state === "closed") {
+    preparedSpeechContext = new AudioContextClass();
+  }
+
+  preparedSpeechContext.resume().catch(error => {
+    console.error("Não foi possível preparar o áudio Gemini:", error);
+  });
+}
+
+function stopGeminiSpeech() {
+  const session = activeGeminiSpeech;
+  if (!session) {
+    return;
+  }
+
+  activeGeminiSpeech = null;
+  session.cancelled = true;
+  clearTimeout(session.timeout);
+  if (session.controller) {
+    session.controller.abort();
+  }
+  if (session.socket && session.socket.readyState < WebSocket.CLOSING) {
+    session.socket.close(1000, "Speech stopped");
+  }
+  session.sources.forEach(source => {
+    try {
+      source.stop();
+    } catch {
+      // O bloco pode já ter terminado.
+    }
+  });
+  session.sources.clear();
+  if (session.context && session.context.state !== "closed") {
+    session.context.close();
+  }
+}
+
+function queueGeminiSpeech(session, base64Data, mimeType) {
+  if (!session.context || !base64Data || session.cancelled) {
+    return;
+  }
+
+  const binary = atob(base64Data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  const sampleCount = Math.floor(bytes.byteLength / 2);
+  if (!sampleCount) {
+    return;
+  }
+
+  const rateMatch = /rate=(\d+)/i.exec(mimeType || "");
+  const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const buffer = session.context.createBuffer(1, sampleCount, sampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let index = 0; index < sampleCount; index += 1) {
+    channel[index] = view.getInt16(index * 2, true) / 32768;
+  }
+
+  const source = session.context.createBufferSource();
+  source.buffer = buffer;
+  source.playbackRate.value = ttsSpeed;
+  source.connect(session.context.destination);
+  source.onended = () => {
+    session.sources.delete(source);
+    if (session.turnComplete && session.sources.size === 0) {
+      session.finish();
+    }
+  };
+
+  const startAt = Math.max(session.context.currentTime + 0.02, session.playbackTime);
+  source.start(startAt);
+  session.playbackTime = startAt + buffer.duration / ttsSpeed;
+  session.sources.add(source);
+}
+
+async function speakNexaWithGemini(text) {
+  stopGeminiSpeech();
+
+  const session = {
+    cancelled: false,
+    completed: false,
+    turnComplete: false,
+    controller: new AbortController(),
+    socket: null,
+    context: null,
+    sources: new Set(),
+    playbackTime: 0,
+    timeout: null,
+    finish: null
+  };
+  activeGeminiSpeech = session;
+
+  let resolveSession;
+  let rejectSession;
+  const completion = new Promise((resolve, reject) => {
+    resolveSession = resolve;
+    rejectSession = reject;
+  });
+  session.finish = error => {
+    if (session.completed) {
+      return;
+    }
+    session.completed = true;
+    clearTimeout(session.timeout);
+    if (error) {
+      rejectSession(error);
+    } else {
+      resolveSession();
+    }
+  };
+
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      throw new Error("Este navegador não oferece suporte à síntese Gemini.");
+    }
+    session.context = preparedSpeechContext || new AudioContextClass();
+    preparedSpeechContext = null;
+    await session.context.resume();
+
+    const response = await fetch("/api/live/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Nexa-Message-Key": messageKey
+      },
+      body: JSON.stringify({ voice: liveVoice }),
+      signal: session.controller.signal
+    });
+    const tokenData = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (response.status === 401) {
+        showAuth();
+      }
+      throw new Error(tokenData.error || `Falha ao gerar voz (HTTP ${response.status}).`);
+    }
+
+    const socketUrl = "wss://generativelanguage.googleapis.com/ws/" +
+      "google.ai.generativelanguage.v1beta.GenerativeService." +
+      "BidiGenerateContentConstrained?access_token=" +
+      encodeURIComponent(tokenData.token);
+    const socket = new WebSocket(socketUrl);
+    socket.binaryType = "arraybuffer";
+    session.socket = socket;
+
+    socket.onopen = () => {
+      socket.send(JSON.stringify({
+        setup: {
+          model: tokenData.model || "models/gemini-3.8-live",
+          generationConfig: { responseModalities: ["AUDIO"] },
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: tokenData.voice || liveVoice }
+            }
+          },
+          systemInstruction: {
+            parts: [{ text: tokenData.systemInstruction }]
+          }
+        }
+      }));
+    };
+
+    socket.onmessage = async event => {
+      try {
+        let payload = event.data;
+        if (typeof Blob !== "undefined" && payload instanceof Blob) {
+          payload = await payload.text();
+        } else if (payload instanceof ArrayBuffer) {
+          payload = new TextDecoder().decode(payload);
+        }
+        if (socket !== session.socket || typeof payload !== "string") {
+          return;
+        }
+
+        const message = JSON.parse(payload);
+        if (message.setupComplete) {
+          socket.send(JSON.stringify({
+            clientContent: {
+              turns: [{ role: "user", parts: [{ text }] }],
+              turnComplete: true
+            }
+          }));
+          return;
+        }
+
+        if (message.error) {
+          throw new Error(message.error.message || "Falha na síntese Gemini.");
+        }
+
+        const content = message.serverContent;
+        if (!content) {
+          return;
+        }
+
+        for (const part of content.modelTurn?.parts || []) {
+          if (part.inlineData?.data) {
+            queueGeminiSpeech(session, part.inlineData.data, part.inlineData.mimeType);
+          }
+        }
+
+        if (content.interrupted) {
+          session.finish(new Error("A síntese de voz foi interrompida."));
+        } else if (content.turnComplete) {
+          session.turnComplete = true;
+          if (session.sources.size === 0) {
+            session.finish();
+          }
+        }
+      } catch (error) {
+        session.finish(error);
+      }
+    };
+
+    socket.onerror = () => session.finish(new Error("Falha na conexão de voz Gemini."));
+    socket.onclose = () => {
+      if (!session.completed) {
+        session.finish(new Error("A conexão de voz Gemini foi encerrada."));
+      }
+    };
+    session.timeout = setTimeout(
+      () => session.finish(new Error("A síntese Gemini demorou demais.")),
+      30000
+    );
+
+    await completion;
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      console.error("Erro na voz Gemini:", error);
+    }
+  } finally {
+    clearTimeout(session.timeout);
+    if (session.socket && session.socket.readyState < WebSocket.CLOSING) {
+      session.socket.close(1000, "Speech finished");
+    }
+    session.sources.forEach(source => {
+      try {
+        source.stop();
+      } catch {
+        // O áudio pode já ter terminado.
+      }
+    });
+    session.sources.clear();
+    if (session.context && session.context.state !== "closed") {
+      session.context.close();
+    }
+    if (activeGeminiSpeech === session) {
+      activeGeminiSpeech = null;
+    }
+  }
+}
 
 function stopSpeaking() {
+  stopGeminiSpeech();
+  if (preparedSpeechContext) {
+    if (preparedSpeechContext.state !== "closed") {
+      preparedSpeechContext.close();
+    }
+    preparedSpeechContext = null;
+  }
   if (activeAudioRequest) {
     activeAudioRequest.abort();
     activeAudioRequest = null;
@@ -121,6 +401,11 @@ async function speakNexa(text) {
     .trim();
 
   if (!cleanText) {
+    return;
+  }
+
+  if (ttsEngine === "gemini-live") {
+    await speakNexaWithGemini(cleanText);
     return;
   }
 
@@ -194,6 +479,15 @@ function loadSpeechSetting() {
   }
 
   try {
+    const savedEngine = localStorage.getItem(TTS_ENGINE_KEY);
+    ttsEngine = savedEngine === "elevenlabs" ? "elevenlabs" : "gemini-live";
+
+    const savedVoice = localStorage.getItem(LIVE_VOICE_KEY);
+    const voiceExists = Array.from(ttsVoiceSelect.options).some(
+      option => option.value === savedVoice
+    );
+    liveVoice = voiceExists ? savedVoice : "Kore";
+
     const savedSpeed = Number(localStorage.getItem(TTS_SPEED_KEY));
     ttsSpeed = Number.isFinite(savedSpeed) && savedSpeed >= 0.8 && savedSpeed <= 1.25
       ? savedSpeed
@@ -203,7 +497,11 @@ function loadSpeechSetting() {
   }
 
   speechToggle.checked = speechEnabled;
+  ttsEngineSelect.value = ttsEngine;
+  ttsVoiceSelect.value = liveVoice;
   ttsSpeedSlider.value = String(ttsSpeed);
+  ttsEngineSelect.disabled = !speechEnabled;
+  ttsVoiceSelect.disabled = !speechEnabled || ttsEngine !== "gemini-live";
   ttsSpeedSlider.disabled = !speechEnabled;
   ttsSpeedValue.value = `${ttsSpeed.toFixed(1).replace(".", ",")}x`;
 }
@@ -218,6 +516,8 @@ function saveSpeechSetting() {
   }
 
   ttsSpeedSlider.disabled = !speechEnabled;
+  ttsEngineSelect.disabled = !speechEnabled;
+  ttsVoiceSelect.disabled = !speechEnabled || ttsEngine !== "gemini-live";
 
   if (!speechEnabled) {
     stopSpeaking();
@@ -225,14 +525,19 @@ function saveSpeechSetting() {
 }
 
 function saveTTSSettings() {
+  ttsEngine = ttsEngineSelect.value;
+  liveVoice = ttsVoiceSelect.value;
   ttsSpeed = Number(ttsSpeedSlider.value);
 
   try {
+    localStorage.setItem(TTS_ENGINE_KEY, ttsEngine);
+    localStorage.setItem(LIVE_VOICE_KEY, liveVoice);
     localStorage.setItem(TTS_SPEED_KEY, String(ttsSpeed));
   } catch (error) {
     console.error("Erro ao salvar configuração de voz:", error);
   }
 
+  ttsVoiceSelect.disabled = !speechEnabled || ttsEngine !== "gemini-live";
   ttsSpeedValue.value = `${ttsSpeed.toFixed(1).replace(".", ",")}x`;
 }
 
@@ -2157,6 +2462,7 @@ composer.addEventListener(
     */
 
     stopSpeaking();
+    prepareGeminiSpeechContext();
 
     /*
       Verifica se é a primeira mensagem do chat (histórico vazio antes de adicionar)
@@ -2302,6 +2608,9 @@ speechToggle.addEventListener(
   "change",
   saveSpeechSetting
 );
+
+ttsEngineSelect.addEventListener("change", saveTTSSettings);
+ttsVoiceSelect.addEventListener("change", saveTTSSettings);
 
 ttsSpeedSlider.addEventListener(
   "input",

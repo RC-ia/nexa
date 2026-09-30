@@ -876,6 +876,25 @@ body {
   font-weight: 600;
 }
 
+.settings-field select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+
+  border: 1px solid var(--line);
+  border-radius: 8px;
+
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-weight: 400;
+}
+
+.settings-field select:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
 .settings-field input:not([type="range"]),
 .settings-field textarea {
   width: 100%;

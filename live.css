@@ -151,35 +151,6 @@
   font-size: 14px;
 }
 
-.live-transcript {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 100%;
-  max-height: min(25vh, 210px);
-  min-height: 54px;
-  overflow-y: auto;
-  padding: 4px 8px;
-}
-
-.live-line {
-  color: var(--text);
-  font-size: 14px;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
-
-.live-line strong {
-  margin-right: 7px;
-  color: var(--live-cyan);
-  font-size: 11px;
-  text-transform: uppercase;
-}
-
-.live-line.is-model strong {
-  color: var(--live-coral);
-}
-
 .live-controls {
   display: flex;
   justify-content: center;

@@ -2,7 +2,6 @@ const startButton = document.getElementById("liveStart");
 const endButton = document.getElementById("liveEnd");
 const statusLabel = document.getElementById("liveStatus");
 const visual = document.getElementById("liveVisual");
-const transcript = document.getElementById("liveTranscript");
 
 let accountMessageKey = "";
 let socket = null;
@@ -21,25 +20,6 @@ const playbackSources = new Set();
 function setStatus(message, state) {
   statusLabel.textContent = message;
   visual.dataset.state = state || "idle";
-}
-
-function addTranscript(speaker, text) {
-  if (!text || !text.trim()) {
-    return;
-  }
-
-  const line = document.createElement("div");
-  line.className = "live-line" + (speaker === "Gemini" ? " is-model" : "");
-
-  const label = document.createElement("strong");
-  label.textContent = speaker;
-
-  const content = document.createElement("span");
-  content.textContent = text.trim();
-
-  line.append(label, content);
-  transcript.appendChild(line);
-  transcript.scrollTop = transcript.scrollHeight;
 }
 
 function pcm16FromFloat(input, sampleRate) {
@@ -227,12 +207,6 @@ function handleServerMessage(activeSocket, message) {
     return;
   }
 
-  if (content.inputTranscription?.text) {
-    addTranscript("Você", content.inputTranscription.text);
-  }
-  if (content.outputTranscription?.text) {
-    addTranscript("Gemini", content.outputTranscription.text);
-  }
   if (content.interrupted) {
     stopPlayback();
     setStatus("Conectado · pode falar", "listening");
@@ -242,9 +216,6 @@ function handleServerMessage(activeSocket, message) {
     if (part.inlineData?.data) {
       queueAudio(part.inlineData.data, part.inlineData.mimeType);
       setStatus("Gemini está falando…", "speaking");
-    }
-    if (part.text) {
-      addTranscript("Gemini", part.text);
     }
   }
   if (content.turnComplete) {
@@ -292,7 +263,9 @@ async function startCall() {
         "Content-Type": "application/json",
         "X-Nexa-Message-Key": accountMessageKey
       },
-      body: "{}",
+      body: JSON.stringify({
+        voice: localStorage.getItem("nexa_live_voice") || "Kore"
+      }),
       signal: tokenRequest.signal
     });
     const tokenData = await tokenResponse.json().catch(() => ({}));
@@ -322,8 +295,11 @@ async function startCall() {
         setup: {
           model: tokenData.model || "models/gemini-3.8-live",
           generationConfig: { responseModalities: ["AUDIO"] },
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: tokenData.voice || "Kore" }
+            }
+          },
           systemInstruction: { parts: [{ text: tokenData.systemInstruction }] }
         }
       }));

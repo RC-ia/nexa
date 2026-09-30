@@ -20,6 +20,13 @@ API_GEMA = os.environ.get("API_GEMA", "").strip()
 API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip("/")
 MODEL = os.environ.get("MODEL", "nada")
 LIVE_MODEL = "models/gemini-3.8-live"
+LIVE_VOICES = {
+    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
+    "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
+    "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+    "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
+    "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+}
 LIVE_SYSTEM_PROMPT = (
     "Você é NEXA, uma assistente em uma chamada de voz. "
     "Fale naturalmente em português brasileiro, com respostas diretas, "
@@ -673,6 +680,11 @@ def create_live_token():
     if not API_GEMA:
         return jsonify({"error": "API_GEMA não configurada no arquivo .env."}), 503
 
+    body = request.get_json(force=True, silent=True) or {}
+    voice = body.get("voice", "Kore")
+    if voice not in LIVE_VOICES:
+        return jsonify({"error": "Voz Gemini inválida."}), 400
+
     now = datetime.now(timezone.utc)
     token_config = {
         "uses": 1,
@@ -681,9 +693,12 @@ def create_live_token():
         "bidiGenerateContentSetup": {
             "model": LIVE_MODEL,
             "generationConfig": {"responseModalities": ["AUDIO"]},
+            "speechConfig": {
+                "voiceConfig": {
+                    "prebuiltVoiceConfig": {"voiceName": voice}
+                }
+            },
             "systemInstruction": {"parts": [{"text": LIVE_SYSTEM_PROMPT}]},
-            "inputAudioTranscription": {},
-            "outputAudioTranscription": {},
         },
     }
 
@@ -731,6 +746,7 @@ def create_live_token():
     return jsonify({
         "token": token_name,
         "model": LIVE_MODEL,
+        "voice": voice,
         "systemInstruction": LIVE_SYSTEM_PROMPT,
     })
 

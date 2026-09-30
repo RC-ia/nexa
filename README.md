@@ -122,19 +122,19 @@ que aponta para o servidor local.
 
 ## Voz da NEXA
 
-A voz usa `POST https://9router.rcscan.online/v1/audio/speech` com o modelo
-`el/eleven_flash_v2_5/SAz9YHcvj6GT2YYXdXww`. **Configurações** permite
-ligar/desligar a voz e ajustar a velocidade de reprodução. A chave do provedor
-fica somente no servidor.
+Em **Configurações > Voz**, escolha o mecanismo, a voz Gemini e a velocidade.
+As respostas de texto usam Gemini 3.8 Live por padrão, em uma sessão curta de
+áudio; a opção ElevenLabs via 9Router mantém o endpoint e modelo já existentes.
+A voz Gemini usa `API_GEMA`, e a chave permanece no servidor.
 
 ## Chamadas Gemini Live
 
 O botão de telefone no composer abre a página própria `/live.html`, que inicia
-uma chamada com o modelo `gemini-3.8-live`. Configure `API_GEMA` com uma chave da Gemini API no `.env`.
-O servidor emite um token efêmero de uso único; a chave permanente não é enviada
-ao navegador. O modo de chamada usa microfone e áudio em tempo real e não altera
-a geração de texto nem a síntese ElevenLabs. O navegador precisa permitir acesso
-ao microfone; fora de `localhost`, o site deve estar em HTTPS.
+uma chamada com o modelo `gemini-3.8-live`. Configure `API_GEMA` com uma chave da
+Gemini API no `.env`. O servidor emite um token efêmero de uso único; a chave
+permanente não é enviada ao navegador. O modo de chamada usa microfone e áudio
+em tempo real. O navegador precisa permitir acesso ao microfone; fora de
+`localhost`, o site deve estar em HTTPS.
 
 ## Memória
 

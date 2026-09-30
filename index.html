@@ -410,6 +410,26 @@
 
         <section id="settingsVoice" class="settings-view" hidden>
           <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
+          <label class="settings-field" for="ttsEngine">
+            <span>Voz das respostas de texto</span>
+            <select id="ttsEngine">
+              <option value="gemini-live">Gemini 3.8 Live</option>
+              <option value="elevenlabs">ElevenLabs via 9Router</option>
+            </select>
+          </label>
+          <label class="settings-field" for="ttsVoice">
+            <span>Voz Gemini</span>
+            <select id="ttsVoice">
+              <option value="Kore">Kore</option>
+              <option value="Puck">Puck</option>
+              <option value="Aoede">Aoede</option>
+              <option value="Zephyr">Zephyr</option>
+              <option value="Charon">Charon</option>
+              <option value="Fenrir">Fenrir</option>
+              <option value="Leda">Leda</option>
+              <option value="Orus">Orus</option>
+            </select>
+          </label>
           <label class="settings-option" for="speechToggle">
             <span class="settings-option-copy">
               <span class="settings-option-title">Resposta por voz</span>
@@ -486,6 +506,26 @@
           </div>
         </section>
       </div>
+          <label class="settings-field" for="ttsEngine">
+            <span>Motor de voz para respostas</span>
+            <select id="ttsEngine">
+              <option value="gemini-live">Gemini 3.8 Live</option>
+              <option value="elevenlabs">ElevenLabs via 9Router</option>
+            </select>
+          </label>
+          <label class="settings-field" for="ttsVoice">
+            <span>Voz Gemini</span>
+            <select id="ttsVoice">
+              <option value="Kore">Kore</option>
+              <option value="Puck">Puck</option>
+              <option value="Aoede">Aoede</option>
+              <option value="Zephyr">Zephyr</option>
+              <option value="Charon">Charon</option>
+              <option value="Fenrir">Fenrir</option>
+              <option value="Leda">Leda</option>
+              <option value="Orus">Orus</option>
+            </select>
+          </label>
 
     </div>
 
@@ -605,7 +645,7 @@
 
   </div>
 
-  <script src="script.js?v=19"></script>
+  <script src="script.js?v=21"></script>
 
 </body>
 
