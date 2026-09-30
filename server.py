@@ -686,9 +686,9 @@ def create_live_token():
 
     try:
         response = requests.post(
-            "https://generativelanguage.googleapis.com/v1alpha/authTokens",
+            "https://generativelanguage.googleapis.com/v1alpha/auth_tokens",
             headers={"x-goog-api-key": API_GEMA},
-            json={"authToken": token_config},
+            json=token_config,
             timeout=(10, 20),
         )
     except requests.RequestException as error:
@@ -700,7 +700,21 @@ def create_live_token():
             "[NEXA-LIVE] emissão de token HTTP %d: %s"
             % (response.status_code, response.text[:500])
         )
-        return jsonify({"error": "O Gemini não autorizou uma chamada Live."}), 502
+        try:
+            error_data = response.json().get("error", {})
+            detail = error_data.get("message", "")
+        except (ValueError, AttributeError):
+            detail = ""
+
+        if not detail:
+            detail = "Resposta não JSON (%s)." % response.headers.get(
+                "Content-Type", "tipo desconhecido"
+            )
+
+        return jsonify({
+            "error": "Gemini Live HTTP %d: %s"
+            % (response.status_code, str(detail)[:300])
+        }), 502
 
     try:
         token_name = response.json().get("name", "")
