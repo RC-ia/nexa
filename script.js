@@ -895,7 +895,7 @@ async function askNexa(text) {
   */
 
   if (response.status === 401) {
-    showAuth("login");
+    showAuth();
     throw new Error(
       "Sua sessão expirou. Entre de novo."
     );
@@ -1717,66 +1717,43 @@ loadVersion();
 
 /*
   ==========================================
-  LOGIN E CADASTRO
+  LOGIN E PAINEL ADMIN
   As conversas ficam no navegador, separadas por conta
-  (nexa_chats:<email>). O app só inicia depois do login.
+  (nexa_chats:<usuário>). O app só inicia depois do login.
   ==========================================
 */
 
 const authPanel = document.getElementById("authPanel");
-const authTabs = document.getElementById("authTabs");
 const authError = document.getElementById("authError");
 const loginForm = document.getElementById("loginForm");
-const registerForm = document.getElementById("registerForm");
-const verifyForm = document.getElementById("verifyForm");
-const verifyHint = document.getElementById("verifyHint");
-const resendButton = document.getElementById("resendCode");
 const drawerEmail = document.getElementById("drawerEmail");
 const drawerLogout = document.getElementById("drawerLogout");
+const drawerAdmin = document.getElementById("drawerAdmin");
+const adminPanel = document.getElementById("adminPanel");
+const adminUsers = document.getElementById("adminUsers");
+const adminForm = document.getElementById("adminForm");
+const adminError = document.getElementById("adminError");
 
-let pendingEmail = "";
-let resendTimer = null;
+let currentUser = null;
+let appStarted = false;
 
-function showAuthError(message) {
-  authError.textContent = message || "";
-  authError.hidden = !message;
+function showMessage(element, message) {
+  element.textContent = message || "";
+  element.hidden = !message;
 }
 
-function setAuthView(view) {
-  const forms = {
-    login: loginForm,
-    register: registerForm,
-    verify: verifyForm
-  };
-
-  Object.keys(forms).forEach(function (name) {
-    forms[name].hidden = name !== view;
-  });
-
-  authTabs.hidden = view === "verify";
-
-  authTabs.querySelectorAll(".auth-tab").forEach(
-    function (tab) {
-      tab.classList.toggle(
-        "active",
-        tab.dataset.tab === view
-      );
-    }
-  );
-
-  showAuthError("");
-}
-
-function showAuth(view) {
+function showAuth() {
+  adminPanel.hidden = true;
   authPanel.hidden = false;
-  setAuthView(view || "login");
+  showMessage(authError, "");
+  document.getElementById("loginUser").focus();
 }
 
-async function authRequest(path, payload) {
+async function api(method, path, payload) {
   const response = await fetch(path, {
-    method: "POST",
+    method,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload || {})
+    body: payload ? JSON.stringify(payload) : undefined
   });
 
   let data = {};
@@ -1788,69 +1765,18 @@ async function authRequest(path, payload) {
   }
 
   if (!response.ok) {
-    const failure = new Error(
-      data.error ||
-      `Erro (HTTP ${response.status}).`
+    throw new Error(
+      data.error || `Erro (HTTP ${response.status}).`
     );
-
-    failure.retryIn = data.retryIn;
-    throw failure;
   }
 
   return data;
 }
 
-function startResendCountdown(seconds) {
-  clearInterval(resendTimer);
-
-  let left = Math.max(0, Number(seconds) || 0);
-
-  function tick() {
-    resendButton.disabled = left > 0;
-    resendButton.textContent = left > 0
-      ? `Reenviar código (${left}s)`
-      : "Reenviar código";
-
-    if (left <= 0) {
-      clearInterval(resendTimer);
-    }
-
-    left -= 1;
-  }
-
-  tick();
-  resendTimer = setInterval(tick, 1000);
-}
-
-function goToVerify(email, seconds) {
-  pendingEmail = email;
-  verifyHint.textContent =
-    `Enviamos um código de 6 dígitos para ${email}. ` +
-    "Digite abaixo para criar a conta.";
-  verifyForm.reset();
-  setAuthView("verify");
-  startResendCountdown(seconds);
-  document.getElementById("verifyCode").focus();
-}
-
-/* Roda uma ação mostrando erro e travando o botão de envio. */
-async function withSubmit(form, action) {
-  const button = form.querySelector("[type=submit]");
-
-  showAuthError("");
-  button.disabled = true;
-
-  try {
-    await action();
-  } catch (error) {
-    showAuthError(error.message);
-  } finally {
-    button.disabled = false;
-  }
-}
-
 function enterApp(user) {
-  const suffix = ":" + user.email;
+  currentUser = user;
+
+  const suffix = ":" + user.username;
   const legacyChats = localStorage.getItem("nexa_chats");
 
   CHATS_KEY = "nexa_chats" + suffix;
@@ -1878,120 +1804,158 @@ function enterApp(user) {
   }
 
   authPanel.hidden = true;
-  drawerEmail.textContent = user.email;
-  drawerEmail.title = user.email;
+  drawerEmail.textContent = user.username;
+  drawerEmail.title = user.username;
+  drawerAdmin.hidden = !user.isAdmin;
 
-  bootApp();
+  if (!appStarted) {
+    appStarted = true;
+    bootApp();
+  }
 }
 
-authTabs.addEventListener("click", function (event) {
-  const tab = event.target.closest(".auth-tab");
-
-  if (tab) {
-    setAuthView(tab.dataset.tab);
-  }
-});
-
-loginForm.addEventListener("submit", function (event) {
+loginForm.addEventListener("submit", async function (event) {
   event.preventDefault();
 
-  withSubmit(loginForm, async function () {
-    const data = await authRequest("/api/auth/login", {
-      email: document.getElementById("loginEmail").value,
+  const button = loginForm.querySelector("[type=submit]");
+
+  showMessage(authError, "");
+  button.disabled = true;
+
+  try {
+    const data = await api("POST", "/api/auth/login", {
+      username: document.getElementById("loginUser").value,
       password: document.getElementById("loginPassword").value
     });
 
     loginForm.reset();
     enterApp(data.user);
-  });
-});
-
-registerForm.addEventListener("submit", function (event) {
-  event.preventDefault();
-
-  const email = document
-    .getElementById("registerEmail").value.trim();
-  const password = document
-    .getElementById("registerPassword").value;
-  const confirm = document
-    .getElementById("registerConfirm").value;
-
-  if (password !== confirm) {
-    showAuthError("As senhas não são iguais.");
-    return;
-  }
-
-  withSubmit(registerForm, async function () {
-    try {
-      const data = await authRequest(
-        "/api/auth/register",
-        { email, password }
-      );
-
-      registerForm.reset();
-      goToVerify(email, data.resendIn);
-
-    } catch (error) {
-      /* Código já enviado há pouco: segue para a digitação dele. */
-      if (error.retryIn) {
-        registerForm.reset();
-        goToVerify(email, error.retryIn);
-        return;
-      }
-
-      throw error;
-    }
-  });
-});
-
-verifyForm.addEventListener("submit", function (event) {
-  event.preventDefault();
-
-  withSubmit(verifyForm, async function () {
-    const data = await authRequest("/api/auth/verify", {
-      email: pendingEmail,
-      code: document.getElementById("verifyCode").value.trim()
-    });
-
-    clearInterval(resendTimer);
-    enterApp(data.user);
-  });
-});
-
-resendButton.addEventListener("click", async function () {
-  showAuthError("");
-  resendButton.disabled = true;
-
-  try {
-    const data = await authRequest(
-      "/api/auth/resend",
-      { email: pendingEmail }
-    );
-
-    startResendCountdown(data.resendIn);
 
   } catch (error) {
-    showAuthError(error.message);
-    startResendCountdown(error.retryIn || 0);
+    showMessage(authError, error.message);
+
+  } finally {
+    button.disabled = false;
   }
 });
-
-document.getElementById("verifyBack").addEventListener(
-  "click",
-  function () {
-    clearInterval(resendTimer);
-    setAuthView("register");
-  }
-);
 
 drawerLogout.addEventListener("click", async function () {
   try {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await api("POST", "/api/auth/logout");
   } catch {
-    // Sem rede: recarregar já cai na tela de login se o cookie expirar.
+    // Sem rede: recarregar já cai no login se o cookie expirar.
   }
 
   location.reload();
+});
+
+/* ---------- Painel admin ---------- */
+
+async function loadAdminUsers() {
+  showMessage(adminError, "");
+
+  try {
+    const data = await api("GET", "/api/admin/users");
+
+    adminUsers.innerHTML = "";
+
+    data.users.forEach(function (user) {
+      const row = document.createElement("div");
+      row.className = "admin-user";
+
+      const name = document.createElement("span");
+      name.className = "admin-user-name";
+      name.textContent = user.username;
+      row.appendChild(name);
+
+      if (user.isAdmin) {
+        const badge = document.createElement("span");
+        badge.className = "admin-badge";
+        badge.textContent = "admin";
+        row.appendChild(badge);
+      }
+
+      const reset = document.createElement("button");
+      reset.type = "button";
+      reset.textContent = "Nova senha";
+      reset.addEventListener("click", function () {
+        const password = prompt(
+          `Nova senha para ${user.username} (mín. 8):`
+        );
+
+        if (password) {
+          adminAction(
+            "POST",
+            `/api/admin/users/${user.id}/password`,
+            { password }
+          );
+        }
+      });
+      row.appendChild(reset);
+
+      if (user.username !== currentUser.username) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "admin-del";
+        remove.textContent = "Apagar";
+        remove.addEventListener("click", function () {
+          if (confirm(`Apagar o usuário ${user.username}?`)) {
+            adminAction(
+              "DELETE",
+              `/api/admin/users/${user.id}`
+            );
+          }
+        });
+        row.appendChild(remove);
+      }
+
+      adminUsers.appendChild(row);
+    });
+
+  } catch (error) {
+    showMessage(adminError, error.message);
+  }
+}
+
+async function adminAction(method, path, payload) {
+  try {
+    await api(method, path, payload);
+    await loadAdminUsers();
+
+  } catch (error) {
+    showMessage(adminError, error.message);
+  }
+}
+
+drawerAdmin.addEventListener("click", function () {
+  closeDrawer();
+  adminPanel.hidden = false;
+  loadAdminUsers();
+});
+
+document.getElementById("adminClose").addEventListener(
+  "click",
+  function () {
+    adminPanel.hidden = true;
+  }
+);
+
+adminForm.addEventListener("submit", async function (event) {
+  event.preventDefault();
+
+  try {
+    await api("POST", "/api/admin/users", {
+      username: document.getElementById("adminNewUser").value,
+      password: document.getElementById("adminNewPassword").value,
+      isAdmin: document.getElementById("adminNewIsAdmin").checked
+    });
+
+    adminForm.reset();
+    await loadAdminUsers();
+
+  } catch (error) {
+    showMessage(adminError, error.message);
+  }
 });
 
 async function initAuth() {
@@ -2007,7 +1971,7 @@ async function initAuth() {
     console.error("Erro ao verificar login:", error);
   }
 
-  showAuth("login");
+  showAuth();
 }
 
 initAuth();

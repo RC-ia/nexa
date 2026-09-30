@@ -132,6 +132,16 @@
         aria-label="Chats anteriores"
       ></nav>
 
+      <button
+        type="button"
+        id="drawerAdmin"
+        class="drawer-settings"
+        hidden
+      >
+        <span class="drawer-icon" aria-hidden="true">★</span>
+        Painel admin
+      </button>
+
       <div class="drawer-account" id="drawerAccount">
         <span class="drawer-account-email" id="drawerEmail"></span>
 
@@ -411,15 +421,10 @@
 
       <div class="auth-brand">NEXA</div>
 
-      <div class="auth-tabs" id="authTabs" role="tablist">
-        <button type="button" class="auth-tab active" data-tab="login" role="tab">Entrar</button>
-        <button type="button" class="auth-tab" data-tab="register" role="tab">Criar conta</button>
-      </div>
-
       <form class="auth-form" id="loginForm">
         <label>
-          Email
-          <input type="email" id="loginEmail" autocomplete="email" required>
+          Usuário
+          <input type="text" id="loginUser" autocomplete="username" autocapitalize="none" required>
         </label>
 
         <label>
@@ -430,56 +435,51 @@
         <button type="submit" class="auth-submit">Entrar</button>
       </form>
 
-      <form class="auth-form" id="registerForm" hidden>
-        <label>
-          Email
-          <input type="email" id="registerEmail" autocomplete="email" required>
-        </label>
-
-        <label>
-          Senha (mínimo 8 caracteres)
-          <input type="password" id="registerPassword" autocomplete="new-password" minlength="8" maxlength="128" required>
-        </label>
-
-        <label>
-          Confirmar senha
-          <input type="password" id="registerConfirm" autocomplete="new-password" minlength="8" maxlength="128" required>
-        </label>
-
-        <button type="submit" class="auth-submit">Enviar código por email</button>
-      </form>
-
-      <form class="auth-form" id="verifyForm" hidden>
-        <p class="auth-hint" id="verifyHint"></p>
-
-        <label>
-          Código de 6 dígitos
-          <input
-            type="text"
-            id="verifyCode"
-            inputmode="numeric"
-            pattern="[0-9]{6}"
-            maxlength="6"
-            autocomplete="one-time-code"
-            required
-          >
-        </label>
-
-        <button type="submit" class="auth-submit">Confirmar e criar conta</button>
-
-        <div class="auth-row">
-          <button type="button" id="resendCode" class="auth-link">Reenviar código</button>
-          <button type="button" id="verifyBack" class="auth-link">Voltar</button>
-        </div>
-      </form>
-
       <p class="auth-error" id="authError" role="alert" hidden></p>
 
     </div>
 
   </div>
 
-  <script src="script.js?v=9"></script>
+  <div
+    class="auth"
+    id="adminPanel"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Painel admin"
+    hidden
+  >
+
+    <div class="auth-card admin-card">
+
+      <div class="admin-head">
+        <h3>Painel admin</h3>
+        <button type="button" id="adminClose" class="drawer-close" aria-label="Fechar">✕</button>
+      </div>
+
+      <div class="admin-users" id="adminUsers"></div>
+
+      <form class="auth-form admin-new" id="adminForm">
+        <span class="drawer-section">Novo usuário</span>
+
+        <input type="text" id="adminNewUser" placeholder="usuário" autocomplete="off" autocapitalize="none" required>
+        <input type="password" id="adminNewPassword" placeholder="senha (mín. 8)" autocomplete="new-password" minlength="8" maxlength="128" required>
+
+        <label class="admin-check">
+          <input type="checkbox" id="adminNewIsAdmin">
+          Também é admin
+        </label>
+
+        <button type="submit" class="auth-submit">Criar usuário</button>
+      </form>
+
+      <p class="auth-error" id="adminError" role="alert" hidden></p>
+
+    </div>
+
+  </div>
+
+  <script src="script.js?v=10"></script>
 
 </body>
 

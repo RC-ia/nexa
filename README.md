@@ -6,7 +6,7 @@ máquina e ser exposta com o túnel do Cloudflare (`cloudflared`).
 
 Estrutura:
 - `server.py` — servidor Flask (serve o site + `/api/chat` com streaming SSE)
-- `auth.py` — login, cadastro com código por email e sessões
+- `auth.py` — login, sessões e painel admin
 - `run.py` — supervisor: roda o servidor e aplica auto-update via git
 - `index.html`, `style.css`, `script.js` — frontend (inalterado)
 - `requirements.txt` — dependências Python
@@ -33,46 +33,34 @@ API_KEY=sua-chave-aqui
 Opcionais (já têm padrão): `API_BASE`, `MODEL`, `PORT`, `MAX_OUTPUT_TOKENS`, `MEMORY_DB`.
 Nunca versione o `.env` (ele já está no `.gitignore`).
 
-## Login e cadastro
+## Login e painel admin
 
-A NEXA exige login para conversar. Na primeira tela dá para **Entrar** com
-email e senha ou **Criar conta**: no cadastro o servidor envia um código de
-6 dígitos para o email, e a conta só é criada depois que o código é digitado.
+A NEXA exige login para conversar. Não existe cadastro aberto: quem cria os
+usuários é o admin, pelo **Painel admin** (botão na gaveta lateral, só
+aparece para admins). Lá dá para listar, criar (com opção de ser admin),
+trocar a senha e apagar usuários.
+
+**Primeiro acesso:** ao subir o servidor pela primeira vez sem nenhum admin,
+ele cria a conta `admin` (ou o `ADMIN_USER` do `.env`). Se `ADMIN_PASSWORD`
+estiver no `.env`, essa é a senha; se não, o servidor gera uma senha e
+**mostra no console uma única vez**. Depois de entrar, troque-a no painel.
 
 Como funciona:
 
-- Senha com no mínimo 8 caracteres, guardada apenas como hash (scrypt).
-- O código vale `CODE_TTL_MINUTES` (padrão 10), tem até `CODE_MAX_ATTEMPTS`
-  tentativas (padrão 5) e o reenvio espera `RESEND_COOLDOWN` segundos (padrão 60).
-  O código também é guardado só como hash.
+- Usuário: 3 a 64 caracteres (letras minúsculas, números e `_ . @ + -`).
+  Senha: mínimo 8 caracteres, guardada só como hash (scrypt).
 - A sessão é um cookie `HttpOnly` (`SameSite=Lax`, `Secure` quando o acesso é
   por HTTPS, como no túnel do Cloudflare) e dura `SESSION_DAYS` (padrão 30).
-  `POST /api/auth/logout` e o botão **Sair** da gaveta encerram a sessão.
-- A memória de longo prazo agora é ligada à conta (o servidor ignora o
-  `userId` vindo do navegador). As conversas do `localStorage` ficam
-  separadas por conta; as conversas de antes do login vão para a primeira
-  conta que entrar naquele navegador.
-- Tentativas de login e de cadastro têm limite por IP/email.
+  Trocar a senha ou apagar um usuário derruba as sessões dele.
+- A memória de longo prazo é ligada à conta. As conversas do `localStorage`
+  ficam separadas por usuário; as de antes do login vão para a primeira conta
+  que entrar naquele navegador.
+- O login tem limite de tentativas por IP/usuário.
+- Contas ficam em `auth.db` (fora do git). Para começar do zero, apague o arquivo.
 
-### Envio do email (SMTP)
-
-Configure no `.env`:
-
-```
-SMTP_HOST=smtp.exemplo.com
-SMTP_PORT=587
-SMTP_USER=usuario
-SMTP_PASSWORD=senha-ou-app-password
-SMTP_FROM=NEXA <no-reply@exemplo.com>
-SMTP_SECURITY=starttls   # ou ssl (porta 465) / none
-```
-
-Sem `SMTP_HOST`, o servidor está em **modo desenvolvimento**: nenhum email é
-enviado e o código aparece no console (`[NEXA-auth] ... código para ...`).
-Use isso só para testar localmente.
-
-Rotas: `POST /api/auth/register`, `/verify`, `/resend`, `/login`, `/logout` e
-`GET /api/auth/me`.
+Rotas: `POST /api/auth/login`, `/api/auth/logout`, `GET /api/auth/me` e, só
+para admin, `GET/POST /api/admin/users`, `POST /api/admin/users/<id>/password`
+e `DELETE /api/admin/users/<id>`.
 
 ## 3. Rodar
 
