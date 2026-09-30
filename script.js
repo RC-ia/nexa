@@ -838,27 +838,43 @@ function createStreamingMessage() {
     block: "end"
   });
 
+  let pendingText = "";
+  let renderFrame = null;
+
+  function flushText() {
+    if (renderFrame !== null) {
+      cancelAnimationFrame(renderFrame);
+      renderFrame = null;
+    }
+
+    if (!pendingText) {
+      return;
+    }
+
+    paragraph.appendChild(
+      document.createTextNode(pendingText)
+    );
+    pendingText = "";
+
+    if (feed) {
+      feed.scrollTop = feed.scrollHeight;
+    }
+  }
+
+  function appendText(chunk) {
+    pendingText += chunk;
+
+    if (renderFrame === null) {
+      renderFrame = requestAnimationFrame(flushText);
+    }
+  }
+
   return {
     message,
-    paragraph,
+    appendText,
+    flushText,
     thinking
   };
-}
-
-function updateStreamingMessage(
-  paragraph,
-  text
-) {
-  paragraph.textContent = text;
-
-  /*
-    Mantém a resposta visível
-    enquanto ela é recebida.
-  */
-
-  if (feed) {
-    feed.scrollTop = feed.scrollHeight;
-  }
 }
 
 /*
@@ -928,7 +944,8 @@ async function askNexa(text) {
   hideTyping();
 
   const {
-    paragraph,
+    appendText,
+    flushText,
     thinking
   } = createStreamingMessage();
 
@@ -981,11 +998,7 @@ async function askNexa(text) {
         typeof data.text === "string"
       ) {
         fullReply += data.text;
-
-        updateStreamingMessage(
-          paragraph,
-          fullReply
-        );
+        appendText(data.text);
       }
 
       /*
@@ -1079,6 +1092,7 @@ async function askNexa(text) {
       processEvent(buffer);
     }
   } finally {
+    flushText();
     thinking.done();
   }
 
