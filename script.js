@@ -1469,10 +1469,10 @@ async function loadMemories() {
     const data = await api("GET", "/api/memories");
     memoryList.replaceChildren();
 
-    const document = data.memories[0]?.memory || "";
+    const memoryDocument = data.memories[0]?.memory || "";
     const limit = data.limit || 10000;
 
-    if (!document) {
+    if (!memoryDocument) {
       const empty = document.createElement("p");
       empty.className = "settings-status";
       empty.textContent = "Nenhuma memória salva ainda.";
@@ -1494,7 +1494,7 @@ async function loadMemories() {
     const editor = document.createElement("textarea");
     editor.className = "settings-field";
     editor.setAttribute("aria-label", "Memória da NEXA");
-    editor.value = document;
+    editor.value = memoryDocument;
     copy.appendChild(editor);
 
     const date = document.createElement("small");
@@ -1544,7 +1544,7 @@ async function loadMemories() {
     row.append(copy, actions);
     memoryList.appendChild(row);
 
-    const used = document.length;
+    const used = memoryDocument.length;
     memoryStatus.textContent =
       `${used} de ${limit} caracteres usados.`;
   } catch (error) {

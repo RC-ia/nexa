@@ -2,91 +2,22 @@ const startButton = document.getElementById("liveStart");
 const endButton = document.getElementById("liveEnd");
 const statusLabel = document.getElementById("liveStatus");
 const visual = document.getElementById("liveVisual");
-const voiceSelect = document.getElementById("liveVoice");
 
 const LIVE_VOICE_KEY = "nexa_live_voice";
-const FALLBACK_VOICES = [
-  "Kore", "Puck", "Charon", "Zephyr", "Fenrir", "Leda", "Orus", "Aoede",
-  "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
-  "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
-  "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
-  "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
-];
+const FALLBACK_VOICE = "Kore";
 
-let availableVoices = FALLBACK_VOICES.slice();
-let voiceListenerAttached = false;
-
-function readSavedVoice() {
-  try {
-    return localStorage.getItem(LIVE_VOICE_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
-function renderVoiceOptions() {
-  if (!voiceSelect) {
-    return;
-  }
-
-  const saved = readSavedVoice();
-  const selected = availableVoices.includes(saved)
-    ? saved
-    : availableVoices[0] || "Kore";
-
-  voiceSelect.replaceChildren();
-
-  availableVoices.forEach(name => {
-    const option = document.createElement("option");
-    option.value = name;
-    option.textContent = name;
-    voiceSelect.appendChild(option);
-  });
-
-  voiceSelect.value = selected;
-
-  if (!voiceListenerAttached) {
-    voiceListenerAttached = true;
-    voiceSelect.addEventListener("change", () => {
-      try {
-        localStorage.setItem(LIVE_VOICE_KEY, voiceSelect.value);
-      } catch {
-        // Sem armazenamento: mantém a escolha apenas nesta sessão.
-      }
-    });
-  }
-}
-
+/*
+  A voz é escolhida em Configurações > Chamada; aqui só lemos a
+  preferência salva. Se o servidor recusar, caímos na voz padrão.
+*/
 function selectedVoice() {
-  return voiceSelect && availableVoices.includes(voiceSelect.value)
-    ? voiceSelect.value
-    : availableVoices[0] || "Kore";
-}
-
-async function loadVoices() {
-  if (!voiceSelect) {
-    return;
-  }
-
-  renderVoiceOptions();
-
+  let saved = "";
   try {
-    const response = await fetch("/api/live/voices", {
-      headers: { "X-Nexa-Message-Key": accountMessageKey }
-    });
-
-    if (!response.ok) {
-      return;
-    }
-
-    const data = await response.json();
-    if (Array.isArray(data.voices) && data.voices.length) {
-      availableVoices = data.voices;
-      renderVoiceOptions();
-    }
+    saved = localStorage.getItem(LIVE_VOICE_KEY) || "";
   } catch {
-    // Mantém a lista local quando o servidor não responde.
+    saved = "";
   }
+  return saved.trim() || FALLBACK_VOICE;
 }
 
 let accountMessageKey = "";
@@ -267,9 +198,6 @@ function endCall(message) {
   startButton.hidden = false;
   startButton.disabled = false;
   endButton.hidden = true;
-  if (voiceSelect) {
-    voiceSelect.disabled = false;
-  }
   setStatus(message || "Chamada encerrada", "idle");
 }
 
@@ -316,9 +244,6 @@ async function startCall() {
   const generation = ++callGeneration;
   startButton.disabled = true;
   endButton.hidden = false;
-  if (voiceSelect) {
-    voiceSelect.disabled = true;
-  }
   setStatus("Solicitando acesso ao microfone…", "connecting");
 
   try {
@@ -463,7 +388,6 @@ async function initializeLivePage() {
 
     startButton.disabled = false;
     setStatus("Pronto para iniciar", "idle");
-    loadVoices();
   } catch (error) {
     setStatus("Não foi possível verificar sua sessão", "error");
   }

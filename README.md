@@ -128,8 +128,9 @@ que aponta para o servidor local.
 
 O chat normal é **apenas texto**: não há leitura das respostas em voz alta nem
 motor de TTS. A única experiência de voz é a chamada Gemini Live em
-`/live.html`. A voz é escolhida em **Configurações > Chamada** e fica salva no
-navegador, valendo também para o seletor da própria página da chamada.
+`/live.html`. A voz é escolhida **apenas** em **Configurações > Chamada** e fica
+salva no navegador; a página da chamada usa essa escolha e não tem seletor
+próprio.
 
 ## Chamadas Gemini Live
 
