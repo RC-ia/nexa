@@ -17,7 +17,8 @@ from auth import auth_bp, current_user, init_auth_db, valid_message_key  # noqa:
 API_KEY = os.environ.get("API_KEY", "").strip()
 API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip("/")
 MODEL = os.environ.get("MODEL", "nada")
-TTS_MODEL = "el/eleven_multilingual_v2"
+TTS_MODEL = "el/eleven_flash_v2_5/SAz9YHcvj6GT2YYXdXww"
+TTS_URL = "https://9router.rcscan.online/v1/audio/speech"
 PORT = int(os.environ.get("PORT", "8000"))
 MEMORY_DB = BASE_DIR / os.environ.get("MEMORY_DB", "nexa.db")
 VERSION_FILE = BASE_DIR / os.environ.get("VERSION_FILE", ".nexa_version")
@@ -687,7 +688,7 @@ def generate_voice_audio():
 
     try:
         response = requests.post(
-            API_BASE + "/audio/speech",
+            TTS_URL,
             headers=auth_headers(),
             json={
                 "model": TTS_MODEL,

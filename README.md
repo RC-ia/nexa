@@ -121,11 +121,10 @@ que aponta para o servidor local.
 
 ## Voz da NEXA
 
-A voz usa o endpoint compatível com OpenAI `POST /audio/speech` do `API_BASE`
-(por padrão, `https://9router.rcscan.online/v1/audio/speech`). O modelo TTS
-padrão é `el/eleven_multilingual_v2`. **Configurações** permite ligar/desligar
-a voz e ajustar a velocidade de reprodução. A chave do provedor fica somente
-no servidor.
+A voz usa `POST https://9router.rcscan.online/v1/audio/speech` com o modelo
+`el/eleven_flash_v2_5/SAz9YHcvj6GT2YYXdXww`. **Configurações** permite
+ligar/desligar a voz e ajustar a velocidade de reprodução. A chave do provedor
+fica somente no servidor.
 
 ## Memória
 
