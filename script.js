@@ -539,6 +539,7 @@ async function startLiveCall() {
       "BidiGenerateContentConstrained?access_token=" +
       encodeURIComponent(tokenData.token);
     const socket = new WebSocket(socketUrl);
+    socket.binaryType = "arraybuffer";
     liveCallSocket = socket;
 
     socket.onopen = () => {
@@ -555,9 +556,24 @@ async function startLiveCall() {
       }));
     };
 
-    socket.onmessage = event => {
+    socket.onmessage = async event => {
       try {
-        handleLiveServerMessage(socket, JSON.parse(event.data));
+        let payload = event.data;
+        if (typeof Blob !== "undefined" && payload instanceof Blob) {
+          payload = await payload.text();
+        } else if (payload instanceof ArrayBuffer) {
+          payload = new TextDecoder().decode(payload);
+        }
+
+        if (socket !== liveCallSocket) {
+          return;
+        }
+
+        if (typeof payload !== "string") {
+          throw new Error("O Gemini Live enviou um frame em formato desconhecido.");
+        }
+
+        handleLiveServerMessage(socket, JSON.parse(payload));
       } catch (error) {
         console.error("Erro ao processar Gemini Live:", error);
         if (liveCallSocket === socket) {
