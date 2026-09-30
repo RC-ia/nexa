@@ -122,6 +122,9 @@ SYSTEM_PROMPT = "\n".join([
     "responderem, diga isso em vez de inventar.",
     "Cite a fonte pelo nome e pelo site quando usar um resultado, no fim da "
     "frase. Nunca invente uma fonte, um link ou uma data.",
+    "Se o resumo não for suficiente, use a ferramenta visitar_pagina com os "
+    "prefixos (P1, P2...) dos resultados que quer ler. Pode pedir várias de "
+    "uma vez: [\"P1\", \"P3\"].",
     "Depois de pesquisar, responda normalmente sem comentar a chamada da "
     "ferramenta.",
 ])
@@ -147,6 +150,34 @@ SEARCH_TOOL = {
                 },
             },
             "required": ["termo"],
+        },
+    },
+}
+
+VISIT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "visitar_pagina",
+        "description": (
+            "Abre uma ou mais páginas dos resultados da última busca (use os "
+            "prefixos P1, P2... devolvidos pela ferramenta pesquisar) e "
+            "devolve o texto principal de cada uma. Chame quando o resumo não "
+            "for suficiente e você precisar ler o conteúdo completo."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "paginas": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Lista de prefixos das páginas a visitar, ex.: "
+                        "[\"P1\", \"P3\"]. Só use prefixos que existiram na "
+                        "última resposta de pesquisar."
+                    ),
+                },
+            },
+            "required": ["paginas"],
         },
     },
 }
@@ -431,6 +462,11 @@ SEARCH_HEADERS = {
     "Accept": "text/html,application/xhtml+xml",
 }
 
+# Cache simples: user_id -> { "P1": url, "P2": url, ... }
+# Usado para a ferramenta visitar_pagina resolver prefixos para URLs.
+_last_search_cache = {}
+_search_cache_lock = threading.Lock()
+
 RESULT_LINK_PATTERN = re.compile(
     r'<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S
 )
@@ -632,15 +668,27 @@ def parse_search_results(page, limit):
     return results
 
 
-def format_search_results(term, results):
+def format_search_results(term, results, user_id=None):
+    """
+    Formata resultados com prefixos P1, P2... para o modelo referenciar.
+    Se user_id for passado, guarda o mapeamento no cache para a ferramenta
+    visitar_pagina resolver depois.
+    """
     lines = ['Resultados da busca por "%s":' % term, ""]
 
+    prefix_map = {}
     for position, item in enumerate(results, start=1):
-        lines.append("%d. %s" % (position, item["titulo"]))
+        prefix = "P%d" % position
+        prefix_map[prefix] = item["url"]
+        lines.append("%s. %s" % (prefix, item["titulo"]))
         lines.append("   %s" % item["url"])
 
         if item["trecho"]:
             lines.append("   %s" % item["trecho"])
+
+    if user_id and prefix_map:
+        with _search_cache_lock:
+            _last_search_cache[user_id] = prefix_map
 
     return "\n".join(lines)
 
@@ -817,7 +865,7 @@ def request_body(stream, messages, memories, reasoning, custom_instructions="",
     }
 
     if memory_enabled:
-        body["tools"] = [MEMORY_TOOL, SEARCH_TOOL]
+        body["tools"] = [MEMORY_TOOL, SEARCH_TOOL, VISIT_TOOL]
         body["tool_choice"] = "auto"
 
     body.update(reasoning_payload(reasoning))
@@ -945,7 +993,7 @@ def run_tools(user_id, calls):
 
             if found:
                 searched = True
-                results[call_id] = format_search_results(term, found)
+                results[call_id] = format_search_results(term, found, user_id)
             elif error:
                 results[call_id] = error
             else:
@@ -953,7 +1001,92 @@ def run_tools(user_id, calls):
 
             continue
 
+        if name == "visitar_pagina":
+            paginas = arguments.get("paginas", [])
+            if not isinstance(paginas, list):
+                paginas = []
+            results[call_id] = fetch_pages(user_id, paginas)
+            continue
+
     return results, memory_updated, searched
+
+
+def fetch_pages(user_id, prefixes):
+    """
+    Busca o conteúdo completo das páginas indicadas pelos prefixos P1, P2...
+    Devolve texto formatado para o modelo.
+    """
+    if not prefixes:
+        return "Nenhuma página indicada."
+
+    with _search_cache_lock:
+        prefix_map = _last_search_cache.get(user_id, {})
+
+    if not prefix_map:
+        return "Nenhuma busca anterior encontrada. Use pesquisar primeiro."
+
+    lines = []
+    for prefix in prefixes:
+        url = prefix_map.get(prefix)
+        if not url:
+            lines.append("%s: prefixo não encontrado na última busca." % prefix)
+            continue
+
+        try:
+            resp = requests.get(url, headers=SEARCH_HEADERS, timeout=(5, 15))
+            if resp.status_code != 200:
+                lines.append("%s (%s): erro HTTP %d" % (prefix, url, resp.status_code))
+                continue
+
+            text = extract_main_text(resp.text)
+            if not text:
+                lines.append("%s (%s): não foi possível extrair texto." % (prefix, url))
+                continue
+
+            # Limita para não estourar tokens
+            if len(text) > 8000:
+                text = text[:8000] + "\n... [truncado]"
+
+            lines.append("=== %s (%s) ===" % (prefix, url))
+            lines.append(text)
+            lines.append("")
+
+        except requests.RequestException as e:
+            lines.append("%s (%s): erro de rede: %s" % (prefix, url, e))
+
+    return "\n".join(lines) if lines else "Nenhuma página pôde ser lida."
+
+
+def extract_main_text(html):
+    """
+    Extrai o texto principal de uma página HTML, removendo scripts, styles,
+    nav, footer, etc. Usa BeautifulSoup se disponível, senão regex simples.
+    """
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Remove elementos que não são conteúdo
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside",
+                         "noscript", "iframe", "form", "button", "input"]):
+            tag.decompose()
+
+        # Tenta achar o conteúdo principal
+        main = soup.find("main") or soup.find("article") or soup.find(role="main")
+        if main:
+            text = main.get_text(separator="\n", strip=True)
+        else:
+            text = soup.get_text(separator="\n", strip=True)
+
+        # Limpa linhas vazias excessivas
+        lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+        return "\n".join(lines)
+
+    except ImportError:
+        # Fallback sem BeautifulSoup: regex simples
+        text = TAG_PATTERN.sub(" ", html)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:8000]
 
 
 # =========================

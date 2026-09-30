@@ -202,6 +202,23 @@ Quando uma ferramenta é usada, a resposta ganha uma pílula embaixo do texto:
 me contou.` A pílula de pesquisa **só aparece quando a busca realmente
 trouxe resultados** — se a ferramenta falhou, não existe aviso de pesquisa.
 
+### Ler o conteúdo completo
+
+A ferramenta `pesquisar` devolve um resumo (título, URL e trecho). Se o
+resumo não for suficiente, o modelo pode chamar `visitar_pagina` com os
+**prefixos** das páginas que quer ler:
+
+```
+visitar_pagina(["P1", "P3"])
+```
+
+Os prefixos são os números que acompanham cada resultado da última busca
+(`P1`, `P2`…). O modelo pode pedir várias páginas de uma vez. A ferramenta
+abre cada URL, extrai o texto principal (remove scripts, styles, nav,
+footer) e devolve o conteúdo limpo — limitado a 8 000 caracteres por página.
+Se a página não carregar, o erro é devolvido ao modelo sem travar a
+resposta.
+
 ## Barra lateral
 
 O botão **☰** no canto esquerdo abre a gaveta de menu, que desliza por cima
