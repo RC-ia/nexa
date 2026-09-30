@@ -474,7 +474,12 @@ function saveMemory() {
   }
 
   chat.messages = history.slice();
-  chat.title = chatTitle(chat.messages);
+  // Só atualiza o título se for o padrão "Nova conversa" ou se foi gerado automaticamente da primeira mensagem
+  // Não sobrescreve títulos gerados pela IA
+  const isDefaultTitle = chat.title === "Nova conversa" || chat.title === chatTitle(chat.messages);
+  if (isDefaultTitle) {
+    chat.title = chatTitle(chat.messages);
+  }
   chat.updatedAt = Date.now();
 
   saveChats();
@@ -1129,7 +1134,10 @@ function stashCurrent() {
   }
 
   chat.messages = history.slice();
-  chat.title = chatTitle(chat.messages);
+  const fallbackTitle = chatTitle(chat.messages);
+  if (chat.title === "Nova conversa" || chat.title === fallbackTitle) {
+    chat.title = fallbackTitle;
+  }
   chat.updatedAt = Date.now();
 }
 
@@ -1394,6 +1402,32 @@ function closeSettings() {
 
 /*
   ==========================================
+  GERAÇÃO DE TÍTULO PELA IA
+  ==========================================
+*/
+
+async function generateChatTitle(message) {
+  try {
+    const response = await fetch("/api/chat/title", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ message })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return data.title;
+    }
+  } catch (error) {
+    console.error("Erro ao gerar título:", error);
+  }
+  return null;
+}
+
+/*
+  ==========================================
   ENVIO DA MENSAGEM
   ==========================================
 */
@@ -1422,6 +1456,11 @@ composer.addEventListener(
     }
 
     /*
+      Verifica se é a primeira mensagem do chat (histórico vazio antes de adicionar)
+    */
+    const isFirstMessage = history.length === 0;
+
+    /*
       Mostra a mensagem do usuário.
     */
 
@@ -1446,6 +1485,21 @@ composer.addEventListener(
 
     try {
       await askNexa(text);
+
+      /* 
+        Se foi a primeira mensagem, gera título pela IA
+      */
+      if (isFirstMessage) {
+        const aiTitle = await generateChatTitle(text);
+        if (aiTitle) {
+          const chat = currentChat();
+          if (chat) {
+            chat.title = aiTitle;
+            saveChats();
+            renderChatList();
+          }
+        }
+      }
 
     } catch (error) {
       console.error(

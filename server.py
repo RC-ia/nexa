@@ -311,6 +311,53 @@ def request_body(stream, messages, memories, reasoning):
     return body
 
 
+def generate_chat_title(user_message):
+    """Gera um título curto para o chat baseado na primeira mensagem do usuário."""
+    if not API_KEY or not user_message:
+        return None
+
+    prompt = (
+        "Crie um título curto e descritivo (máximo 50 caracteres) para uma conversa "
+        "que começa com esta mensagem do usuário:\n\n"
+        f"\"{user_message}\"\n\n"
+        "Responda APENAS com o título, sem aspas, sem explicações."
+    )
+
+    try:
+        response = requests.post(
+            API_BASE + "/chat/completions",
+            headers=auth_headers(),
+            json={
+                "model": MODEL,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Você gera títulos curtos e descritivos para conversas. Máximo 50 caracteres. Apenas o título, nada mais.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+                "max_tokens": 30,
+                "temperature": 0.3,
+            },
+            timeout=(10, 30),
+        )
+
+        if response.status_code != 200:
+            return None
+
+        title = extract_text(response.json()).strip()
+        title = title.strip('"\'')
+        
+        if title and len(title) <= 60:
+            return title
+            
+    except (requests.RequestException, ValueError) as error:
+        print("[NEXA] falha ao gerar título:", error)
+    
+    return None
+
+
 def extract_memory(user_id, user_message, assistant_message):
     if not API_KEY or not user_id:
         return
@@ -572,6 +619,35 @@ def static_file(filename):
         return jsonify({"error": "Não encontrado."}), 404
 
     return send_from_directory(BASE_DIR, filename)
+
+
+@app.post("/api/chat/title")
+def chat_title():
+    user = current_user()
+
+    if user is None:
+        return jsonify({"error": "Faça login para conversar com a NEXA."}), 401
+
+    if not API_KEY:
+        return jsonify({"error": "API_KEY não configurada no arquivo .env."}), 500
+
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        body = {}
+
+    message = body.get("message", "").strip()
+    if not message:
+        return jsonify({"error": "Mensagem não fornecida."}), 400
+
+    title = generate_chat_title(message)
+    
+    if title:
+        return jsonify({"title": title})
+    else:
+        # Fallback: truncar a mensagem
+        fallback = message[:42] + ("…" if len(message) > 42 else "")
+        return jsonify({"title": fallback})
 
 
 @app.post("/api/chat")
