@@ -1276,10 +1276,11 @@ body {
 
 
 /* =========================
-   AVISO DE MEMÓRIA ATUALIZADA
+   AVISOS DE FERRAMENTA
 ========================= */
 
-.memory-notice {
+.memory-notice,
+.search-notice {
   display: table;
   margin: 10px 0 0;
 
@@ -1303,7 +1304,30 @@ body {
   animation: memoryNoticeAppear 0.34s ease-out;
 }
 
-.memory-notice[hidden] {
+/* Dois avisos seguidos ficam colados, com folga só entre linhas. */
+.search-notice + .memory-notice {
+  margin-top: 6px;
+}
+
+.search-notice {
+  border-color: rgba(168, 120, 255, 0.3);
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(168, 120, 255, 0.14),
+      rgba(134, 229, 209, 0.09)
+    );
+
+  color: #c3aef0;
+}
+
+.search-notice-icon {
+  color: #b794f6;
+}
+
+.memory-notice[hidden],
+.search-notice[hidden] {
   display: none;
 }
 
@@ -1315,7 +1339,14 @@ body {
   line-height: 1;
 }
 
-.memory-notice-text {
+.search-notice-icon {
+  font-size: 13px;
+
+  line-height: 1;
+}
+
+.memory-notice-text,
+.search-notice-text {
   white-space: nowrap;
 }
 

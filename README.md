@@ -156,6 +156,27 @@ e pode ser editado à mão em **Configurações > Memória**.
 Apagar a pasta `memoria/` remove a memória persistente (as conversas do
 navegador continuam no `localStorage`).
 
+## Pesquisa
+
+A NEXA também tem a ferramenta `pesquisar`, que busca no **DuckDuckGo** pelo
+endpoint HTML público (sem chave de API). As regras de quando pesquisar estão
+no system prompt: ela procura sempre que a resposta depender de fato novo,
+atual ou verificável, quando o usuário pedir, quando ela não souber a resposta
+e quando o assunto for específico ou técnico. Ela não pesquisa para opinar ou
+conversar, e cita a fonte quando usa um resultado.
+
+A busca traz título, trecho e link de até 5 resultados por consulta. O modelo
+pode pesquisar de novo na continuação, com limite de 4 rodadas
+(`MAX_TOOL_ROUNDS`).
+
+O DuckDuckGo limita requisições por IP e responde `202`. Quando isso acontece,
+a NEXA recebe o aviso e responde com o que já sabe, dizendo que não conseguiu
+verificar. O aviso também aparece no log como `[NEXA-PESQUISA] ... (202)`.
+
+Quando uma ferramenta é usada, a resposta ganha uma pílula embaixo do texto:
+`⌕ Pesquisei na web para responder.` ou `✦ Memória atualizada com o que você
+me contou.`
+
 ## Barra lateral
 
 O botão **☰** no canto esquerdo abre a gaveta de menu, que desliza por cima

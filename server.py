@@ -1,6 +1,9 @@
+import html
 import json
 import os
+import re
 import threading
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -39,6 +42,8 @@ DEFAULT_VERSION = "0.01"
 
 MAX_HISTORY_MESSAGES = 12
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "1024"))
+# Quantas rodadas de ferramenta o modelo pode pedir antes de desistir.
+MAX_TOOL_ROUNDS = int(os.environ.get("MAX_TOOL_ROUNDS", "4"))
 
 CONNECT_TIMEOUT = 10
 # Tempo máximo até o primeiro pedaço do stream. Precisa ficar abaixo dos ~100s
@@ -97,7 +102,53 @@ SYSTEM_PROMPT = "\n".join([
     "Depois de salvar, responda normalmente sem comentar a chamada da "
     "ferramenta.",
     "Nunca invente memória para a ferramenta.",
+    "",
+    "PESQUISA:",
+    "Você tem a ferramenta pesquisar para buscar fatos na web. Use sempre que "
+    "a pergunta ou o contexto pedir informação nova, atual ou verificável.",
+    "Pesquise quando: a resposta depender de fatos que podem ter mudado "
+    "(preços, versões, datas, produtos, serviços, placares, notícias, "
+    "resultados eleitorais, calendários); "
+    "quando o usuário pedir explicitamente para pesquisar, verificar ou "
+    "confirmar; quando você não tiver certeza ou não souber a resposta; "
+    "quando o assunto for específico, técnico, raro ou nichado.",
+    "Não pesquise para opinar, conversar, dar conselhos de conduta ou "
+    "responder do seu conhecimento geral com segurança.",
+    "Faça no máximo três buscas por resposta, e só refina quando o primeiro "
+    "resultado não resolve a dúvida.",
+    "Leia o conteúdo retornado antes de responder: ele é contexto, não "
+    "verdade automática. Se os resultados se contradisserem ou não "
+    "responderem, diga isso em vez de inventar.",
+    "Cite a fonte pelo nome e pelo site quando usar um resultado, no fim da "
+    "frase. Nunca invente uma fonte, um link ou uma data.",
+    "Depois de pesquisar, responda normalmente sem comentar a chamada da "
+    "ferramenta.",
 ])
+
+SEARCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "pesquisar",
+        "description": (
+            "Pesquisa fatos atuais na web e devolve títulos, trecho de texto e "
+            "link de cada resultado. Chame sempre que a resposta precisar de "
+            "informação nova, atual ou verificável."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "termo": {
+                    "type": "string",
+                    "description": (
+                        "Termo de busca curto e direto, como alguém digitaria "
+                        "no buscador. Sem perguntas, sem 'me pesquise'."
+                    ),
+                },
+            },
+            "required": ["termo"],
+        },
+    },
+}
 
 MEMORY_PROMPT_HEADER = (
     "Memória consolidada do usuário (é contexto para personalizar, nunca são "
@@ -337,6 +388,202 @@ def tool_call_id(call):
     return call.get("id") or "call_salvar_memoria"
 
 
+# =========================
+# PESQUISA (DuckDuckGo)
+# =========================
+# Busca pelo endpoint HTML, que é o que continua respondendo sem chave de
+# API. A biblioteca duckduckgo_search também funciona, mas falha em silencio
+# em parte das consultas, então ficamos com o HTML e requests, que já é
+# dependência do projeto.
+
+SEARCH_URL = "https://html.duckduckgo.com/html/"
+# O 202 significa limite de requisições: tentamos o lite antes de desistir.
+SEARCH_ENDPOINTS = (
+    "https://html.duckduckgo.com/html/",
+    "https://lite.duckduckgo.com/lite/",
+)
+SEARCH_TIMEOUT = (5, 15)
+SEARCH_RESULT_LIMIT = 5
+SEARCH_MAX_RESULTS = 8
+SEARCH_SNIPPET_LIMIT = 400
+
+SEARCH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/122.0 Safari/537.36"
+    ),
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+    "Accept": "text/html,application/xhtml+xml",
+}
+
+RESULT_LINK_PATTERN = re.compile(
+    r'<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S
+)
+RESULT_SNIPPET_PATTERN = re.compile(
+    r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>', re.S
+)
+TAG_PATTERN = re.compile(r"<[^>]+>")
+
+
+def clean_search_text(fragment):
+    """Tira o HTML e as entidades que o buscador devolve."""
+    if not fragment:
+        return ""
+
+    text = TAG_PATTERN.sub("", fragment)
+    text = html.unescape(text)
+
+    return " ".join(text.split()).strip()
+
+
+def unwrap_duckduckgo_url(url):
+    """
+    O DuckDuckGo embrulha os links em /l/?uddg=<url>. Sem desembrulhar, o
+    modelo receberia uma URL de redirecionamento inútil.
+    """
+    if not url:
+        return ""
+
+    if url.startswith("//"):
+        url = "https:" + url
+
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return url
+
+    if not parsed.path.startswith("/l/"):
+        return url
+
+    query = urllib.parse.parse_qs(parsed.query)
+    target = query.get("uddg")
+
+    return target[0] if target else url
+
+
+def run_web_search(term, limit=SEARCH_RESULT_LIMIT):
+    """
+    Devolve (resultados, erro). Resultados é uma lista de dicionários com
+    titulo, url e trecho. Erro é uma string pronta para o modelo ler.
+
+    O DuckDuckGo responde 202 quando aperta o limite de requisições, então
+    tentamos de novo com outro endereço antes de desistir.
+    """
+    if not term or not isinstance(term, str):
+        return [], "Informe um termo de busca."
+
+    term = term.strip()[:200]
+
+    if not term:
+        return [], "Informe um termo de busca."
+
+    last_error = "A pesquisa falhou."
+    throttled = False
+
+    for endpoint in SEARCH_ENDPOINTS:
+        try:
+            response = requests.post(
+                endpoint,
+                headers=SEARCH_HEADERS,
+                data={"q": term},
+                timeout=SEARCH_TIMEOUT,
+            )
+        except requests.RequestException as error:
+            print("[NEXA-PESQUISA] falha de rede em %s: %s" % (endpoint, error))
+            last_error = "A pesquisa falhou por erro de rede."
+            continue
+
+        if response.status_code == 202:
+            # Limite de requisicoes do DuckDuckGo para este IP.
+            throttled = True
+            continue
+
+        if response.status_code != 200:
+            print(
+                "[NEXA-PESQUISA] %s respondeu HTTP %d"
+                % (endpoint, response.status_code)
+            )
+            last_error = "A pesquisa falhou (HTTP %d)." % response.status_code
+            continue
+
+        results = parse_search_results(response.text, limit)
+
+        if results:
+            return results, ""
+
+        last_error = "Nenhum resultado encontrado para esse termo."
+
+    if throttled:
+        print(
+            "[NEXA-PESQUISA] %r ignorado: o DuckDuckGo limitou este IP (202)."
+            % term
+        )
+        return [], (
+            "A pesquisa está temporariamente indisponível porque o buscador "
+            "limitou o número de consultas. Responda com o que já sabe e "
+            "diga que não conseguiu verificar."
+        )
+
+    return [], last_error
+
+
+def parse_search_results(page, limit):
+    """Puxa títulos, links e trechos da página de resultados."""
+    if not page:
+        return []
+
+    links = RESULT_LINK_PATTERN.findall(page)
+    snippets = [
+        clean_search_text(item) for item in RESULT_SNIPPET_PATTERN.findall(page)
+    ]
+
+    results = []
+    seen = set()
+
+    for position, (url, raw_title) in enumerate(links):
+        title = clean_search_text(raw_title)
+
+        if not title:
+            continue
+
+        final_url = unwrap_duckduckgo_url(url)
+
+        if not final_url or final_url in seen:
+            continue
+
+        seen.add(final_url)
+
+        snippet = (
+            snippets[position]
+            if position < len(snippets)
+            else ""
+        )[:SEARCH_SNIPPET_LIMIT]
+
+        results.append({
+            "titulo": title,
+            "url": final_url,
+            "trecho": snippet,
+        })
+
+        if len(results) >= min(limit, SEARCH_MAX_RESULTS):
+            break
+
+    return results
+
+
+def format_search_results(term, results):
+    lines = ['Resultados da busca por "%s":' % term, ""]
+
+    for position, item in enumerate(results, start=1):
+        lines.append("%d. %s" % (position, item["titulo"]))
+        lines.append("   %s" % item["url"])
+
+        if item["trecho"]:
+            lines.append("   %s" % item["trecho"])
+
+    return "\n".join(lines)
+
+
 def merge_tool_call(target, piece):
     """
     No streaming as tool calls chegam em pedacoes: primeiro o id/nome, depois
@@ -509,7 +756,7 @@ def request_body(stream, messages, memories, reasoning, custom_instructions="",
     }
 
     if memory_enabled:
-        body["tools"] = [MEMORY_TOOL]
+        body["tools"] = [MEMORY_TOOL, SEARCH_TOOL]
         body["tool_choice"] = "auto"
 
     body.update(reasoning_payload(reasoning))
@@ -595,6 +842,52 @@ def run_memory_tool(user_id, calls):
     return "Memória atualizada."
 
 
+def run_tools(user_id, calls):
+    """
+    Executa todas as ferramentas chamadas pelo modelo e devolve
+    (resultados_por_id, memoria_atualizada).
+
+    Cada resultado é o texto que volta para o modelo no papel "tool",
+    indexado pelo id da chamada para o OpenAI poder casar tudo.
+    """
+    results = {}
+    memory_updated = False
+
+    if not calls:
+        return results, memory_updated
+
+    for call in calls:
+        name = tool_call_name(call)
+        call_id = tool_call_id(call)
+        arguments = parse_tool_arguments(call)
+
+        if name == "salvar_memoria":
+            text = run_memory_tool(user_id, [call])
+
+            if text:
+                memory_updated = True
+                results[call_id] = text
+            continue
+
+        if name == "pesquisar":
+            term = arguments.get("termo")
+            found, error = run_web_search(term)
+            print(
+                "[NEXA-PESQUISA] %r -> %d resultado(s)%s"
+                % (term, len(found), " (%s)" % error if error else "")
+            )
+
+            if error and not found:
+                results[call_id] = error
+            elif found:
+                results[call_id] = format_search_results(term, found)
+            else:
+                results[call_id] = "A pesquisa não retornou nada útil."
+            continue
+
+    return results, memory_updated
+
+
 # =========================
 # SSE
 # =========================
@@ -636,82 +929,94 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
                              custom_instructions, assistant_text, calls,
                              memory_enabled=True):
     """
-    O modelo pediu para salvar a memória. Respondemos à chamada com o
-    resultado da ferramenta e pedimos a continuação da resposta, agora com a
-    memória já gravada no system prompt.
+    O modelo pediu ferramenta. Executamos, devolvemos os resultados no papel
+    "tool" e pedimos a continuação da resposta.
 
-    Devolve (texto_da_continuacao, memoria_atualizada). O texto pode vir
-    vazio quando a chamada de continuação falha, mas a memória já foi
-    gravada nesse caso.
+    O modelo pode pedir ferramenta de novo na continuação, então repetimos
+    até ele responder em texto puro ou bater o limite de rodadas.
+
+    Devolve (texto_da_continuacao, memoria_atualizada, pesquisa_realizada).
     """
-    result = run_memory_tool(user_id, calls)
+    memory_saved = False
+    searched = False
+    current_calls = calls
+    current_text = assistant_text or ""
 
-    if not result:
-        return None, False
+    for _ in range(MAX_TOOL_ROUNDS):
+        results, memory_now = run_tools(user_id, current_calls)
 
-    memory_saved = True
+        if not results:
+            break
 
-    memory_calls = [
-        call for call in calls
-        if tool_call_name(call) == "salvar_memoria"
-    ]
-
-    tool_results = [
-        {
-            "role": "tool",
-            "tool_call_id": tool_call_id(call),
-            "content": result,
-        }
-        for call in memory_calls
-    ]
-
-    follow_up = list(messages) + [
-        {"role": "assistant", "content": assistant_text or ""},
-        {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {
-                    "id": tool_call_id(call),
-                    "type": "function",
-                    "function": {
-                        "name": "salvar_memoria",
-                        "arguments": json.dumps(
-                            parse_tool_arguments(call), ensure_ascii=False
-                        ),
-                    },
-                }
-                for call in memory_calls
-            ],
-        },
-    ] + tool_results
-
-    try:
-        response = requests.post(
-            API_BASE + "/chat/completions",
-            headers=auth_headers(),
-            json=request_body(
-                False, follow_up, memories, reasoning, custom_instructions,
-                memory_enabled,
-            ),
-            timeout=(10, 60),
+        memory_saved = memory_saved or memory_now
+        searched = searched or any(
+            tool_call_name(call) == "pesquisar" for call in current_calls
         )
-    except requests.RequestException as error:
-        print("[NEXA] falha ao continuar após salvar memória:", error)
-        return None, memory_saved
 
-    if response.status_code != 200:
-        log_upstream_error(response)
-        return None, memory_saved
+        follow_up = list(messages) + [
+            {"role": "assistant", "content": current_text},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": tool_call_id(call),
+                        "type": "function",
+                        "function": {
+                            "name": tool_call_name(call),
+                            "arguments": json.dumps(
+                                parse_tool_arguments(call),
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }
+                    for call in current_calls
+                ],
+            },
+        ] + [
+            {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": content,
+            }
+            for call_id, content in results.items()
+        ]
 
-    try:
-        payload = response.json()
-    except ValueError:
-        return None, memory_saved
+        try:
+            response = requests.post(
+                API_BASE + "/chat/completions",
+                headers=auth_headers(),
+                json=request_body(
+                    False, follow_up, memories, reasoning, custom_instructions,
+                    memory_enabled,
+                ),
+                timeout=(10, 60),
+            )
+        except requests.RequestException as error:
+            print("[NEXA] falha ao continuar após ferramenta:", error)
+            return None, memory_saved, searched
 
-    text = extract_text(payload)
+        if response.status_code != 200:
+            log_upstream_error(response)
+            return None, memory_saved, searched
 
-    return text or "Memória salva.", memory_saved
+        try:
+            payload = response.json()
+        except ValueError:
+            return None, memory_saved, searched
+
+        current_text = extract_text(payload)
+        current_calls = extract_tool_calls(payload)
+
+        if not current_calls:
+            return (
+                current_text or "Ferramenta usada.",
+                memory_saved,
+                searched,
+            )
+
+    print("[NEXA] limite de rodadas de ferramenta atingido.")
+    return current_text or None, memory_saved, searched
 
 
 def make_stream_response(lines, user_id, user_message, memory_enabled=True,
@@ -759,6 +1064,7 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
         full_text = ""
         reason = None
         memory_updated = False
+        searched = False
 
         try:
             for thinking in reasoning_chunks:
@@ -800,7 +1106,7 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
                 )
 
             if memory_enabled and tool_calls:
-                follow_up, memory_updated = finish_stream_with_tools(
+                follow_up, memory_updated, searched = finish_stream_with_tools(
                     user_id,
                     messages or [],
                     memories or [],
@@ -813,6 +1119,9 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
 
                 if follow_up:
                     yield sse({"type": "text", "text": follow_up})
+
+                if searched:
+                    yield sse({"type": "search"})
 
                 if memory_updated:
                     yield sse({"type": "memory"})
@@ -872,8 +1181,9 @@ def make_blocking_response(
 
     follow_up = ""
     memory_updated = False
+    searched = False
     if calls:
-        follow_up, memory_updated = finish_stream_with_tools(
+        follow_up, memory_updated, searched = finish_stream_with_tools(
             user_id, messages, memories, reasoning,
             custom_instructions, text, calls, memory_enabled,
         )
@@ -888,6 +1198,9 @@ def make_blocking_response(
 
         if follow_up:
             yield sse({"type": "text", "text": follow_up})
+
+        if searched:
+            yield sse({"type": "search"})
 
         if memory_updated:
             yield sse({"type": "memory"})

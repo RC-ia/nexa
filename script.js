@@ -277,7 +277,8 @@ function cleanMessages(list) {
       role: item.role,
       content: item.content,
       thinking: item.thinking,
-      memoryUpdated: item.memoryUpdated === true
+      memoryUpdated: item.memoryUpdated === true,
+      searched: item.searched === true
     }));
 }
 
@@ -521,7 +522,7 @@ function loadChats() {
   ==========================================
 */
 
-function addMessage(text, type, thinkingText, memoryUpdated) {
+function addMessage(text, type, thinkingText, memoryUpdated, searched) {
   const message =
     document.createElement("div");
 
@@ -560,6 +561,17 @@ function addMessage(text, type, thinkingText, memoryUpdated) {
 
     message.appendChild(thinking.button);
     message.appendChild(thinking.panel);
+
+    const searchNotice =
+      createSearchNotice();
+
+    searchNotice.restore(
+      searched === true
+    );
+
+    message.appendChild(
+      searchNotice.element
+    );
 
     const memoryNotice =
       createMemoryNotice();
@@ -660,32 +672,45 @@ function hideTyping() {
 
 /*
   ==========================================
-  AVISO DE MEMÓRIA ATUALIZADA
+  AVISOS DE FERRAMENTA
   ==========================================
 */
 
-const MEMORY_NOTICE_TEXT =
-  "Memória atualizada com o que você me contou.";
+const NOTICE_ITEMS = {
+  memory: {
+    className: "memory-notice",
+    icon: "✦",
+    text: "Memória atualizada com o que você me contou."
+  },
+  search: {
+    className: "search-notice",
+    icon: "⌕",
+    text: "Pesquisei na web para responder."
+  }
+};
 
-function createMemoryNotice() {
+function createNotice(kind) {
+  const config =
+    NOTICE_ITEMS[kind];
+
   const notice =
     document.createElement("p");
 
-  notice.className = "memory-notice";
+  notice.className = config.className;
   notice.hidden = true;
 
   const icon =
     document.createElement("span");
 
-  icon.className = "memory-notice-icon";
+  icon.className = config.className + "-icon";
   icon.setAttribute("aria-hidden", "true");
-  icon.textContent = "✦";
+  icon.textContent = config.icon;
 
   const text =
     document.createElement("span");
 
-  text.className = "memory-notice-text";
-  text.textContent = MEMORY_NOTICE_TEXT;
+  text.className = config.className + "-text";
+  text.textContent = config.text;
 
   notice.appendChild(icon);
   notice.appendChild(text);
@@ -711,6 +736,14 @@ function createMemoryNotice() {
       }
     }
   };
+}
+
+function createMemoryNotice() {
+  return createNotice("memory");
+}
+
+function createSearchNotice() {
+  return createNotice("search");
 }
 
 function createThinkingBlock() {
@@ -847,10 +880,14 @@ function createStreamingMessage() {
   const memoryNotice =
     createMemoryNotice();
 
+  const searchNotice =
+    createSearchNotice();
+
   message.appendChild(label);
   message.appendChild(thinking.button);
   message.appendChild(thinking.panel);
   message.appendChild(paragraph);
+  message.appendChild(searchNotice.element);
   message.appendChild(memoryNotice.element);
 
   chat.appendChild(message);
@@ -896,7 +933,8 @@ function createStreamingMessage() {
     appendText,
     flushText,
     thinking,
-    memoryNotice
+    memoryNotice,
+    searchNotice
   };
 }
 
@@ -973,7 +1011,8 @@ async function askNexa(text) {
     appendText,
     flushText,
     thinking,
-    memoryNotice
+    memoryNotice,
+    searchNotice
   } = createStreamingMessage();
 
   const reader =
@@ -987,6 +1026,7 @@ async function askNexa(text) {
   let fullThinking = "";
   let finished = false;
   let memoryUpdated = false;
+  let searched = false;
 
   /*
     Processa um evento SSE.
@@ -1044,13 +1084,23 @@ async function askNexa(text) {
       }
 
       /*
-        A memória desta conta foi reescrita
-        pela ferramenta chamada pelo modelo.
+        A memória foi reescrita pela
+        ferramenta chamada pelo modelo.
       */
 
       if (data.type === "memory") {
         memoryUpdated = true;
         memoryNotice.show();
+      }
+
+      /*
+        O modelo consultou a web
+        antes de responder.
+      */
+
+      if (data.type === "search") {
+        searched = true;
+        searchNotice.show();
       }
 
       /*
@@ -1154,7 +1204,8 @@ async function askNexa(text) {
     role: "model",
     content: fullReply,
     thinking: fullThinking,
-    memoryUpdated
+    memoryUpdated,
+    searched
   });
 
   saveMemory();
@@ -2162,7 +2213,8 @@ function restoreConversation() {
         ? "user"
         : "nexa",
       item.thinking,
-      item.memoryUpdated
+      item.memoryUpdated,
+      item.searched
     );
   });
 }
