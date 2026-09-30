@@ -1,6 +1,10 @@
 const composer = document.getElementById("composer");
 const input = document.getElementById("messageInput");
 const chat = document.getElementById("chat");
+
+/* A conversa rola dentro de .feed; o composer fica fixo no rodapé. */
+const feed = document.querySelector(".feed");
+
 const micButton = document.getElementById("micButton");
 const sendButton = composer.querySelector('button[type="submit"]');
 const newChatButton = document.getElementById("newChatButton");
@@ -636,8 +640,9 @@ function updateStreamingMessage(
     enquanto ela é recebida.
   */
 
-  chat.scrollTop =
-    chat.scrollHeight;
+  if (feed) {
+    feed.scrollTop = feed.scrollHeight;
+  }
 }
 
 /*
@@ -918,6 +923,10 @@ function clearConversation() {
       <p>Conversa limpa. Minha memória dessa conversa foi apagada. O que eu já aprendi sobre você continua guardado.</p>
     </div>
   `;
+
+  if (feed) {
+    feed.scrollTop = 0;
+  }
 
   input.value = "";
   input.focus();
