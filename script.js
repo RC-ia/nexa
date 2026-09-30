@@ -295,13 +295,6 @@ function setupReasoningUI() {
   ==========================================
 */
 
-const WELCOME_HTML = `
-  <div class="message nexa">
-    <span class="label">NEXA</span>
-    <p>E aí. Sou a NEXA. Já tô online — manda a boa.</p>
-  </div>
-`;
-
 let chats = [];
 let activeChatId = null;
 let drawerOpen = false;
@@ -1148,7 +1141,7 @@ function stopSpeaking() {
 
 function renderChat() {
   if (history.length === 0) {
-    chat.innerHTML = WELCOME_HTML;
+    chat.innerHTML = "";
   } else {
     restoreConversation();
   }
