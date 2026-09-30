@@ -12,6 +12,8 @@ BASE_DIR = Path(__file__).resolve().parent
 
 load_dotenv(BASE_DIR / ".env")
 
+from auth import auth_bp, current_user, init_auth_db  # noqa: E402  (precisa do .env já carregado)
+
 API_KEY = os.environ.get("API_KEY", "").strip()
 API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip("/")
 MODEL = os.environ.get("MODEL", "nada")
@@ -68,6 +70,7 @@ SYSTEM_PROMPT = "\n".join([
 ])
 
 app = Flask(__name__)
+app.register_blueprint(auth_bp)
 
 
 # =========================
@@ -573,6 +576,11 @@ def static_file(filename):
 
 @app.post("/api/chat")
 def chat():
+    user = current_user()
+
+    if user is None:
+        return jsonify({"error": "Faça login para conversar com a NEXA."}), 401
+
     if not API_KEY:
         return jsonify({"error": "API_KEY não configurada no arquivo .env."}), 500
 
@@ -581,7 +589,8 @@ def chat():
     except Exception:
         body = {}
 
-    user_id = str(body.get("userId") or "")
+    # A memória fica presa à conta logada; o userId vindo do navegador é ignorado.
+    user_id = "acct_%d" % user["id"]
 
     reasoning = body.get("reasoning")
     reasoning = reasoning.strip() if isinstance(reasoning, str) else ""
@@ -665,6 +674,7 @@ def chat():
 
 
 init_db()
+init_auth_db()
 
 
 if __name__ == "__main__":

@@ -20,9 +20,8 @@ const settingsPanel = document.getElementById("settingsPanel");
 const settingsClose = document.getElementById("settingsClose");
 
 const MEMORY_KEY = "nexa_conversation";
-const CHATS_KEY = "nexa_chats";
-const ACTIVE_CHAT_KEY = "nexa_active_chat";
-const USER_ID_KEY = "nexa_user_id";
+let CHATS_KEY = "nexa_chats";
+let ACTIVE_CHAT_KEY = "nexa_active_chat";
 const REASONING_KEY = "nexa_reasoning";
 
 const REASONING_LABELS = {
@@ -286,32 +285,6 @@ function setupReasoningUI() {
   );
 }
 
-
-/*
-  ==========================================
-  ID PERMANENTE
-  ==========================================
-*/
-
-function getUserId() {
-  let userId =
-    localStorage.getItem(USER_ID_KEY);
-
-  if (!userId) {
-    userId =
-      "user_" +
-      crypto.randomUUID();
-
-    localStorage.setItem(
-      USER_ID_KEY,
-      userId
-    );
-  }
-
-  return userId;
-}
-
-const userId = getUserId();
 
 /*
   ==========================================
@@ -912,8 +885,6 @@ async function askNexa(text) {
         history:
           history.slice(-12),
 
-        userId,
-
         reasoning: reasoningLevel
       })
     });
@@ -922,6 +893,13 @@ async function askNexa(text) {
     Se o servidor responder com
     JSON de erro antes do streaming.
   */
+
+  if (response.status === 401) {
+    showAuth("login");
+    throw new Error(
+      "Sua sessão expirou. Entre de novo."
+    );
+  }
 
   if (!response.ok) {
     let data = null;
@@ -1688,12 +1666,14 @@ function restoreConversation() {
   });
 }
 
-loadChats();
-renderChat();
-renderChatList();
-loadReasoning();
-setupReasoningUI();
-renderReasoning();
+function bootApp() {
+  loadChats();
+  renderChat();
+  renderChatList();
+  loadReasoning();
+  setupReasoningUI();
+  renderReasoning();
+}
 
 /*
   ==========================================
@@ -1734,3 +1714,300 @@ async function loadVersion() {
 }
 
 loadVersion();
+
+/*
+  ==========================================
+  LOGIN E CADASTRO
+  As conversas ficam no navegador, separadas por conta
+  (nexa_chats:<email>). O app só inicia depois do login.
+  ==========================================
+*/
+
+const authPanel = document.getElementById("authPanel");
+const authTabs = document.getElementById("authTabs");
+const authError = document.getElementById("authError");
+const loginForm = document.getElementById("loginForm");
+const registerForm = document.getElementById("registerForm");
+const verifyForm = document.getElementById("verifyForm");
+const verifyHint = document.getElementById("verifyHint");
+const resendButton = document.getElementById("resendCode");
+const drawerEmail = document.getElementById("drawerEmail");
+const drawerLogout = document.getElementById("drawerLogout");
+
+let pendingEmail = "";
+let resendTimer = null;
+
+function showAuthError(message) {
+  authError.textContent = message || "";
+  authError.hidden = !message;
+}
+
+function setAuthView(view) {
+  const forms = {
+    login: loginForm,
+    register: registerForm,
+    verify: verifyForm
+  };
+
+  Object.keys(forms).forEach(function (name) {
+    forms[name].hidden = name !== view;
+  });
+
+  authTabs.hidden = view === "verify";
+
+  authTabs.querySelectorAll(".auth-tab").forEach(
+    function (tab) {
+      tab.classList.toggle(
+        "active",
+        tab.dataset.tab === view
+      );
+    }
+  );
+
+  showAuthError("");
+}
+
+function showAuth(view) {
+  authPanel.hidden = false;
+  setAuthView(view || "login");
+}
+
+async function authRequest(path, payload) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {})
+  });
+
+  let data = {};
+
+  try {
+    data = await response.json();
+  } catch {
+    // Resposta sem JSON.
+  }
+
+  if (!response.ok) {
+    const failure = new Error(
+      data.error ||
+      `Erro (HTTP ${response.status}).`
+    );
+
+    failure.retryIn = data.retryIn;
+    throw failure;
+  }
+
+  return data;
+}
+
+function startResendCountdown(seconds) {
+  clearInterval(resendTimer);
+
+  let left = Math.max(0, Number(seconds) || 0);
+
+  function tick() {
+    resendButton.disabled = left > 0;
+    resendButton.textContent = left > 0
+      ? `Reenviar código (${left}s)`
+      : "Reenviar código";
+
+    if (left <= 0) {
+      clearInterval(resendTimer);
+    }
+
+    left -= 1;
+  }
+
+  tick();
+  resendTimer = setInterval(tick, 1000);
+}
+
+function goToVerify(email, seconds) {
+  pendingEmail = email;
+  verifyHint.textContent =
+    `Enviamos um código de 6 dígitos para ${email}. ` +
+    "Digite abaixo para criar a conta.";
+  verifyForm.reset();
+  setAuthView("verify");
+  startResendCountdown(seconds);
+  document.getElementById("verifyCode").focus();
+}
+
+/* Roda uma ação mostrando erro e travando o botão de envio. */
+async function withSubmit(form, action) {
+  const button = form.querySelector("[type=submit]");
+
+  showAuthError("");
+  button.disabled = true;
+
+  try {
+    await action();
+  } catch (error) {
+    showAuthError(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function enterApp(user) {
+  const suffix = ":" + user.email;
+  const legacyChats = localStorage.getItem("nexa_chats");
+
+  CHATS_KEY = "nexa_chats" + suffix;
+  ACTIVE_CHAT_KEY = "nexa_active_chat" + suffix;
+
+  /*
+    Conversas de antes do login: a primeira conta que entra
+    neste navegador herda elas, e a chave antiga é removida.
+  */
+  if (
+    legacyChats &&
+    localStorage.getItem(CHATS_KEY) === null
+  ) {
+    localStorage.setItem(CHATS_KEY, legacyChats);
+
+    const legacyActive =
+      localStorage.getItem("nexa_active_chat");
+
+    if (legacyActive) {
+      localStorage.setItem(ACTIVE_CHAT_KEY, legacyActive);
+    }
+
+    localStorage.removeItem("nexa_chats");
+    localStorage.removeItem("nexa_active_chat");
+  }
+
+  authPanel.hidden = true;
+  drawerEmail.textContent = user.email;
+  drawerEmail.title = user.email;
+
+  bootApp();
+}
+
+authTabs.addEventListener("click", function (event) {
+  const tab = event.target.closest(".auth-tab");
+
+  if (tab) {
+    setAuthView(tab.dataset.tab);
+  }
+});
+
+loginForm.addEventListener("submit", function (event) {
+  event.preventDefault();
+
+  withSubmit(loginForm, async function () {
+    const data = await authRequest("/api/auth/login", {
+      email: document.getElementById("loginEmail").value,
+      password: document.getElementById("loginPassword").value
+    });
+
+    loginForm.reset();
+    enterApp(data.user);
+  });
+});
+
+registerForm.addEventListener("submit", function (event) {
+  event.preventDefault();
+
+  const email = document
+    .getElementById("registerEmail").value.trim();
+  const password = document
+    .getElementById("registerPassword").value;
+  const confirm = document
+    .getElementById("registerConfirm").value;
+
+  if (password !== confirm) {
+    showAuthError("As senhas não são iguais.");
+    return;
+  }
+
+  withSubmit(registerForm, async function () {
+    try {
+      const data = await authRequest(
+        "/api/auth/register",
+        { email, password }
+      );
+
+      registerForm.reset();
+      goToVerify(email, data.resendIn);
+
+    } catch (error) {
+      /* Código já enviado há pouco: segue para a digitação dele. */
+      if (error.retryIn) {
+        registerForm.reset();
+        goToVerify(email, error.retryIn);
+        return;
+      }
+
+      throw error;
+    }
+  });
+});
+
+verifyForm.addEventListener("submit", function (event) {
+  event.preventDefault();
+
+  withSubmit(verifyForm, async function () {
+    const data = await authRequest("/api/auth/verify", {
+      email: pendingEmail,
+      code: document.getElementById("verifyCode").value.trim()
+    });
+
+    clearInterval(resendTimer);
+    enterApp(data.user);
+  });
+});
+
+resendButton.addEventListener("click", async function () {
+  showAuthError("");
+  resendButton.disabled = true;
+
+  try {
+    const data = await authRequest(
+      "/api/auth/resend",
+      { email: pendingEmail }
+    );
+
+    startResendCountdown(data.resendIn);
+
+  } catch (error) {
+    showAuthError(error.message);
+    startResendCountdown(error.retryIn || 0);
+  }
+});
+
+document.getElementById("verifyBack").addEventListener(
+  "click",
+  function () {
+    clearInterval(resendTimer);
+    setAuthView("register");
+  }
+);
+
+drawerLogout.addEventListener("click", async function () {
+  try {
+    await fetch("/api/auth/logout", { method: "POST" });
+  } catch {
+    // Sem rede: recarregar já cai na tela de login se o cookie expirar.
+  }
+
+  location.reload();
+});
+
+async function initAuth() {
+  try {
+    const response = await fetch("/api/auth/me");
+
+    if (response.ok) {
+      const data = await response.json();
+      enterApp(data.user);
+      return;
+    }
+  } catch (error) {
+    console.error("Erro ao verificar login:", error);
+  }
+
+  showAuth("login");
+}
+
+initAuth();

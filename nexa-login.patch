@@ -1,0 +1,1442 @@
+diff --git a/.env.example b/.env.example
+new file mode 100644
+index 0000000..9af0b0b
+--- /dev/null
++++ b/.env.example
+@@ -0,0 +1,18 @@
++# Chave da API do modelo
++API_KEY=
++
++# --- Email (código de cadastro) ---
++# Sem SMTP_HOST o código aparece só no console do servidor (modo dev).
++SMTP_HOST=
++SMTP_PORT=587
++SMTP_USER=
++SMTP_PASSWORD=
++SMTP_FROM=
++SMTP_SECURITY=starttls
++
++# --- Login (opcionais, já têm padrão) ---
++# CODE_TTL_MINUTES=10
++# CODE_MAX_ATTEMPTS=5
++# RESEND_COOLDOWN=60
++# SESSION_DAYS=30
++# AUTH_DB=auth.db
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..b18c7bc
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,6 @@
++.env
++auth.db
++.nexa_version
++.venv/
++__pycache__/
++*.pyc
+diff --git a/README.md b/README.md
+index 2c76eb4..9b3e00c 100644
+--- a/README.md
++++ b/README.md
+@@ -6,11 +6,13 @@ máquina e ser exposta com o túnel do Cloudflare (`cloudflared`).
+ 
+ Estrutura:
+ - `server.py` — servidor Flask (serve o site + `/api/chat` com streaming SSE)
++- `auth.py` — login, cadastro com código por email e sessões
+ - `run.py` — supervisor: roda o servidor e aplica auto-update via git
+ - `index.html`, `style.css`, `script.js` — frontend (inalterado)
+ - `requirements.txt` — dependências Python
+ - `.env.example` — modelo de configuração
+ - `nexa.db` — banco SQLite de memória (criado automaticamente)
++- `auth.db` — contas, cadastros pendentes e sessões (criado automaticamente, **não versionar**)
+ 
+ ## 1. Instalar as dependências
+ 
+@@ -31,6 +33,47 @@ API_KEY=sua-chave-aqui
+ Opcionais (já têm padrão): `API_BASE`, `MODEL`, `PORT`, `MAX_OUTPUT_TOKENS`, `MEMORY_DB`.
+ Nunca versione o `.env` (ele já está no `.gitignore`).
+ 
++## Login e cadastro
++
++A NEXA exige login para conversar. Na primeira tela dá para **Entrar** com
++email e senha ou **Criar conta**: no cadastro o servidor envia um código de
++6 dígitos para o email, e a conta só é criada depois que o código é digitado.
++
++Como funciona:
++
++- Senha com no mínimo 8 caracteres, guardada apenas como hash (scrypt).
++- O código vale `CODE_TTL_MINUTES` (padrão 10), tem até `CODE_MAX_ATTEMPTS`
++  tentativas (padrão 5) e o reenvio espera `RESEND_COOLDOWN` segundos (padrão 60).
++  O código também é guardado só como hash.
++- A sessão é um cookie `HttpOnly` (`SameSite=Lax`, `Secure` quando o acesso é
++  por HTTPS, como no túnel do Cloudflare) e dura `SESSION_DAYS` (padrão 30).
++  `POST /api/auth/logout` e o botão **Sair** da gaveta encerram a sessão.
++- A memória de longo prazo agora é ligada à conta (o servidor ignora o
++  `userId` vindo do navegador). As conversas do `localStorage` ficam
++  separadas por conta; as conversas de antes do login vão para a primeira
++  conta que entrar naquele navegador.
++- Tentativas de login e de cadastro têm limite por IP/email.
++
++### Envio do email (SMTP)
++
++Configure no `.env`:
++
++```
++SMTP_HOST=smtp.exemplo.com
++SMTP_PORT=587
++SMTP_USER=usuario
++SMTP_PASSWORD=senha-ou-app-password
++SMTP_FROM=NEXA <no-reply@exemplo.com>
++SMTP_SECURITY=starttls   # ou ssl (porta 465) / none
++```
++
++Sem `SMTP_HOST`, o servidor está em **modo desenvolvimento**: nenhum email é
++enviado e o código aparece no console (`[NEXA-auth] ... código para ...`).
++Use isso só para testar localmente.
++
++Rotas: `POST /api/auth/register`, `/verify`, `/resend`, `/login`, `/logout` e
++`GET /api/auth/me`.
++
+ ## 3. Rodar
+ 
+ ```bash
+diff --git a/auth.py b/auth.py
+new file mode 100644
+index 0000000..52b8536
+--- /dev/null
++++ b/auth.py
+@@ -0,0 +1,522 @@
++"""
++Autenticação da NEXA: cadastro com código por email, login e sessão.
++
++- Senhas: hash scrypt (werkzeug), nunca guardadas em texto.
++- Código de cadastro: 6 dígitos, guardado só como hash, expira e limita tentativas.
++- Sessão: token aleatório em cookie HttpOnly; no banco fica só o hash do token.
++- Banco separado (auth.db) para não misturar contas com o nexa.db versionado.
++"""
++
++import hashlib
++import hmac
++import os
++import re
++import secrets
++import smtplib
++import sqlite3
++import ssl
++import threading
++import time
++from email.message import EmailMessage
++from functools import wraps
++from pathlib import Path
++
++from flask import Blueprint, jsonify, request
++from werkzeug.security import check_password_hash, generate_password_hash
++
++BASE_DIR = Path(__file__).resolve().parent
++
++AUTH_DB = BASE_DIR / os.environ.get("AUTH_DB", "auth.db")
++
++SMTP_HOST = os.environ.get("SMTP_HOST", "").strip()
++SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
++SMTP_USER = os.environ.get("SMTP_USER", "").strip()
++SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
++SMTP_FROM = os.environ.get("SMTP_FROM", "").strip() or SMTP_USER
++# starttls (porta 587), ssl (porta 465) ou none.
++SMTP_SECURITY = os.environ.get("SMTP_SECURITY", "starttls").strip().lower()
++
++CODE_TTL = int(os.environ.get("CODE_TTL_MINUTES", "10")) * 60
++CODE_MAX_ATTEMPTS = int(os.environ.get("CODE_MAX_ATTEMPTS", "5"))
++RESEND_COOLDOWN = int(os.environ.get("RESEND_COOLDOWN", "60"))
++SESSION_TTL = int(os.environ.get("SESSION_DAYS", "30")) * 86400
++
++MIN_PASSWORD = 8
++MAX_PASSWORD = 128
++COOKIE_NAME = "nexa_session"
++EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
++
++# Hash usado quando o email não existe, para o login levar o mesmo tempo
++# e não revelar quais emails têm conta.
++_DUMMY_HASH = generate_password_hash("nexa-dummy-password")
++
++auth_bp = Blueprint("auth", __name__)
++
++
++# =========================
++# BANCO
++# =========================
++
++def db():
++    conn = sqlite3.connect(AUTH_DB, timeout=10)
++    conn.row_factory = sqlite3.Row
++    return conn
++
++
++def init_auth_db():
++    with db() as conn:
++        conn.execute(
++            "CREATE TABLE IF NOT EXISTS users ("
++            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
++            "email TEXT NOT NULL UNIQUE, "
++            "password_hash TEXT NOT NULL, "
++            "created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
++        )
++        conn.execute(
++            "CREATE TABLE IF NOT EXISTS pending_signups ("
++            "email TEXT PRIMARY KEY, "
++            "password_hash TEXT NOT NULL, "
++            "code_hash TEXT NOT NULL, "
++            "salt TEXT NOT NULL, "
++            "expires_at INTEGER NOT NULL, "
++            "attempts INTEGER NOT NULL DEFAULT 0, "
++            "last_sent_at INTEGER NOT NULL)"
++        )
++        conn.execute(
++            "CREATE TABLE IF NOT EXISTS sessions ("
++            "token_hash TEXT PRIMARY KEY, "
++            "user_id INTEGER NOT NULL, "
++            "expires_at INTEGER NOT NULL)"
++        )
++
++
++def purge_expired(conn):
++    now = int(time.time())
++    conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
++    conn.execute("DELETE FROM pending_signups WHERE expires_at < ?", (now,))
++
++
++# =========================
++# LIMITE DE TENTATIVAS (em memória)
++# =========================
++
++_hits = {}
++_hits_lock = threading.Lock()
++
++
++def rate_limited(key, limit, window):
++    """Conta o acesso e diz se passou do limite na janela (segundos)."""
++    now = time.time()
++
++    with _hits_lock:
++        recent = [t for t in _hits.get(key, []) if now - t < window]
++        recent.append(now)
++        _hits[key] = recent
++
++        if len(_hits) > 5000:
++            for k in [k for k, v in _hits.items() if not v or now - v[-1] > window]:
++                _hits.pop(k, None)
++
++        return len(recent) > limit
++
++
++def client_ip():
++    return request.headers.get("CF-Connecting-IP") or request.remote_addr or "?"
++
++
++# =========================
++# UTILIDADES
++# =========================
++
++def normalize_email(value):
++    if not isinstance(value, str):
++        return ""
++
++    email = value.strip().lower()
++
++    if len(email) > 254 or not EMAIL_RE.match(email):
++        return ""
++
++    return email
++
++
++def password_error(password):
++    if not isinstance(password, str):
++        return "Senha inválida."
++
++    if len(password) < MIN_PASSWORD:
++        return "A senha precisa ter pelo menos %d caracteres." % MIN_PASSWORD
++
++    if len(password) > MAX_PASSWORD:
++        return "A senha pode ter no máximo %d caracteres." % MAX_PASSWORD
++
++    return ""
++
++
++def body_json():
++    data = request.get_json(force=True, silent=True)
++    return data if isinstance(data, dict) else {}
++
++
++def error(message, status):
++    return jsonify({"error": message}), status
++
++
++def hash_code(salt, email, code):
++    return hashlib.sha256(("%s:%s:%s" % (salt, email, code)).encode()).hexdigest()
++
++
++def new_code():
++    return "%06d" % secrets.randbelow(1000000)
++
++
++def hash_token(token):
++    return hashlib.sha256(token.encode()).hexdigest()
++
++
++# =========================
++# EMAIL
++# =========================
++
++def send_code_email(email, code):
++    """Envia o código. Sem SMTP configurado, mostra no console (modo dev)."""
++
++    if not SMTP_HOST:
++        print(
++            "[NEXA-auth] SMTP não configurado — código para %s: %s "
++            "(configure SMTP_HOST no .env para enviar por email)" % (email, code),
++            flush=True,
++        )
++        return
++
++    minutes = CODE_TTL // 60
++
++    message = EmailMessage()
++    message["Subject"] = "Seu código da NEXA: " + code
++    message["From"] = SMTP_FROM
++    message["To"] = email
++    message.set_content(
++        "Seu código de verificação da NEXA é:\n\n"
++        "    %s\n\n"
++        "Ele vale por %d minutos. Se não foi você que pediu, ignore este email."
++        % (code, minutes)
++    )
++
++    context = ssl.create_default_context()
++
++    if SMTP_SECURITY == "ssl":
++        server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15, context=context)
++    else:
++        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15)
++
++    try:
++        if SMTP_SECURITY == "starttls":
++            server.starttls(context=context)
++
++        if SMTP_USER:
++            server.login(SMTP_USER, SMTP_PASSWORD)
++
++        server.send_message(message)
++
++    finally:
++        try:
++            server.quit()
++        except smtplib.SMTPException:
++            pass
++
++
++def issue_code(conn, email, password_hash):
++    """Cria/renova o cadastro pendente e envia o código. Levanta em falha de envio."""
++    code = new_code()
++    salt = secrets.token_hex(8)
++    now = int(time.time())
++
++    send_code_email(email, code)
++
++    conn.execute(
++        "INSERT INTO pending_signups "
++        "(email, password_hash, code_hash, salt, expires_at, attempts, last_sent_at) "
++        "VALUES (?, ?, ?, ?, ?, 0, ?) "
++        "ON CONFLICT(email) DO UPDATE SET "
++        "password_hash = excluded.password_hash, code_hash = excluded.code_hash, "
++        "salt = excluded.salt, expires_at = excluded.expires_at, "
++        "attempts = 0, last_sent_at = excluded.last_sent_at",
++        (email, password_hash, hash_code(salt, email, code), salt, now + CODE_TTL, now),
++    )
++
++
++# =========================
++# SESSÃO
++# =========================
++
++def is_https():
++    return request.is_secure or request.headers.get("X-Forwarded-Proto", "") == "https"
++
++
++def start_session(conn, user_id, response):
++    token = secrets.token_urlsafe(32)
++
++    conn.execute(
++        "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
++        (hash_token(token), user_id, int(time.time()) + SESSION_TTL),
++    )
++
++    response.set_cookie(
++        COOKIE_NAME,
++        token,
++        max_age=SESSION_TTL,
++        httponly=True,
++        samesite="Lax",
++        secure=is_https(),
++        path="/",
++    )
++
++    return response
++
++
++def current_user():
++    token = request.cookies.get(COOKIE_NAME, "")
++
++    if not token:
++        return None
++
++    try:
++        with db() as conn:
++            row = conn.execute(
++                "SELECT users.id AS id, users.email AS email FROM sessions "
++                "JOIN users ON users.id = sessions.user_id "
++                "WHERE sessions.token_hash = ? AND sessions.expires_at > ?",
++                (hash_token(token), int(time.time())),
++            ).fetchone()
++    except sqlite3.Error as err:
++        print("[NEXA-auth] falha ao ler sessão:", err)
++        return None
++
++    return {"id": row["id"], "email": row["email"]} if row else None
++
++
++def login_required(view):
++    @wraps(view)
++    def wrapper(*args, **kwargs):
++        if current_user() is None:
++            return error("Faça login para conversar com a NEXA.", 401)
++
++        return view(*args, **kwargs)
++
++    return wrapper
++
++
++# =========================
++# ROTAS
++# =========================
++
++@auth_bp.get("/api/auth/me")
++def me():
++    user = current_user()
++
++    if user is None:
++        return error("Não autenticado.", 401)
++
++    return jsonify({"user": {"email": user["email"]}})
++
++
++@auth_bp.post("/api/auth/register")
++def register():
++    data = body_json()
++    email = normalize_email(data.get("email"))
++    password = data.get("password")
++
++    if not email:
++        return error("Informe um email válido.", 400)
++
++    problem = password_error(password)
++    if problem:
++        return error(problem, 400)
++
++    if rate_limited("register:" + client_ip(), 10, 3600):
++        return error("Muitas tentativas. Tente de novo em alguns minutos.", 429)
++
++    try:
++        with db() as conn:
++            purge_expired(conn)
++
++            if conn.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
++                return error("Já existe uma conta com esse email. Entre com sua senha.", 409)
++
++            pending = conn.execute(
++                "SELECT last_sent_at FROM pending_signups WHERE email = ?", (email,)
++            ).fetchone()
++
++            if pending:
++                wait = RESEND_COOLDOWN - (int(time.time()) - pending["last_sent_at"])
++
++                if wait > 0:
++                    return jsonify({
++                        "error": "Aguarde %ds para pedir outro código." % wait,
++                        "retryIn": wait,
++                    }), 429
++
++            issue_code(conn, email, generate_password_hash(password))
++
++    except (smtplib.SMTPException, OSError) as err:
++        print("[NEXA-auth] falha ao enviar email:", err)
++        return error("Não consegui enviar o email agora. Tente novamente em instantes.", 502)
++
++    except sqlite3.Error as err:
++        print("[NEXA-auth] erro no banco:", err)
++        return error("Erro interno ao criar a conta.", 500)
++
++    return jsonify({"ok": True, "resendIn": RESEND_COOLDOWN})
++
++
++@auth_bp.post("/api/auth/resend")
++def resend():
++    data = body_json()
++    email = normalize_email(data.get("email"))
++
++    if not email:
++        return error("Informe um email válido.", 400)
++
++    if rate_limited("resend:" + client_ip(), 10, 3600):
++        return error("Muitas tentativas. Tente de novo em alguns minutos.", 429)
++
++    try:
++        with db() as conn:
++            pending = conn.execute(
++                "SELECT password_hash, last_sent_at FROM pending_signups WHERE email = ?",
++                (email,),
++            ).fetchone()
++
++            if not pending:
++                return error("Cadastro não encontrado ou expirado. Comece de novo.", 404)
++
++            wait = RESEND_COOLDOWN - (int(time.time()) - pending["last_sent_at"])
++
++            if wait > 0:
++                return jsonify({
++                    "error": "Aguarde %ds para pedir outro código." % wait,
++                    "retryIn": wait,
++                }), 429
++
++            issue_code(conn, email, pending["password_hash"])
++
++    except (smtplib.SMTPException, OSError) as err:
++        print("[NEXA-auth] falha ao enviar email:", err)
++        return error("Não consegui enviar o email agora. Tente novamente em instantes.", 502)
++
++    except sqlite3.Error as err:
++        print("[NEXA-auth] erro no banco:", err)
++        return error("Erro interno.", 500)
++
++    return jsonify({"ok": True, "resendIn": RESEND_COOLDOWN})
++
++
++@auth_bp.post("/api/auth/verify")
++def verify():
++    data = body_json()
++    email = normalize_email(data.get("email"))
++    code = str(data.get("code") or "").strip()
++
++    if not email or not re.fullmatch(r"\d{6}", code):
++        return error("Digite o código de 6 dígitos.", 400)
++
++    invalid = "Código inválido ou expirado."
++
++    try:
++        with db() as conn:
++            purge_expired(conn)
++
++            pending = conn.execute(
++                "SELECT * FROM pending_signups WHERE email = ?", (email,)
++            ).fetchone()
++
++            if not pending:
++                return error(invalid + " Peça um novo código.", 400)
++
++            if pending["attempts"] >= CODE_MAX_ATTEMPTS:
++                conn.execute("DELETE FROM pending_signups WHERE email = ?", (email,))
++                return error("Muitas tentativas erradas. Comece o cadastro de novo.", 429)
++
++            expected = hash_code(pending["salt"], email, code)
++
++            if not hmac.compare_digest(expected, pending["code_hash"]):
++                conn.execute(
++                    "UPDATE pending_signups SET attempts = attempts + 1 WHERE email = ?",
++                    (email,),
++                )
++                return error(invalid, 400)
++
++            try:
++                cursor = conn.execute(
++                    "INSERT INTO users (email, password_hash) VALUES (?, ?)",
++                    (email, pending["password_hash"]),
++                )
++            except sqlite3.IntegrityError:
++                conn.execute("DELETE FROM pending_signups WHERE email = ?", (email,))
++                return error("Já existe uma conta com esse email. Entre com sua senha.", 409)
++
++            conn.execute("DELETE FROM pending_signups WHERE email = ?", (email,))
++
++            response = jsonify({"user": {"email": email}})
++            return start_session(conn, cursor.lastrowid, response)
++
++    except sqlite3.Error as err:
++        print("[NEXA-auth] erro no banco:", err)
++        return error("Erro interno ao confirmar o código.", 500)
++
++
++@auth_bp.post("/api/auth/login")
++def login():
++    data = body_json()
++    email = normalize_email(data.get("email"))
++    password = data.get("password")
++
++    failed = "Email ou senha incorretos."
++
++    if not email or not isinstance(password, str) or len(password) > MAX_PASSWORD:
++        return error(failed, 401)
++
++    key = "login:%s:%s" % (client_ip(), email)
++
++    if rate_limited(key, 8, 900):
++        return error("Muitas tentativas. Tente de novo em alguns minutos.", 429)
++
++    try:
++        with db() as conn:
++            purge_expired(conn)
++
++            user = conn.execute(
++                "SELECT id, password_hash FROM users WHERE email = ?", (email,)
++            ).fetchone()
++
++            valid = check_password_hash(
++                user["password_hash"] if user else _DUMMY_HASH, password
++            )
++
++            if not user or not valid:
++                return error(failed, 401)
++
++            response = jsonify({"user": {"email": email}})
++            return start_session(conn, user["id"], response)
++
++    except sqlite3.Error as err:
++        print("[NEXA-auth] erro no banco:", err)
++        return error("Erro interno ao entrar.", 500)
++
++
++@auth_bp.post("/api/auth/logout")
++def logout():
++    token = request.cookies.get(COOKIE_NAME, "")
++
++    if token:
++        try:
++            with db() as conn:
++                conn.execute(
++                    "DELETE FROM sessions WHERE token_hash = ?", (hash_token(token),)
++                )
++        except sqlite3.Error as err:
++            print("[NEXA-auth] erro ao encerrar sessão:", err)
++
++    response = jsonify({"ok": True})
++    response.delete_cookie(COOKIE_NAME, path="/")
++    return response
+diff --git a/index.html b/index.html
+index f1d8238..aa33b76 100644
+--- a/index.html
++++ b/index.html
+@@ -132,6 +132,18 @@
+         aria-label="Chats anteriores"
+       ></nav>
+ 
++      <div class="drawer-account" id="drawerAccount">
++        <span class="drawer-account-email" id="drawerEmail"></span>
++
++        <button
++          type="button"
++          id="drawerLogout"
++          class="drawer-logout"
++        >
++          Sair
++        </button>
++      </div>
++
+       <button
+         type="button"
+         id="drawerSettings"
+@@ -386,7 +398,88 @@
+ 
+   </main>
+ 
+-  <script src="script.js?v=8"></script>
++  <div
++    class="auth"
++    id="authPanel"
++    role="dialog"
++    aria-modal="true"
++    aria-label="Entrar na NEXA"
++    hidden
++  >
++
++    <div class="auth-card">
++
++      <div class="auth-brand">NEXA</div>
++
++      <div class="auth-tabs" id="authTabs" role="tablist">
++        <button type="button" class="auth-tab active" data-tab="login" role="tab">Entrar</button>
++        <button type="button" class="auth-tab" data-tab="register" role="tab">Criar conta</button>
++      </div>
++
++      <form class="auth-form" id="loginForm">
++        <label>
++          Email
++          <input type="email" id="loginEmail" autocomplete="email" required>
++        </label>
++
++        <label>
++          Senha
++          <input type="password" id="loginPassword" autocomplete="current-password" required>
++        </label>
++
++        <button type="submit" class="auth-submit">Entrar</button>
++      </form>
++
++      <form class="auth-form" id="registerForm" hidden>
++        <label>
++          Email
++          <input type="email" id="registerEmail" autocomplete="email" required>
++        </label>
++
++        <label>
++          Senha (mínimo 8 caracteres)
++          <input type="password" id="registerPassword" autocomplete="new-password" minlength="8" maxlength="128" required>
++        </label>
++
++        <label>
++          Confirmar senha
++          <input type="password" id="registerConfirm" autocomplete="new-password" minlength="8" maxlength="128" required>
++        </label>
++
++        <button type="submit" class="auth-submit">Enviar código por email</button>
++      </form>
++
++      <form class="auth-form" id="verifyForm" hidden>
++        <p class="auth-hint" id="verifyHint"></p>
++
++        <label>
++          Código de 6 dígitos
++          <input
++            type="text"
++            id="verifyCode"
++            inputmode="numeric"
++            pattern="[0-9]{6}"
++            maxlength="6"
++            autocomplete="one-time-code"
++            required
++          >
++        </label>
++
++        <button type="submit" class="auth-submit">Confirmar e criar conta</button>
++
++        <div class="auth-row">
++          <button type="button" id="resendCode" class="auth-link">Reenviar código</button>
++          <button type="button" id="verifyBack" class="auth-link">Voltar</button>
++        </div>
++      </form>
++
++      <p class="auth-error" id="authError" role="alert" hidden></p>
++
++    </div>
++
++  </div>
++
++  <script src="script.js?v=9"></script>
+ 
+ </body>
+ 
+diff --git a/script.js b/script.js
+index 9e2dcb5..b839b30 100644
+--- a/script.js
++++ b/script.js
+@@ -20,9 +20,8 @@ const settingsPanel = document.getElementById("settingsPanel");
+ const settingsClose = document.getElementById("settingsClose");
+ 
+ const MEMORY_KEY = "nexa_conversation";
+-const CHATS_KEY = "nexa_chats";
+-const ACTIVE_CHAT_KEY = "nexa_active_chat";
+-const USER_ID_KEY = "nexa_user_id";
++let CHATS_KEY = "nexa_chats";
++let ACTIVE_CHAT_KEY = "nexa_active_chat";
+ const REASONING_KEY = "nexa_reasoning";
+ 
+ const REASONING_LABELS = {
+@@ -287,32 +286,6 @@ function setupReasoningUI() {
+ }
+ 
+ 
+-/*
+-  ==========================================
+-  ID PERMANENTE
+-  ==========================================
+-*/
+-
+-function getUserId() {
+-  let userId =
+-    localStorage.getItem(USER_ID_KEY);
+-
+-  if (!userId) {
+-    userId =
+-      "user_" +
+-      crypto.randomUUID();
+-
+-    localStorage.setItem(
+-      USER_ID_KEY,
+-      userId
+-    );
+-  }
+-
+-  return userId;
+-}
+-
+-const userId = getUserId();
+-
+ /*
+   ==========================================
+   MEMÓRIA LOCAL DAS CONVERSAS
+@@ -912,8 +885,6 @@ async function askNexa(text) {
+         history:
+           history.slice(-12),
+ 
+-        userId,
+-
+         reasoning: reasoningLevel
+       })
+     });
+@@ -923,6 +894,13 @@ async function askNexa(text) {
+     JSON de erro antes do streaming.
+   */
+ 
++  if (response.status === 401) {
++    showAuth("login");
++    throw new Error(
++      "Sua sessão expirou. Entre de novo."
++    );
++  }
++
+   if (!response.ok) {
+     let data = null;
+ 
+@@ -1688,12 +1666,14 @@ function restoreConversation() {
+   });
+ }
+ 
+-loadChats();
+-renderChat();
+-renderChatList();
+-loadReasoning();
+-setupReasoningUI();
+-renderReasoning();
++function bootApp() {
++  loadChats();
++  renderChat();
++  renderChatList();
++  loadReasoning();
++  setupReasoningUI();
++  renderReasoning();
++}
+ 
+ /*
+   ==========================================
+@@ -1734,3 +1714,300 @@ async function loadVersion() {
+ }
+ 
+ loadVersion();
++
++/*
++  ==========================================
++  LOGIN E CADASTRO
++  As conversas ficam no navegador, separadas por conta
++  (nexa_chats:<email>). O app só inicia depois do login.
++  ==========================================
++*/
++
++const authPanel = document.getElementById("authPanel");
++const authTabs = document.getElementById("authTabs");
++const authError = document.getElementById("authError");
++const loginForm = document.getElementById("loginForm");
++const registerForm = document.getElementById("registerForm");
++const verifyForm = document.getElementById("verifyForm");
++const verifyHint = document.getElementById("verifyHint");
++const resendButton = document.getElementById("resendCode");
++const drawerEmail = document.getElementById("drawerEmail");
++const drawerLogout = document.getElementById("drawerLogout");
++
++let pendingEmail = "";
++let resendTimer = null;
++
++function showAuthError(message) {
++  authError.textContent = message || "";
++  authError.hidden = !message;
++}
++
++function setAuthView(view) {
++  const forms = {
++    login: loginForm,
++    register: registerForm,
++    verify: verifyForm
++  };
++
++  Object.keys(forms).forEach(function (name) {
++    forms[name].hidden = name !== view;
++  });
++
++  authTabs.hidden = view === "verify";
++
++  authTabs.querySelectorAll(".auth-tab").forEach(
++    function (tab) {
++      tab.classList.toggle(
++        "active",
++        tab.dataset.tab === view
++      );
++    }
++  );
++
++  showAuthError("");
++}
++
++function showAuth(view) {
++  authPanel.hidden = false;
++  setAuthView(view || "login");
++}
++
++async function authRequest(path, payload) {
++  const response = await fetch(path, {
++    method: "POST",
++    headers: { "Content-Type": "application/json" },
++    body: JSON.stringify(payload || {})
++  });
++
++  let data = {};
++
++  try {
++    data = await response.json();
++  } catch {
++    // Resposta sem JSON.
++  }
++
++  if (!response.ok) {
++    const failure = new Error(
++      data.error ||
++      `Erro (HTTP ${response.status}).`
++    );
++
++    failure.retryIn = data.retryIn;
++    throw failure;
++  }
++
++  return data;
++}
++
++function startResendCountdown(seconds) {
++  clearInterval(resendTimer);
++
++  let left = Math.max(0, Number(seconds) || 0);
++
++  function tick() {
++    resendButton.disabled = left > 0;
++    resendButton.textContent = left > 0
++      ? `Reenviar código (${left}s)`
++      : "Reenviar código";
++
++    if (left <= 0) {
++      clearInterval(resendTimer);
++    }
++
++    left -= 1;
++  }
++
++  tick();
++  resendTimer = setInterval(tick, 1000);
++}
++
++function goToVerify(email, seconds) {
++  pendingEmail = email;
++  verifyHint.textContent =
++    `Enviamos um código de 6 dígitos para ${email}. ` +
++    "Digite abaixo para criar a conta.";
++  verifyForm.reset();
++  setAuthView("verify");
++  startResendCountdown(seconds);
++  document.getElementById("verifyCode").focus();
++}
++
++/* Roda uma ação mostrando erro e travando o botão de envio. */
++async function withSubmit(form, action) {
++  const button = form.querySelector("[type=submit]");
++
++  showAuthError("");
++  button.disabled = true;
++
++  try {
++    await action();
++  } catch (error) {
++    showAuthError(error.message);
++  } finally {
++    button.disabled = false;
++  }
++}
++
++function enterApp(user) {
++  const suffix = ":" + user.email;
++  const legacyChats = localStorage.getItem("nexa_chats");
++
++  CHATS_KEY = "nexa_chats" + suffix;
++  ACTIVE_CHAT_KEY = "nexa_active_chat" + suffix;
++
++  /*
++    Conversas de antes do login: a primeira conta que entra
++    neste navegador herda elas, e a chave antiga é removida.
++  */
++  if (
++    legacyChats &&
++    localStorage.getItem(CHATS_KEY) === null
++  ) {
++    localStorage.setItem(CHATS_KEY, legacyChats);
++
++    const legacyActive =
++      localStorage.getItem("nexa_active_chat");
++
++    if (legacyActive) {
++      localStorage.setItem(ACTIVE_CHAT_KEY, legacyActive);
++    }
++
++    localStorage.removeItem("nexa_chats");
++    localStorage.removeItem("nexa_active_chat");
++  }
++
++  authPanel.hidden = true;
++  drawerEmail.textContent = user.email;
++  drawerEmail.title = user.email;
++
++  bootApp();
++}
++
++authTabs.addEventListener("click", function (event) {
++  const tab = event.target.closest(".auth-tab");
++
++  if (tab) {
++    setAuthView(tab.dataset.tab);
++  }
++});
++
++loginForm.addEventListener("submit", function (event) {
++  event.preventDefault();
++
++  withSubmit(loginForm, async function () {
++    const data = await authRequest("/api/auth/login", {
++      email: document.getElementById("loginEmail").value,
++      password: document.getElementById("loginPassword").value
++    });
++
++    loginForm.reset();
++    enterApp(data.user);
++  });
++});
++
++registerForm.addEventListener("submit", function (event) {
++  event.preventDefault();
++
++  const email = document
++    .getElementById("registerEmail").value.trim();
++  const password = document
++    .getElementById("registerPassword").value;
++  const confirm = document
++    .getElementById("registerConfirm").value;
++
++  if (password !== confirm) {
++    showAuthError("As senhas não são iguais.");
++    return;
++  }
++
++  withSubmit(registerForm, async function () {
++    try {
++      const data = await authRequest(
++        "/api/auth/register",
++        { email, password }
++      );
++
++      registerForm.reset();
++      goToVerify(email, data.resendIn);
++
++    } catch (error) {
++      /* Código já enviado há pouco: segue para a digitação dele. */
++      if (error.retryIn) {
++        registerForm.reset();
++        goToVerify(email, error.retryIn);
++        return;
++      }
++
++      throw error;
++    }
++  });
++});
++
++verifyForm.addEventListener("submit", function (event) {
++  event.preventDefault();
++
++  withSubmit(verifyForm, async function () {
++    const data = await authRequest("/api/auth/verify", {
++      email: pendingEmail,
++      code: document.getElementById("verifyCode").value.trim()
++    });
++
++    clearInterval(resendTimer);
++    enterApp(data.user);
++  });
++});
++
++resendButton.addEventListener("click", async function () {
++  showAuthError("");
++  resendButton.disabled = true;
++
++  try {
++    const data = await authRequest(
++      "/api/auth/resend",
++      { email: pendingEmail }
++    );
++
++    startResendCountdown(data.resendIn);
++
++  } catch (error) {
++    showAuthError(error.message);
++    startResendCountdown(error.retryIn || 0);
++  }
++});
++
++document.getElementById("verifyBack").addEventListener(
++  "click",
++  function () {
++    clearInterval(resendTimer);
++    setAuthView("register");
++  }
++);
++
++drawerLogout.addEventListener("click", async function () {
++  try {
++    await fetch("/api/auth/logout", { method: "POST" });
++  } catch {
++    // Sem rede: recarregar já cai na tela de login se o cookie expirar.
++  }
++
++  location.reload();
++});
++
++async function initAuth() {
++  try {
++    const response = await fetch("/api/auth/me");
++
++    if (response.ok) {
++      const data = await response.json();
++      enterApp(data.user);
++      return;
++    }
++  } catch (error) {
++    console.error("Erro ao verificar login:", error);
++  }
++
++  showAuth("login");
++}
++
++initAuth();
+diff --git a/server.py b/server.py
+index cf8dca8..75990e3 100644
+--- a/server.py
++++ b/server.py
+@@ -12,6 +12,8 @@ BASE_DIR = Path(__file__).resolve().parent
+ 
+ load_dotenv(BASE_DIR / ".env")
+ 
++from auth import auth_bp, current_user, init_auth_db  # noqa: E402  (precisa do .env já carregado)
++
+ API_KEY = os.environ.get("API_KEY", "").strip()
+ API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip("/")
+ MODEL = os.environ.get("MODEL", "nada")
+@@ -68,6 +70,7 @@ SYSTEM_PROMPT = "\n".join([
+ ])
+ 
+ app = Flask(__name__)
++app.register_blueprint(auth_bp)
+ 
+ 
+ # =========================
+@@ -573,6 +576,11 @@ def static_file(filename):
+ 
+ @app.post("/api/chat")
+ def chat():
++    user = current_user()
++
++    if user is None:
++        return jsonify({"error": "Faça login para conversar com a NEXA."}), 401
++
+     if not API_KEY:
+         return jsonify({"error": "API_KEY não configurada no arquivo .env."}), 500
+ 
+@@ -581,7 +589,8 @@ def chat():
+     except Exception:
+         body = {}
+ 
+-    user_id = str(body.get("userId") or "")
++    # A memória fica presa à conta logada; o userId vindo do navegador é ignorado.
++    user_id = "acct_%d" % user["id"]
+ 
+     reasoning = body.get("reasoning")
+     reasoning = reasoning.strip() if isinstance(reasoning, str) else ""
+@@ -665,6 +674,7 @@ def chat():
+ 
+ 
+ init_db()
++init_auth_db()
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/style.css b/style.css
+index f0c0455..f590228 100644
+--- a/style.css
++++ b/style.css
+@@ -2272,3 +2272,249 @@ footer {
+     animation-iteration-count: 1 !important;
+   }
+ }
++
++
++/* =========================
++   LOGIN / CADASTRO
++========================= */
++
++.auth {
++  position: fixed;
++  inset: 0;
++
++  z-index: 100;
++
++  display: grid;
++  place-items: center;
++
++  padding: 24px;
++
++  background: rgba(3, 2, 7, 0.92);
++}
++
++.auth[hidden],
++.auth-form[hidden],
++.auth-error[hidden] {
++  display: none;
++}
++
++.auth-card {
++  width: min(360px, 100%);
++
++  padding: 24px 22px;
++
++  border: 1px solid var(--line);
++  border-radius: 18px;
++
++  background: var(--panel-light);
++
++  box-shadow: 0 22px 55px rgba(0, 0, 0, 0.5);
++}
++
++.auth-brand {
++  margin-bottom: 16px;
++
++  color: var(--text);
++
++  font-size: 20px;
++  font-weight: 600;
++  letter-spacing: 3px;
++  text-align: center;
++}
++
++.auth-tabs {
++  display: grid;
++  grid-template-columns: 1fr 1fr;
++  gap: 6px;
++
++  margin-bottom: 16px;
++
++  padding: 4px;
++
++  border: 1px solid var(--line);
++  border-radius: 12px;
++}
++
++.auth-tabs[hidden] {
++  display: none;
++}
++
++.auth-tab {
++  padding: 8px 0;
++
++  border: 0;
++  border-radius: 9px;
++
++  background: transparent;
++
++  color: var(--muted);
++
++  font-size: 13px;
++
++  cursor: pointer;
++}
++
++.auth-tab.active {
++  background: rgba(139, 92, 246, 0.2);
++  color: var(--text);
++}
++
++.auth-form {
++  display: flex;
++  flex-direction: column;
++  gap: 12px;
++}
++
++.auth-form label {
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++
++  color: var(--muted);
++
++  font-size: 12px;
++}
++
++.auth-form input {
++  width: 100%;
++
++  padding: 11px 12px;
++
++  border: 1px solid var(--line);
++  border-radius: 11px;
++
++  background: var(--panel);
++
++  color: var(--text);
++
++  font-size: 14px;
++  font-family: inherit;
++
++  outline: none;
++}
++
++.auth-form input:focus {
++  border-color: var(--accent);
++}
++
++#verifyCode {
++  font-size: 20px;
++  letter-spacing: 8px;
++  text-align: center;
++}
++
++.auth-submit {
++  margin-top: 4px;
++
++  padding: 11px 16px;
++
++  border: 1px solid var(--line-hover);
++  border-radius: 11px;
++
++  background: rgba(139, 92, 246, 0.25);
++
++  color: var(--text);
++
++  font-size: 14px;
++
++  cursor: pointer;
++}
++
++.auth-submit:hover {
++  background: rgba(139, 92, 246, 0.38);
++}
++
++.auth-submit:disabled,
++.auth-link:disabled {
++  opacity: 0.5;
++  cursor: not-allowed;
++}
++
++.auth-hint {
++  margin: 0;
++
++  color: var(--muted);
++
++  font-size: 13px;
++  line-height: 1.5;
++}
++
++.auth-row {
++  display: flex;
++  justify-content: space-between;
++  gap: 8px;
++}
++
++.auth-link {
++  padding: 4px 0;
++
++  border: 0;
++
++  background: transparent;
++
++  color: var(--accent-light);
++
++  font-size: 12.5px;
++
++  cursor: pointer;
++}
++
++.auth-error {
++  margin: 14px 0 0;
++
++  color: #f87171;
++
++  font-size: 12.5px;
++  line-height: 1.5;
++  text-align: center;
++}
++
++.drawer-account {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 8px;
++
++  margin-top: auto;
++  padding: 10px 4px 0;
++
++  border-top: 1px solid var(--line);
++}
++
++.drawer-account[hidden] {
++  display: none;
++}
++
++.drawer-account-email {
++  min-width: 0;
++
++  overflow: hidden;
++
++  color: var(--muted);
++
++  font-size: 12px;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.drawer-logout {
++  flex: none;
++
++  padding: 5px 11px;
++
++  border: 1px solid var(--line);
++  border-radius: 9px;
++
++  background: transparent;
++
++  color: var(--text);
++
++  font-size: 12px;
++
++  cursor: pointer;
++}
++
++.drawer-logout:hover {
++  border-color: var(--line-hover);
++  background: rgba(139, 92, 246, 0.14);
++}

@@ -6,11 +6,13 @@ máquina e ser exposta com o túnel do Cloudflare (`cloudflared`).
 
 Estrutura:
 - `server.py` — servidor Flask (serve o site + `/api/chat` com streaming SSE)
+- `auth.py` — login, cadastro com código por email e sessões
 - `run.py` — supervisor: roda o servidor e aplica auto-update via git
 - `index.html`, `style.css`, `script.js` — frontend (inalterado)
 - `requirements.txt` — dependências Python
 - `.env.example` — modelo de configuração
 - `nexa.db` — banco SQLite de memória (criado automaticamente)
+- `auth.db` — contas, cadastros pendentes e sessões (criado automaticamente, **não versionar**)
 
 ## 1. Instalar as dependências
 
@@ -30,6 +32,47 @@ API_KEY=sua-chave-aqui
 
 Opcionais (já têm padrão): `API_BASE`, `MODEL`, `PORT`, `MAX_OUTPUT_TOKENS`, `MEMORY_DB`.
 Nunca versione o `.env` (ele já está no `.gitignore`).
+
+## Login e cadastro
+
+A NEXA exige login para conversar. Na primeira tela dá para **Entrar** com
+email e senha ou **Criar conta**: no cadastro o servidor envia um código de
+6 dígitos para o email, e a conta só é criada depois que o código é digitado.
+
+Como funciona:
+
+- Senha com no mínimo 8 caracteres, guardada apenas como hash (scrypt).
+- O código vale `CODE_TTL_MINUTES` (padrão 10), tem até `CODE_MAX_ATTEMPTS`
+  tentativas (padrão 5) e o reenvio espera `RESEND_COOLDOWN` segundos (padrão 60).
+  O código também é guardado só como hash.
+- A sessão é um cookie `HttpOnly` (`SameSite=Lax`, `Secure` quando o acesso é
+  por HTTPS, como no túnel do Cloudflare) e dura `SESSION_DAYS` (padrão 30).
+  `POST /api/auth/logout` e o botão **Sair** da gaveta encerram a sessão.
+- A memória de longo prazo agora é ligada à conta (o servidor ignora o
+  `userId` vindo do navegador). As conversas do `localStorage` ficam
+  separadas por conta; as conversas de antes do login vão para a primeira
+  conta que entrar naquele navegador.
+- Tentativas de login e de cadastro têm limite por IP/email.
+
+### Envio do email (SMTP)
+
+Configure no `.env`:
+
+```
+SMTP_HOST=smtp.exemplo.com
+SMTP_PORT=587
+SMTP_USER=usuario
+SMTP_PASSWORD=senha-ou-app-password
+SMTP_FROM=NEXA <no-reply@exemplo.com>
+SMTP_SECURITY=starttls   # ou ssl (porta 465) / none
+```
+
+Sem `SMTP_HOST`, o servidor está em **modo desenvolvimento**: nenhum email é
+enviado e o código aparece no console (`[NEXA-auth] ... código para ...`).
+Use isso só para testar localmente.
+
+Rotas: `POST /api/auth/register`, `/verify`, `/resend`, `/login`, `/logout` e
+`GET /api/auth/me`.
 
 ## 3. Rodar
 
