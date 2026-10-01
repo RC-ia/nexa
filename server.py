@@ -1462,6 +1462,14 @@ RESULT_LINK_PATTERN = re.compile(
 RESULT_SNIPPET_PATTERN = re.compile(
     r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>', re.S
 )
+# O endpoint lite responde com outro layout (class='result-link').
+LITE_LINK_PATTERN = re.compile(
+    "<a[^>]+href=\"([^\"]+)\"[^>]*class=['\"]result-link['\"][^>]*>(.*?)</a>",
+    re.S,
+)
+LITE_SNIPPET_PATTERN = re.compile(
+    "<td[^>]+class=['\"]result-snippet['\"][^>]*>(.*?)</td>", re.S
+)
 TAG_PATTERN = re.compile(r"<[^>]+>")
 
 
@@ -1658,6 +1666,14 @@ def parse_search_results(page, limit):
     snippets = [
         clean_search_text(item) for item in RESULT_SNIPPET_PATTERN.findall(page)
     ]
+
+    if not links:
+        # Layout do endpoint lite (entra quando o html limita o IP).
+        links = LITE_LINK_PATTERN.findall(page)
+        snippets = [
+            clean_search_text(item)
+            for item in LITE_SNIPPET_PATTERN.findall(page)
+        ]
 
     results = []
     seen = set()
