@@ -1724,16 +1724,48 @@ function renderChatList() {
   GESTOS NA TELA
   ==========================================
   Puxar para a direita abre a gaveta; para a esquerda abre a
-  chamada; para baixo, já no fim da conversa, cria outra.
+  chamada; para cima, já no fim da conversa, cria outra.
 */
 
 (function () {
   const SIDE_MIN = 70;
-  const DOWN_MIN = 90;
+  const PULL_MIN = 90;
+  const PULL_ZONE = 0.6;
+
+  const pullBall = document.getElementById("pullBall");
 
   let startX = 0;
   let startY = 0;
   let tracking = false;
+  let pullTracking = false;
+
+  function setPullProgress(progress) {
+    if (!pullBall) {
+      return;
+    }
+
+    pullBall.hidden = false;
+    pullBall.style.opacity = String(0.35 + 0.65 * progress);
+    pullBall.style.transform =
+      "scale(" + (0.55 + 0.45 * progress) + ")";
+    pullBall.classList.toggle("ready", progress >= 1);
+  }
+
+  function resetPull() {
+    pullTracking = false;
+
+    if (pullBall) {
+      pullBall.classList.remove("ready");
+      pullBall.hidden = true;
+    }
+  }
+
+  function atConversationEnd() {
+    return (
+      feed.scrollTop + feed.clientHeight >=
+      feed.scrollHeight - 4
+    );
+  }
 
   document.addEventListener(
     "touchstart",
@@ -1748,12 +1780,41 @@ function renderChatList() {
             target.tagName === "SELECT"))
       ) {
         tracking = false;
+        pullTracking = false;
         return;
       }
 
       tracking = true;
       startX = event.touches[0].clientX;
       startY = event.touches[0].clientY;
+
+      pullTracking =
+        authPanel.hidden &&
+        !drawerOpen &&
+        !sendButton.disabled &&
+        startY >= window.innerHeight * PULL_ZONE &&
+        atConversationEnd();
+    },
+    { passive: true }
+  );
+
+  document.addEventListener(
+    "touchmove",
+    function (event) {
+      if (!pullTracking || event.touches.length !== 1) {
+        return;
+      }
+
+      const dx = event.touches[0].clientX - startX;
+      const dy = event.touches[0].clientY - startY;
+
+      if (-dy <= 0 || -dy < 2 * Math.abs(dx)) {
+        return;
+      }
+
+      setPullProgress(
+        Math.min(1, -dy / PULL_MIN)
+      );
     },
     { passive: true }
   );
@@ -1762,6 +1823,7 @@ function renderChatList() {
     "touchend",
     function (event) {
       if (!tracking) {
+        resetPull();
         return;
       }
 
@@ -1772,6 +1834,7 @@ function renderChatList() {
         event.changedTouches[0];
 
       if (!touch || !authPanel.hidden) {
+        resetPull();
         return;
       }
 
@@ -1782,6 +1845,8 @@ function renderChatList() {
         Math.abs(dx) >= SIDE_MIN &&
         Math.abs(dx) >= 2 * Math.abs(dy)
       ) {
+        resetPull();
+
         if (dx > 0) {
           if (!drawerOpen) {
             openDrawer();
@@ -1795,23 +1860,16 @@ function renderChatList() {
         return;
       }
 
-      if (
-        drawerOpen ||
-        dy < DOWN_MIN ||
-        dy < 2 * Math.abs(dx)
-      ) {
-        return;
-      }
+      /* Para cima só vale no fim da conversa, puxando pela parte de baixo. */
+      const pulled =
+        pullTracking &&
+        -dy >= PULL_MIN &&
+        -dy >= 2 * Math.abs(dx) &&
+        atConversationEnd();
 
-      /* Para baixo só vale no fim da conversa (puxada no final). */
-      if (
-        feed.scrollTop + feed.clientHeight <
-        feed.scrollHeight - 4
-      ) {
-        return;
-      }
+      resetPull();
 
-      if (!sendButton.disabled) {
+      if (pulled) {
         startNewChat();
       }
     },

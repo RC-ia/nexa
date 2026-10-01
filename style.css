@@ -2992,3 +2992,50 @@ html.keyboard-open footer {
   flex-direction: row !important;
   align-items: center;
 }
+
+/* =========================
+   GESTO DE NOVO CHAT
+   Bolinha que aparece ao puxar para cima, no fim da conversa.
+========================= */
+
+.pull-ball {
+  position: fixed;
+  left: 50%;
+
+  bottom: 86px;
+  z-index: 7;
+
+  width: 26px;
+  height: 26px;
+  margin-left: -13px;
+
+  pointer-events: none;
+
+  opacity: 0;
+}
+
+.pull-ball[hidden] {
+  display: none;
+}
+
+.pull-ball i {
+  display: block;
+  width: 100%;
+  height: 100%;
+
+  border: 2px solid rgba(139, 92, 246, 0.35);
+  border-top-color: var(--accent-light);
+  border-radius: 50%;
+
+  animation: pullBallSpin 0.9s linear infinite;
+}
+
+.pull-ball.ready i {
+  border-color: var(--accent-light);
+}
+
+@keyframes pullBallSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
