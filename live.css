@@ -67,6 +67,8 @@
 }
 
 .live-visual {
+  --core-size: 196px;
+
   position: relative;
   display: grid;
   place-items: center;
@@ -76,62 +78,23 @@
   isolation: isolate;
 }
 
-.live-orbit,
-.live-core {
-  position: absolute;
-  border-radius: 50%;
-  transition: border-color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+.live-visual[data-state="connecting"] .core,
+.live-visual[data-state="listening"] .core {
+  animation-duration: 2.2s;
 }
 
-.live-orbit-one {
-  inset: 5px;
-  border: 1px solid rgba(134, 229, 209, 0.42);
-  box-shadow: 0 0 48px rgba(58, 178, 157, 0.09), inset 0 0 42px rgba(58, 178, 157, 0.06);
+.live-visual[data-state="speaking"] {
+  --accent: #ff8b7e;
+  --accent-light: #ffd4bd;
 }
 
-.live-orbit-two {
-  inset: 21px;
-  border: 1px solid rgba(134, 229, 209, 0.22);
+.live-visual[data-state="speaking"] .core-energy {
+  animation-duration: 0.85s;
 }
 
-.live-orbit-three {
-  inset: 39px;
-  border: 1px solid rgba(134, 229, 209, 0.14);
-}
-
-.live-core {
-  width: 76px;
-  height: 76px;
-  background: radial-gradient(circle at 35% 30%, #b8fff0, #56cbb3 45%, #176658 100%);
-  box-shadow: 0 0 36px rgba(86, 203, 179, 0.38), 0 0 96px rgba(86, 203, 179, 0.14);
-}
-
-.live-visual[data-state="connecting"] .live-orbit-one,
-.live-visual[data-state="listening"] .live-orbit-one,
-.live-visual[data-state="speaking"] .live-orbit-one {
-  animation: liveOrbit 3s ease-in-out infinite;
-}
-
-.live-visual[data-state="listening"] .live-core {
-  animation: livePulse 1.8s ease-in-out infinite;
-}
-
-.live-visual[data-state="speaking"] .live-core {
-  background: radial-gradient(circle at 35% 30%, #ffd4bd, #ff987e 48%, #8a3d49 100%);
-  box-shadow: 0 0 42px rgba(255, 139, 126, 0.45), 0 0 100px rgba(255, 139, 126, 0.18);
-  animation: livePulse 0.7s ease-in-out infinite alternate;
-}
-
-.live-visual[data-state="error"] .live-core {
-  background: radial-gradient(circle at 35% 30%, #ffc4c4, #dc6675 48%, #662b3c 100%);
-}
-
-@keyframes liveOrbit {
-  50% { transform: scale(1.08); opacity: 0.66; }
-}
-
-@keyframes livePulse {
-  to { transform: scale(1.1); }
+.live-visual[data-state="error"] {
+  --accent: #dc6675;
+  --accent-light: #ffc4c4;
 }
 
 .live-heading {
@@ -212,13 +175,9 @@
   }
 
   .live-visual {
+    --core-size: 168px;
     width: 168px;
     height: 168px;
-  }
-
-  .live-core {
-    width: 66px;
-    height: 66px;
   }
 
   .live-heading h1 {
@@ -226,9 +185,4 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .live-orbit,
-  .live-core {
-    animation: none !important;
-  }
-}
+
