@@ -2684,6 +2684,21 @@ footer {
   }
 }
 
+/* =========================
+   TECLADO NATIVO (APP ANDROID/APK)
+   O app injeta html.keyboard-open e --keyboard-height enquanto o
+   teclado está aberto; o campo de envio sobe junto e o rodapé
+   sai de cena para sobrar espaço.
+========================= */
+
+html.keyboard-open .app {
+  padding-bottom: var(--keyboard-height, 0px);
+}
+
+html.keyboard-open footer {
+  display: none;
+}
+
 
 /* =========================
    TELAS BAIXAS

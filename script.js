@@ -2163,6 +2163,27 @@ document.addEventListener(
 
 /*
   ==========================================
+  TECLADO NATIVO (APP ANDROID/APK)
+  O app dispara "nativeKeyboardChange" no window quando o teclado
+  abre/fecha; ao abrir, mantém o fim da conversa visível. A classe
+  .keyboard-open e a variável --keyboard-height usadas no CSS são
+  injetadas pelo próprio app no <html>.
+  ==========================================
+*/
+
+window.addEventListener(
+  "nativeKeyboardChange",
+  function (event) {
+    const detail = event.detail || {};
+
+    if (detail.visible) {
+      feed.scrollTop = feed.scrollHeight;
+    }
+  }
+);
+
+/*
+  ==========================================
   MICROFONE
   ==========================================
 */
