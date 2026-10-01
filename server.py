@@ -42,6 +42,12 @@ PORT = int(os.environ.get("PORT", "8000"))
 MEMORY_DIR = BASE_DIR / os.environ.get("MEMORY_DIR", "memoria")
 VERSION_FILE = BASE_DIR / os.environ.get("VERSION_FILE", ".nexa_version")
 DEFAULT_VERSION = "0.01"
+# System prompt editável nas configurações. Quando o arquivo existe, ele
+# substitui o SYSTEM_PROMPT embutido.
+SYSTEM_PROMPT_FILE = BASE_DIR / os.environ.get(
+    "SYSTEM_PROMPT_FILE", "system_prompt_custom.txt"
+)
+SYSTEM_PROMPT_MAX = 20000
 
 MAX_HISTORY_MESSAGES = 12
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "1024"))
@@ -130,6 +136,22 @@ SYSTEM_PROMPT = "\n".join([
     "Depois de pesquisar, responda normalmente sem comentar a chamada da "
     "ferramenta.",
 ])
+
+
+def get_custom_system_prompt():
+    """Devolve o system prompt salvo nas configurações (ou None se não houver)."""
+    try:
+        content = SYSTEM_PROMPT_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+    return content or None
+
+
+def current_system_prompt():
+    """System prompt efetivo: o salvo nas configurações ou o padrão embutido."""
+    return get_custom_system_prompt() or SYSTEM_PROMPT
+
 
 SEARCH_TOOL = {
     "type": "function",
@@ -233,6 +255,9 @@ app.register_blueprint(auth_bp)
 MEMORY_LOCK = threading.Lock()
 MEMORY_FILE_LIMIT = 10000
 MEMORY_HEADER = "# Contexto do usuário\n\n"
+
+# Escrita do system prompt editável (mesmo padrão de gravação atômica da memória).
+SYSTEM_PROMPT_LOCK = threading.Lock()
 
 
 def init_db():
@@ -781,7 +806,7 @@ def log_upstream_error(response):
 
 
 def build_messages(messages, memories, custom_instructions=""):
-    system_prompt = SYSTEM_PROMPT
+    system_prompt = current_system_prompt()
 
     if memories:
         system_prompt += (
@@ -1747,6 +1772,90 @@ def chat():
     )
 
 
+# =========================
+# SYSTEM PROMPT (editável nas configurações)
+# =========================
+
+@app.get("/api/system-prompt")
+def read_system_prompt():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para ver o system prompt."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    return jsonify({
+        "prompt": current_system_prompt(),
+        "is_custom": get_custom_system_prompt() is not None,
+    })
+
+
+@app.put("/api/system-prompt")
+def update_system_prompt():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para editar o system prompt."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    body = request.get_json(force=True, silent=True) or {}
+    prompt = body.get("prompt", "")
+    if not isinstance(prompt, str):
+        return jsonify({"error": "System prompt inválido."}), 400
+
+    prompt = prompt.strip()
+    if not prompt:
+        return jsonify({"error": "O system prompt não pode ficar vazio."}), 400
+
+    if len(prompt) > SYSTEM_PROMPT_MAX:
+        prompt = prompt[:SYSTEM_PROMPT_MAX]
+
+    with SYSTEM_PROMPT_LOCK:
+        temporary = SYSTEM_PROMPT_FILE.with_suffix(".txt.tmp")
+        try:
+            temporary.write_text(prompt, encoding="utf-8")
+            temporary.replace(SYSTEM_PROMPT_FILE)
+        except OSError as error:
+            print("[NEXA] falha ao salvar o system prompt:", error)
+            return jsonify({"error": "Não foi possível salvar o system prompt."}), 500
+
+    return jsonify({
+        "ok": True,
+        "prompt": current_system_prompt(),
+        "is_custom": True,
+    })
+
+
+@app.delete("/api/system-prompt")
+def reset_system_prompt():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para restaurar o system prompt."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    with SYSTEM_PROMPT_LOCK:
+        try:
+            SYSTEM_PROMPT_FILE.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            print("[NEXA] falha ao remover o system prompt:", error)
+            return jsonify({"error": "Não foi possível restaurar o system prompt."}), 500
+
+    return jsonify({
+        "ok": True,
+        "prompt": current_system_prompt(),
+        "is_custom": False,
+    })
+
+
 @app.get("/api/memories")
 def list_memories():
     user = current_user()
@@ -1819,17 +1928,6 @@ def clear_memories():
 
     clear_memory("acct_%d" % user["id"])
     return jsonify({"ok": True})
-
-
-@app.get("/api/system-prompt")
-def get_system_prompt():
-    """Retorna o system prompt completo usado pela NEXA."""
-    user = current_user()
-    if user is None:
-        return jsonify({"error": "Faça login para ver o system prompt."}), 401
-
-    # Retorna o SYSTEM_PROMPT base (sem memórias nem instruções customizadas)
-    return jsonify({"systemPrompt": SYSTEM_PROMPT})
 
 
 init_db()

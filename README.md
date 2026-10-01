@@ -278,6 +278,9 @@ Dentro dela:
 - **Configurações** — reúne Chamada, Memória, Instruções, Lembretes e Mais.
   Instruções e preferências de memória ficam separadas por usuário neste
   navegador; lembretes são locais e só disparam enquanto a página estiver aberta.
+  Na seção **Instruções**, o **system prompt** completo que o servidor usa pode
+  ser visto e editado: ele fica em `system_prompt_custom.txt` (fora do git) e
+  substitui o padrão embutido, com botão para restaurar o padrão.
 
 A gaveta fecha pelo **✕**, clicando fora dela ou com `Esc`.
 

@@ -25,12 +25,9 @@ const settingsViews = {
   live: document.getElementById("settingsLive"),
   memory: document.getElementById("settingsMemory"),
   instructions: document.getElementById("settingsInstructions"),
-  systemprompt: document.getElementById("settingsSystemPrompt"),
   reminders: document.getElementById("settingsReminders"),
   more: document.getElementById("settingsMore")
 };
-const systemPromptView = document.getElementById("systemPromptView");
-const copySystemPromptBtn = document.getElementById("copySystemPrompt");
 const liveVoiceSelect = document.getElementById("liveVoiceSelect");
 const liveVoiceStatus = document.getElementById("liveVoiceStatus");
 const liveCallOpenButton = document.getElementById("liveCallOpen");
@@ -39,6 +36,8 @@ const memoryList = document.getElementById("memoryList");
 const memoryStatus = document.getElementById("memoryStatus");
 const customInstructionsInput = document.getElementById("customInstructions");
 const instructionStatus = document.getElementById("instructionStatus");
+const systemPromptInput = document.getElementById("systemPromptInput");
+const systemPromptStatus = document.getElementById("systemPromptStatus");
 const reminderForm = document.getElementById("reminderForm");
 const reminderTextInput = document.getElementById("reminderText");
 const reminderAtInput = document.getElementById("reminderAt");
@@ -1563,7 +1562,6 @@ function showSettingsView(viewName) {
     live: "Chamada",
     memory: "Memória",
     instructions: "Instruções",
-    systemprompt: "System Prompt",
     reminders: "Lembretes",
     more: "Mais"
   };
@@ -1580,7 +1578,6 @@ function showSettingsView(viewName) {
     loadMemories();
   } else if (viewName === "instructions") {
     customInstructionsInput.value = customInstructions;
-  } else if (viewName === "systemprompt") {
     loadSystemPrompt();
   } else if (viewName === "reminders") {
     const localNow = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
@@ -1590,31 +1587,17 @@ function showSettingsView(viewName) {
 }
 
 async function loadSystemPrompt() {
+  systemPromptStatus.textContent = "Carregando…";
+
   try {
     const data = await api("GET", "/api/system-prompt");
-    if (systemPromptView) {
-      systemPromptView.value = data.systemPrompt || "Não foi possível carregar o system prompt.";
-    }
+    systemPromptInput.value = data.prompt || "";
+    systemPromptStatus.textContent = data.is_custom
+      ? ""
+      : "Usando o prompt padrão do sistema.";
   } catch (error) {
-    console.error("Erro ao carregar system prompt:", error);
-    if (systemPromptView) {
-      systemPromptView.value = "Erro ao carregar system prompt.";
-    }
+    systemPromptStatus.textContent = error.message;
   }
-}
-
-if (copySystemPromptBtn) {
-  copySystemPromptBtn.addEventListener("click", function () {
-    if (systemPromptView && systemPromptView.value) {
-      navigator.clipboard.writeText(systemPromptView.value).then(() => {
-        copySystemPromptBtn.textContent = "Copiado!";
-        setTimeout(() => { copySystemPromptBtn.textContent = "Copiar"; }, 2000);
-      }).catch(() => {
-        copySystemPromptBtn.textContent = "Falhou";
-        setTimeout(() => { copySystemPromptBtn.textContent = "Copiar"; }, 2000);
-      });
-    }
-  });
 }
 
 async function loadMemories() {
@@ -2053,6 +2036,39 @@ document.getElementById("saveInstructions").addEventListener("click", function (
     instructionStatus.textContent = "Instruções salvas.";
   } catch (error) {
     instructionStatus.textContent = "Não foi possível salvar as instruções.";
+  }
+});
+
+document.getElementById("saveSystemPrompt").addEventListener("click", async function () {
+  const button = document.getElementById("saveSystemPrompt");
+  button.disabled = true;
+
+  try {
+    const data = await api(
+      "PUT",
+      "/api/system-prompt",
+      { prompt: systemPromptInput.value.slice(0, 20000) }
+    );
+    systemPromptInput.value = data.prompt || systemPromptInput.value;
+    systemPromptStatus.textContent = "System prompt salvo.";
+  } catch (error) {
+    systemPromptStatus.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById("resetSystemPrompt").addEventListener("click", async function () {
+  if (!confirm("Restaurar o system prompt padrão do sistema?")) {
+    return;
+  }
+
+  try {
+    const data = await api("DELETE", "/api/system-prompt");
+    systemPromptInput.value = data.prompt || "";
+    systemPromptStatus.textContent = "System prompt restaurado ao padrão.";
+  } catch (error) {
+    systemPromptStatus.textContent = error.message;
   }
 });
 

@@ -397,10 +397,6 @@
               <strong>Instruções</strong>
               <span>Como a NEXA deve responder</span>
             </button>
-            <button type="button" class="settings-category" data-settings-open="systemprompt">
-              <strong>System Prompt</strong>
-              <span>Prompt completo do sistema (somente leitura)</span>
-            </button>
             <button type="button" class="settings-category" data-settings-open="reminders">
               <strong>Lembretes</strong>
               <span>Alertas programados neste navegador</span>
@@ -450,21 +446,22 @@
             <textarea id="customInstructions" maxlength="2000" rows="6" placeholder="Ex.: prefira respostas curtas e use exemplos em português."></textarea>
           </label>
           <p class="settings-description">Estas instruções são aplicadas às conversas de texto desta conta neste navegador.</p>
+          <div class="settings-list-heading">
+            <strong>System prompt</strong>
+            <button type="button" id="resetSystemPrompt" class="settings-inline-button">Restaurar padrão</button>
+          </div>
+          <p class="settings-description">Texto completo que o servidor envia ao modelo como system prompt em todas as conversas. A memória e as instruções adicionais entram depois dele. Editar aqui muda o comportamento da NEXA.</p>
+          <label class="settings-field" for="systemPromptInput">
+            <span>System prompt atual</span>
+            <textarea id="systemPromptInput" maxlength="20000" rows="14" placeholder="System prompt usado pelo servidor."></textarea>
+          </label>
+          <div class="settings-page-actions">
+            <span id="systemPromptStatus" class="settings-status" role="status"></span>
+            <button type="button" id="saveSystemPrompt" class="settings-action">Salvar prompt</button>
+          </div>
           <div class="settings-page-actions">
             <span id="instructionStatus" class="settings-status" role="status"></span>
             <button type="button" id="saveInstructions" class="settings-action">Salvar</button>
-          </div>
-        </section>
-
-        <section id="settingsSystemPrompt" class="settings-view" hidden>
-          <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
-          <p class="settings-description">O system prompt completo que a NEXA usa. Somente leitura — para alterar o comportamento, use <strong>Instruções</strong> acima.</p>
-          <div class="settings-field">
-            <label for="systemPromptView">System Prompt</label>
-            <textarea id="systemPromptView" readonly rows="20" spellcheck="false"></textarea>
-          </div>
-          <div class="settings-page-actions">
-            <button type="button" id="copySystemPrompt" class="settings-action">Copiar</button>
           </div>
         </section>
 
