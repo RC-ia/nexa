@@ -1721,6 +1721,106 @@ function renderChatList() {
 
 /*
   ==========================================
+  GESTOS NA TELA
+  ==========================================
+  Puxar para a direita abre a gaveta; para a esquerda abre a
+  chamada; para baixo, já no fim da conversa, cria outra.
+*/
+
+(function () {
+  const SIDE_MIN = 70;
+  const DOWN_MIN = 90;
+
+  let startX = 0;
+  let startY = 0;
+  let tracking = false;
+
+  document.addEventListener(
+    "touchstart",
+    function (event) {
+      const target = event.target;
+
+      if (
+        event.touches.length !== 1 ||
+        (target &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.tagName === "SELECT"))
+      ) {
+        tracking = false;
+        return;
+      }
+
+      tracking = true;
+      startX = event.touches[0].clientX;
+      startY = event.touches[0].clientY;
+    },
+    { passive: true }
+  );
+
+  document.addEventListener(
+    "touchend",
+    function (event) {
+      if (!tracking) {
+        return;
+      }
+
+      tracking = false;
+
+      const touch =
+        event.changedTouches &&
+        event.changedTouches[0];
+
+      if (!touch || !authPanel.hidden) {
+        return;
+      }
+
+      const dx = touch.clientX - startX;
+      const dy = touch.clientY - startY;
+
+      if (
+        Math.abs(dx) >= SIDE_MIN &&
+        Math.abs(dx) >= 2 * Math.abs(dy)
+      ) {
+        if (dx > 0) {
+          if (!drawerOpen) {
+            openDrawer();
+          }
+        } else if (drawerOpen) {
+          closeDrawer();
+        } else {
+          window.location.href = "/live.html";
+        }
+
+        return;
+      }
+
+      if (
+        drawerOpen ||
+        dy < DOWN_MIN ||
+        dy < 2 * Math.abs(dx)
+      ) {
+        return;
+      }
+
+      /* Para baixo só vale no fim da conversa (puxada no final). */
+      if (
+        feed.scrollTop + feed.clientHeight <
+        feed.scrollHeight - 4
+      ) {
+        return;
+      }
+
+      if (!sendButton.disabled) {
+        startNewChat();
+      }
+    },
+    { passive: true }
+  );
+})();
+
+/*
+  ==========================================
   GAVETA E CONFIGURAÇÕES
   ==========================================
 */
