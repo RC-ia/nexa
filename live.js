@@ -398,3 +398,60 @@ startButton.addEventListener("click", startCall);
 endButton.addEventListener("click", () => endCall("Chamada encerrada"));
 window.addEventListener("pagehide", () => endCall("Chamada encerrada"));
 initializeLivePage();
+
+/*
+  ==========================================
+  GESTOS NA TELA
+  ==========================================
+  Puxar para a esquerda volta para a conversa.
+*/
+
+(function () {
+  const SIDE_MIN = 70;
+
+  let startX = 0;
+  let startY = 0;
+  let tracking = false;
+
+  document.addEventListener(
+    "touchstart",
+    function (event) {
+      if (event.touches.length !== 1) {
+        tracking = false;
+        return;
+      }
+
+      tracking = true;
+      startX = event.touches[0].clientX;
+      startY = event.touches[0].clientY;
+    },
+    { passive: true }
+  );
+
+  document.addEventListener(
+    "touchend",
+    function (event) {
+      if (!tracking) {
+        return;
+      }
+
+      tracking = false;
+
+      const touch =
+        event.changedTouches &&
+        event.changedTouches[0];
+
+      if (!touch) {
+        return;
+      }
+
+      const dx = touch.clientX - startX;
+      const dy = touch.clientY - startY;
+
+      if (-dx >= SIDE_MIN && -dx >= 2 * Math.abs(dy)) {
+        window.location.href = "/";
+      }
+    },
+    { passive: true }
+  );
+})();
