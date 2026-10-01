@@ -38,9 +38,6 @@ const customInstructionsInput = document.getElementById("customInstructions");
 const instructionStatus = document.getElementById("instructionStatus");
 const systemPromptInput = document.getElementById("systemPromptInput");
 const systemPromptStatus = document.getElementById("systemPromptStatus");
-const reminderForm = document.getElementById("reminderForm");
-const reminderTextInput = document.getElementById("reminderText");
-const reminderAtInput = document.getElementById("reminderAt");
 const reminderList = document.getElementById("reminderList");
 const reminderStatus = document.getElementById("reminderStatus");
 const reminderNotificationButton = document.getElementById("reminderNotification");
@@ -1580,8 +1577,6 @@ function showSettingsView(viewName) {
     customInstructionsInput.value = customInstructions;
     loadSystemPrompt();
   } else if (viewName === "reminders") {
-    const localNow = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
-    reminderAtInput.min = localNow.toISOString().slice(0, 16);
     renderReminderList();
   }
 }
@@ -2070,25 +2065,6 @@ document.getElementById("resetSystemPrompt").addEventListener("click", async fun
   } catch (error) {
     systemPromptStatus.textContent = error.message;
   }
-});
-
-reminderForm.addEventListener("submit", function (event) {
-  event.preventDefault();
-  const text = reminderTextInput.value.trim();
-  const at = new Date(reminderAtInput.value).getTime();
-
-  if (!text || !Number.isFinite(at) || at <= Date.now()) {
-    reminderStatus.textContent = "Escolha uma data e hora futuras.";
-    return;
-  }
-
-  const reminder = { id: makeId(), text, at };
-  reminders.push(reminder);
-  saveReminderData();
-  scheduleReminder(reminder);
-  renderReminderList();
-  reminderForm.reset();
-  reminderStatus.textContent = "Lembrete programado.";
 });
 
 reminderNotificationButton.addEventListener("click", async function () {
