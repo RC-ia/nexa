@@ -1113,6 +1113,100 @@ def send_push_notification(user_id, title, body):
 
 
 # =========================
+# CHATS (sincronização entre aparelhos)
+# =========================
+# Cada conta tem um arquivo com todas as conversas; cada conversa carrega
+# uma "rev" que aumenta a cada gravação. O cliente envia a rev em que se
+# baseou: se o servidor estiver em outra, outro aparelho gravou primeiro e
+# a gravação é recusada devolvendo a versão atual (o cliente mescla,
+# acrescenta a mensagem dele depois e tenta de novo).
+
+CHATS_LOCK = threading.Lock()
+CHATS_LIMIT = 500
+CHAT_MESSAGES_LIMIT = 5000
+CHAT_CONTENT_LIMIT = 200000
+CHATS_MAX_BYTES = 5 * 1024 * 1024
+
+def chats_path(user_id):
+    safe_id = "".join(
+        char if char.isalnum() or char in "-_" else "_" for char in str(user_id)
+    )
+    return MEMORY_DIR / ("%s.chats.json" % safe_id)
+
+def load_chats(path):
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+    chats = data.get("chats") if isinstance(data, dict) else None
+    return chats if isinstance(chats, list) else []
+
+def save_chats(path, chats):
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(
+        json.dumps({"chats": chats}, ensure_ascii=False), encoding="utf-8"
+    )
+    temporary.replace(path)
+
+def sanitize_chat(chat_id, chat):
+    """Valida e normaliza a conversa vinda do cliente (None se inválida)."""
+    if not isinstance(chat, dict) or not chat_id or len(chat_id) > 100:
+        return None
+    if chat.get("id") != chat_id:
+        return None
+
+    title = chat.get("title")
+    if not isinstance(title, str):
+        title = ""
+
+    messages = chat.get("messages")
+    if not isinstance(messages, list) or len(messages) > CHAT_MESSAGES_LIMIT:
+        return None
+
+    clean_messages = []
+    for item in messages:
+        if not isinstance(item, dict):
+            return None
+
+        role = item.get("role")
+        content = item.get("content")
+        if role not in ("user", "model") or not isinstance(content, str):
+            return None
+        if len(content) > CHAT_CONTENT_LIMIT:
+            return None
+
+        message = {"role": role, "content": content}
+
+        message_id = item.get("id")
+        if isinstance(message_id, str) and message_id:
+            message["id"] = message_id[:64]
+
+        thinking = item.get("thinking")
+        if isinstance(thinking, str) and thinking:
+            message["thinking"] = thinking[:CHAT_CONTENT_LIMIT]
+
+        if item.get("memoryUpdated") is True:
+            message["memoryUpdated"] = True
+        if item.get("searched") is True:
+            message["searched"] = True
+
+        clean_messages.append(message)
+
+    def as_int(value):
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return int(value)
+        return 0
+
+    return {
+        "id": chat_id,
+        "title": title[:300],
+        "createdAt": as_int(chat.get("createdAt")),
+        "updatedAt": as_int(chat.get("updatedAt")),
+        "messages": clean_messages,
+    }
+
+# =========================
 # CLIENTE DO MODELO
 # =========================
 
@@ -2775,6 +2869,145 @@ def due_reminders():
     items = pending_reminders_since(user_id, after_seq)
     cursor = max([after_seq] + [item["seq"] for item in items])
     return jsonify({"due": items, "cursor": cursor})
+
+@app.get("/api/chats")
+def list_chats():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para ver as conversas."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    user_id = "acct_%d" % user["id"]
+    with CHATS_LOCK:
+        chats = load_chats(chats_path(user_id))
+
+    return jsonify({"chats": chats})
+
+@app.put("/api/chats/<chat_id>")
+def save_chat(chat_id):
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para sincronizar as conversas."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    if request.content_length and request.content_length > CHATS_MAX_BYTES:
+        return jsonify({"error": "Conversa grande demais para sincronizar."}), 413
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Corpo inválido."}), 400
+
+    clean = sanitize_chat(str(chat_id), body.get("chat"))
+    if clean is None:
+        return jsonify({"error": "Conversa inválida."}), 400
+
+    base_rev = body.get("base_rev")
+    if (
+        not isinstance(base_rev, int)
+        or isinstance(base_rev, bool)
+        or base_rev < 0
+    ):
+        base_rev = 0
+
+    user_id = "acct_%d" % user["id"]
+    path = chats_path(user_id)
+
+    with CHATS_LOCK:
+        chats = load_chats(path)
+        index = next(
+            (i for i, item in enumerate(chats) if item.get("id") == chat_id),
+            None,
+        )
+
+        if index is None:
+            if base_rev > 0:
+                # A conversa existia e foi apagada em outro aparelho.
+                return jsonify({
+                    "error": "Conversa apagada em outro aparelho.",
+                    "deleted": True,
+                }), 410
+            if len(chats) >= CHATS_LIMIT:
+                return jsonify({
+                    "error": "Limite de conversas sincronizadas atingido.",
+                }), 400
+            new_rev = 1
+            chats.append(dict(clean, rev=new_rev))
+        else:
+            current = chats[index]
+            if int(current.get("rev") or 0) != base_rev:
+                # Outro aparelho gravou primeiro: devolve a versão atual.
+                return jsonify({
+                    "error": "Conversa atualizada em outro aparelho.",
+                    "chat": current,
+                }), 409
+            new_rev = base_rev + 1
+            chats[index] = dict(clean, rev=new_rev)
+
+        blob = json.dumps({"chats": chats}, ensure_ascii=False)
+        if len(blob.encode("utf-8")) > CHATS_MAX_BYTES:
+            return jsonify({
+                "error": "Conversas grandes demais para sincronizar.",
+            }), 413
+
+        try:
+            save_chats(path, chats)
+        except OSError as error:
+            print("[NEXA] falha ao salvar conversas:", error)
+            return jsonify({"error": "Falha ao salvar as conversas."}), 500
+
+    return jsonify({"rev": new_rev})
+
+@app.delete("/api/chats/<chat_id>")
+def delete_chat(chat_id):
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para sincronizar as conversas."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    user_id = "acct_%d" % user["id"]
+    path = chats_path(user_id)
+
+    with CHATS_LOCK:
+        chats = load_chats(path)
+        remaining = [item for item in chats if item.get("id") != chat_id]
+        if len(remaining) != len(chats):
+            try:
+                save_chats(path, remaining)
+            except OSError as error:
+                print("[NEXA] falha ao salvar conversas:", error)
+                return jsonify({"error": "Falha ao salvar as conversas."}), 500
+
+    return jsonify({"ok": True})
+
+@app.delete("/api/chats")
+def delete_all_chats():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para sincronizar as conversas."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    user_id = "acct_%d" % user["id"]
+
+    with CHATS_LOCK:
+        try:
+            save_chats(chats_path(user_id), [])
+        except OSError as error:
+            print("[NEXA] falha ao salvar conversas:", error)
+            return jsonify({"error": "Falha ao salvar as conversas."}), 500
+
+    return jsonify({"ok": True})
 
 @app.post("/api/push-token")
 def register_push_token():

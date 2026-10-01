@@ -46,6 +46,7 @@ const MEMORY_KEY = "nexa_conversation";
 const MESSAGE_KEY_STORAGE_PREFIX = "nexa_message_key:";
 let CHATS_KEY = "nexa_chats";
 let ACTIVE_CHAT_KEY = "nexa_active_chat";
+const CHATS_PUSH_DELAY_MS = 1500;
 const REASONING_KEY = "nexa_reasoning";
 const LIVE_VOICE_KEY = "nexa_live_voice";
 const MEMORY_ENABLED_KEY = "nexa_memory_enabled:";
@@ -259,6 +260,18 @@ function makeId() {
   );
 }
 
+/* Id da mensagem: o merge entre aparelhos usa para não duplicar. */
+function makeMessageId() {
+  return (
+    "msg_" +
+    Date.now().toString(36) +
+    "_" +
+    Math.random()
+      .toString(36)
+      .slice(2, 7)
+  );
+}
+
 function cleanMessages(list) {
   if (!Array.isArray(list)) {
     return [];
@@ -274,6 +287,7 @@ function cleanMessages(list) {
     .map(item => ({
       role: item.role,
       content: item.content,
+      id: typeof item.id === "string" ? item.id : undefined,
       thinking: item.thinking,
       memoryUpdated: item.memoryUpdated === true,
       searched: item.searched === true
@@ -353,7 +367,9 @@ function makeChat() {
     title: "Nova conversa",
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    messages: []
+    messages: [],
+    rev: 0,
+    dirty: false
   };
 }
 
@@ -384,6 +400,13 @@ function normalizeChat(raw) {
     updatedAt:
       Number(raw.updatedAt) ||
       Date.now(),
+
+    rev: Math.max(
+      0,
+      Math.floor(Number(raw.rev) || 0)
+    ),
+
+    dirty: raw.dirty === true,
 
     messages
   };
@@ -416,6 +439,232 @@ function saveChats() {
   );
 }
 
+/*
+  ==========================================
+  SINCRONIZAÇÃO DAS CONVERSAS (servidor)
+  ==========================================
+  O servidor guarda a lista por conta e cada conversa tem uma `rev`.
+  Gravação baseada em rev antiga é recusada (409): o outro aparelho
+  chegou primeiro — a versão dele fica e as nossas mensagens novas
+  entram depois dela.
+*/
+
+let chatsPushTimer = null;
+
+function mergeChatMessages(localMessages, serverMessages) {
+  let common = 0;
+  const max = Math.min(localMessages.length, serverMessages.length);
+
+  while (
+    common < max &&
+    localMessages[common].role === serverMessages[common].role &&
+    localMessages[common].content === serverMessages[common].content
+  ) {
+    common += 1;
+  }
+
+  /*
+    Mensagem local que já está no servidor não entra de novo — o envio
+    pode ter funcionado sem a resposta chegar de volta.
+  */
+  const serverIds = new Set();
+
+  serverMessages.forEach(function (message) {
+    if (message && typeof message.id === "string" && message.id) {
+      serverIds.add(message.id);
+    }
+  });
+
+  const extra = localMessages
+    .slice(common)
+    .filter(function (message) {
+      return !(
+        message &&
+        typeof message.id === "string" &&
+        message.id &&
+        serverIds.has(message.id)
+      );
+    });
+
+  return serverMessages.concat(extra);
+}
+
+function applyChatContent(local, source) {
+  local.title = source.title;
+  local.updatedAt = source.updatedAt;
+  local.messages = source.messages;
+  local.rev = source.rev || 0;
+}
+
+async function pushChat(chat, attempt) {
+  const body = {
+    chat: {
+      id: chat.id,
+      title: chat.title,
+      createdAt: chat.createdAt,
+      updatedAt: chat.updatedAt,
+      messages: chat.messages
+    },
+    base_rev: chat.rev || 0
+  };
+
+  try {
+    const data = await api(
+      "PUT",
+      "/api/chats/" + encodeURIComponent(chat.id),
+      body
+    );
+
+    chat.rev = Number(data.rev) || chat.rev || 0;
+    chat.dirty = false;
+    saveChats();
+  } catch (error) {
+    const serverChat = error.data && error.data.chat;
+
+    if (error.status === 409 && serverChat && attempt < 2) {
+      chat.messages = mergeChatMessages(
+        chat.messages,
+        serverChat.messages || []
+      );
+      chat.rev = Number(serverChat.rev) || 0;
+
+      if (typeof serverChat.title === "string" && serverChat.title) {
+        chat.title = serverChat.title;
+      }
+
+      chat.updatedAt = Date.now();
+
+      if (chat.id === activeChatId && !sendButton.disabled) {
+        history.length = 0;
+        history.push(...chat.messages);
+        renderChat();
+      }
+
+      return pushChat(chat, attempt + 1);
+    }
+
+    if (error.status === 410) {
+      /* Apagada em outro aparelho: some daqui também. */
+      deleteChat(chat.id);
+      return;
+    }
+
+    /* Sem rede: fica "dirty" e tenta de novo depois. */
+  }
+}
+
+async function pushDirtyChats() {
+  const pending = chats.filter(chat => chat.dirty);
+
+  for (const chat of pending) {
+    await pushChat(chat, 1);
+  }
+}
+
+function scheduleChatsPush() {
+  if (chatsPushTimer) {
+    return;
+  }
+
+  chatsPushTimer = setTimeout(function () {
+    chatsPushTimer = null;
+    pushDirtyChats().catch(function () {});
+  }, CHATS_PUSH_DELAY_MS);
+}
+
+/* Puxa do servidor e aplica o que houver de novo (e envia o pendente). */
+async function syncChatsFromServer() {
+  if (!messageKey) {
+    return;
+  }
+
+  const data = await api("GET", "/api/chats");
+  const serverChats = Array.isArray(data.chats) ? data.chats : [];
+  const onServer = new Set(serverChats.map(item => item.id));
+  const activeBefore = activeChatId;
+  let activeTouched = false;
+
+  /*
+    Conversa que estava no servidor e sumiu foi apagada em outro
+    aparelho. Conversa local nova (rev 0) ou com envio pendente fica.
+  */
+  chats = chats.filter(function (chat) {
+    if (chat.dirty || onServer.has(chat.id) || !(chat.rev > 0)) {
+      return true;
+    }
+
+    if (chat.id === activeBefore) {
+      activeTouched = true;
+    }
+
+    return false;
+  });
+
+  serverChats.forEach(function (item) {
+    const incoming = normalizeChat(item);
+
+    if (!incoming) {
+      return;
+    }
+
+    const local = findChat(incoming.id);
+
+    if (!local) {
+      chats.push(incoming);
+      return;
+    }
+
+    if (local.dirty || incoming.rev < local.rev) {
+      return;
+    }
+
+    if (
+      incoming.rev !== local.rev ||
+      incoming.updatedAt !== local.updatedAt ||
+      incoming.messages.length !== local.messages.length
+    ) {
+      applyChatContent(local, incoming);
+
+      if (local.id === activeBefore) {
+        activeTouched = true;
+      }
+    }
+  });
+
+  /* Conversa local que nunca foi ao servidor entra na fila de envio. */
+  chats.forEach(function (chat) {
+    if (!chat.dirty && !(chat.rev > 0) && chat.messages.length) {
+      chat.dirty = true;
+    }
+  });
+
+  if (!findChat(activeChatId)) {
+    if (chats.length === 0) {
+      chats.push(makeChat());
+    }
+
+    activeChatId = chats[0].id;
+    activeTouched = true;
+  }
+
+  if (activeTouched) {
+    const chat = currentChat();
+
+    history.length = 0;
+
+    if (chat) {
+      history.push(...chat.messages);
+    }
+
+    renderChat();
+  }
+
+  saveChats();
+  renderChatList();
+
+  pushDirtyChats().catch(function () {});
+}
+
 /* Esvazia `history` dentro do chat aberto e grava. */
 function saveMemory() {
   const chat = currentChat();
@@ -432,9 +681,11 @@ function saveMemory() {
     chat.title = chatTitle(chat.messages);
   }
   chat.updatedAt = Date.now();
+  chat.dirty = true;
 
   saveChats();
   renderChatList();
+  scheduleChatsPush();
 }
 
 function loadChats() {
@@ -1181,12 +1432,14 @@ async function askNexa(text) {
 
   history.push({
     role: "user",
-    content: text
+    content: text,
+    id: makeMessageId()
   });
 
   history.push({
     role: "model",
     content: fullReply,
+    id: makeMessageId(),
     thinking: fullThinking,
     memoryUpdated,
     searched
@@ -1278,6 +1531,8 @@ function openChat(id) {
   renderChatList();
   closeDrawer();
 
+  syncChatsFromServer().catch(function () {});
+
   input.value = "";
   input.focus();
 }
@@ -1320,6 +1575,11 @@ function deleteChat(id) {
 
     renderChat();
   }
+
+  api(
+    "DELETE",
+    "/api/chats/" + encodeURIComponent(id)
+  ).catch(function () {});
 
   saveChats();
   renderChatList();
@@ -1888,6 +2148,21 @@ composer.addEventListener(
       return;
     }
 
+    sendButton.disabled = true;
+    micButton.disabled = true;
+    newChatButton.disabled = true;
+    drawerNewChat.disabled = true;
+
+    /*
+      Antes de enviar, puxa o que houver de novo: se outro aparelho
+      mexeu na conversa, a tela é atualizada antes do prompt entrar.
+    */
+    try {
+      await syncChatsFromServer();
+    } catch (error) {
+      // Servidor fora do ar: envia com o histórico local mesmo.
+    }
+
     /*
       Verifica se é a primeira mensagem do chat (histórico vazio antes de adicionar)
     */
@@ -1906,11 +2181,6 @@ composer.addEventListener(
     );
 
     input.value = "";
-
-    sendButton.disabled = true;
-    micButton.disabled = true;
-    newChatButton.disabled = true;
-    drawerNewChat.disabled = true;
 
     /*
       Indicador enquanto o primeiro
@@ -1932,8 +2202,10 @@ composer.addEventListener(
           if (chat) {
             chat.title = aiTitle;
             chat.updatedAt = Date.now();
+            chat.dirty = true;
             saveChats();
             renderChatList();
+            scheduleChatsPush();
           }
         }
       }
@@ -2132,8 +2404,15 @@ document.getElementById("exportChats").addEventListener("click", function () {
   URL.revokeObjectURL(url);
 });
 
-document.getElementById("clearChats").addEventListener("click", function () {
+document.getElementById("clearChats").addEventListener("click", async function () {
   if (!confirm("Apagar todas as conversas deste usuário neste navegador?")) {
+    return;
+  }
+
+  try {
+    await api("DELETE", "/api/chats");
+  } catch (error) {
+    window.alert("Não deu para apagar no servidor: " + error.message);
     return;
   }
 
@@ -2404,9 +2683,14 @@ async function api(method, path, payload) {
   }
 
   if (!response.ok) {
-    throw new Error(
+    const error = new Error(
       data.error || `Erro (HTTP ${response.status}).`
     );
+
+    error.status = response.status;
+    error.data = data;
+
+    throw error;
   }
 
   return data;
@@ -2470,6 +2754,7 @@ function enterApp(user, issuedMessageKey) {
 
   startReminderPolling();
   syncPushToken();
+  syncChatsFromServer().catch(function () {});
 }
 
 loginForm.addEventListener("submit", async function (event) {

@@ -344,13 +344,44 @@ O botão **Nova conversa** do topo continua funcionando igual: os dois botões
 fazem a mesma coisa.
 
 Tudo isso fica no `localStorage`, em `nexa_chats` (a lista de conversas) e
-`nexa_active_chat` (qual está aberta). A memória de longo prazo fica nos
-arquivos `.md` da pasta `memoria/` e não é afetada.
+`nexa_active_chat` (qual está aberta) — além da cópia sincronizada no
+servidor (veja **Sincronização das conversas**). A memória de longo prazo
+fica nos arquivos `.md` da pasta `memoria/` e não é afetada.
 
 > **Nota sobre versões antigas:** antes da barra lateral a NEXA guardava uma
 > conversa só, em `nexa_conversation`. Na primeira abertura depois dessa
 > mudança, essa conversa é migrada sozinha para a lista e a chave antiga é
 > apagada. Não é preciso fazer nada manualmente.
+
+## Sincronização das conversas
+
+As conversas são **do servidor**: cada conta tem todas as conversas em
+`memoria/<conta>.chats.json` (fora do git), e o `localStorage` é só o cache
+local de cada aparelho. Em qualquer aparelho logado na mesma conta, os chats
+e o histórico aparecem iguais.
+
+Como funciona:
+
+- **Envio** — quando a conversa muda (mensagem nova, título), o navegador
+  manda a conversa inteira para o servidor (`PUT /api/chats/<id>`), com uma
+  pequena espera para juntar mudanças seguidas. Antes de enviar um prompt, a
+  página **atualiza com tudo o que há de novo** no servidor: assim a mensagem
+  nova nunca parte de um histórico atrasado.
+- **Quem chega primeiro vence** — cada conversa tem uma `rev` (número que
+  sobe a cada gravação). O cliente diz em que `rev` estava; se outro aparelho
+  gravou antes, o servidor recusa (`409`) e devolve a versão atual. A versão
+  de quem chegou primeiro fica; o segundo mescla as mensagens dele **depois**
+  das do servidor e grava de novo. Nada se perde e nada duplica (cada
+  mensagem tem um id).
+- **Apagar** — apagar uma conversa no servidor vale para todos os aparelhos;
+  quem estava com ela aberta em outro lugar a remove ao sincronizar. Isso
+  vale também para **Apagar todas as conversas** (Configurações > Mais).
+- **Limites** — até 500 conversas por conta, 5 MB no total e 200.000
+  caracteres por mensagem. A lista de conversas nunca sai do navegador sem
+  login.
+
+Rotas: `GET /api/chats`, `PUT /api/chats/<id>`, `DELETE /api/chats/<id>` e
+`DELETE /api/chats`.
 
 ## Versão
 
