@@ -2265,6 +2265,44 @@ function renderReminderList(items) {
   });
 }
 
+/*
+  Lembretes chegam num chat próprio ("Lembretes") para a mensagem não
+  se perder no meio de outra conversa. Se esse chat estiver aberto, a
+  mensagem também aparece na hora.
+*/
+const REMINDERS_CHAT_ID = "lembretes-da-nexa";
+const REMINDERS_CHAT_TITLE = "Lembretes";
+
+function deliverReminder(text) {
+  let target = findChat(REMINDERS_CHAT_ID);
+
+  if (!target) {
+    target = makeChat();
+    target.id = REMINDERS_CHAT_ID;
+    target.title = REMINDERS_CHAT_TITLE;
+    chats.unshift(target);
+  }
+
+  const message = {
+    role: "model",
+    content: text,
+    id: makeMessageId()
+  };
+
+  target.messages.push(message);
+  target.updatedAt = Date.now();
+  target.dirty = true;
+
+  if (target.id === activeChatId) {
+    history.push(message);
+    addMessage(text, "nexa", "", false);
+  }
+
+  saveChats();
+  renderChatList();
+  scheduleChatsPush();
+}
+
 async function pollDueReminders() {
   if (!currentUser || !messageKey) {
     return;
@@ -2281,14 +2319,14 @@ async function pollDueReminders() {
         return;
       }
 
-      addMessage(item.message, "nexa", "", false);
+      deliverReminder(item.message);
 
       if ("Notification" in window && Notification.permission === "granted") {
         try {
           new Notification("Lembrete da NEXA", { body: item.message });
         } catch (error) {
           // Navegador móvel pode recusar Notification direto; a mensagem
-          // no chat já apareceu.
+          // já ficou salva no chat Lembretes.
         }
       }
     });
