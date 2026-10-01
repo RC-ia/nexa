@@ -1,6 +1,6 @@
 """
-Launcher do servidor NEXA para Linux.
-Inicia o server.py como **daemon** (sobrevive ao fechar o terminal).
+Launcher do servidor NEXA - Cross-platform (Windows + Linux).
+Inicia o server.py como processo **desanexado/daemon** (sobrevive ao fechar o terminal).
 Guarda o PID em arquivo para o server_manager poder controlar depois.
 """
 
@@ -8,7 +8,7 @@ import os
 import sys
 import subprocess
 import time
-import atexit
+import platform
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -16,6 +16,14 @@ SERVER_SCRIPT = BASE_DIR / "server.py"
 PYTHON_EXE = sys.executable
 PID_FILE = BASE_DIR / ".nexa_server.pid"
 LOG_FILE = BASE_DIR / ".nexa_server.log"
+
+IS_WINDOWS = platform.system() == "Windows"
+
+# Windows flags
+if IS_WINDOWS:
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
+    DETACHED_PROCESS = 0x00000008
+    CREATE_NO_WINDOW = 0x08000000
 
 
 def _log(msg: str):
@@ -38,78 +46,66 @@ def write_pid(pid: int):
 
 
 def is_alive(pid: int) -> bool:
-    """Verifica se processo existe (Linux)."""
+    """Verifica se processo existe (cross-platform)."""
+    if IS_WINDOWS:
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            return str(pid) in result.stdout
+        except Exception:
+            return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+
+def _start_windows() -> dict:
+    """Inicia desanexado no Windows."""
     try:
-        # kill -0 não mata, só verifica se o processo existe e temos permissão
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
-
-
-def _daemonize():
-    """Double-fork para daemonizar corretamente no Linux."""
-    # Primeiro fork
-    try:
-        pid = os.fork()
-        if pid > 0:
-            sys.exit(0)  # Pai sai
-    except OSError as e:
-        _log(f"Primeiro fork falhou: {e}")
-        sys.exit(1)
-
-    # Desanexa do terminal pai
-    os.chdir("/")
-    os.setsid()
-    os.umask(0)
-
-    # Segundo fork
-    try:
-        pid = os.fork()
-        if pid > 0:
-            sys.exit(0)  # Pai intermediário sai
-    except OSError as e:
-        _log(f"Segundo fork falhou: {e}")
-        sys.exit(1)
-
-    # Redireciona stdio para /dev/null (ou log file)
-    sys.stdout.flush()
-    sys.stderr.flush()
-    with open(LOG_FILE, "a") as f:
-        os.dup2(f.fileno(), sys.stdout.fileno())
-        os.dup2(f.fileno(), sys.stderr.fileno())
-    with open(os.devnull, "r") as f:
-        os.dup2(f.fileno(), sys.stdin.fileno())
-
-
-def start_detached() -> dict:
-    """Inicia server.py como daemon."""
-    pid = read_pid()
-    if pid and is_alive(pid):
-        return {"ok": False, "error": f"Servidor já rodando (PID: {pid})", "pid": pid}
-
-    try:
-        # Prepara ambiente para o daemon
-        env = os.environ.copy()
-        env["PYTHONUNBUFFERED"] = "1"
-
-        # Inicia o processo que vai fazer o double-fork
         proc = subprocess.Popen(
-            [PYTHON_EXE, "-c", f"""
-import os, sys, subprocess, time
+            [PYTHON_EXE, str(SERVER_SCRIPT)],
+            cwd=str(BASE_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | CREATE_NO_WINDOW,
+            start_new_session=True,
+        )
+        time.sleep(1.5)
+        write_pid(proc.pid)
+        _log(f"Servidor iniciado desanexado (PID: {proc.pid})")
+        return {"ok": True, "pid": proc.pid}
+    except Exception as e:
+        _log(f"Falha ao iniciar (Windows): {e}")
+        return {"ok": False, "error": str(e)}
+
+
+def _start_linux() -> dict:
+    """Inicia como daemon no Linux (double-fork)."""
+    # Código Python que será executado no subprocesso para fazer o double-fork
+    daemon_code = f"""
+import os, sys
 from pathlib import Path
 
 BASE_DIR = Path(r"{BASE_DIR}")
 SERVER_SCRIPT = BASE_DIR / "server.py"
 PID_FILE = BASE_DIR / ".nexa_server.pid"
 LOG_FILE = BASE_DIR / ".nexa_server.log"
+PYTHON_EXE = r"{PYTHON_EXE}"
 
 def daemonize():
     try:
         pid = os.fork()
         if pid > 0:
             sys.exit(0)
-    except OSError as e:
+    except OSError:
         sys.exit(1)
     os.chdir("/")
     os.setsid()
@@ -118,7 +114,7 @@ def daemonize():
         pid = os.fork()
         if pid > 0:
             sys.exit(0)
-    except OSError as e:
+    except OSError:
         sys.exit(1)
     sys.stdout.flush()
     sys.stderr.flush()
@@ -135,8 +131,15 @@ with open(PID_FILE, "w") as f:
     f.write(str(os.getpid()))
 
 # Executa o servidor
-os.execve(r"{PYTHON_EXE}", [r"{PYTHON_EXE}", str(SERVER_SCRIPT)], {k: v for k, v in os.environ.items()})
-"""],
+os.execve(PYTHON_EXE, [PYTHON_EXE, str(SERVER_SCRIPT)], dict(os.environ))
+"""
+
+    try:
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+
+        proc = subprocess.Popen(
+            [PYTHON_EXE, "-c", daemon_code],
             cwd=str(BASE_DIR),
             env=env,
             stdout=subprocess.DEVNULL,
@@ -145,13 +148,9 @@ os.execve(r"{PYTHON_EXE}", [r"{PYTHON_EXE}", str(SERVER_SCRIPT)], {k: v for k, v
             start_new_session=True,
         )
 
-        # Aguarda o processo intermediário terminar (ele faz o double-fork e sai)
         proc.wait(timeout=5)
-
-        # Dá tempo do daemon neto subir e escrever o PID
         time.sleep(1.5)
 
-        # Lê o PID real do daemon
         real_pid = read_pid()
         if real_pid and is_alive(real_pid):
             _log(f"Servidor iniciado como daemon (PID: {real_pid})")
@@ -160,7 +159,71 @@ os.execve(r"{PYTHON_EXE}", [r"{PYTHON_EXE}", str(SERVER_SCRIPT)], {k: v for k, v
             return {"ok": False, "error": "Daemon não escreveu PID válido"}
 
     except Exception as e:
-        _log(f"Falha ao iniciar: {e}")
+        _log(f"Falha ao iniciar (Linux): {e}")
+        return {"ok": False, "error": str(e)}
+
+
+def start_detached() -> dict:
+    """Inicia server.py desanexado/daemon conforme o SO."""
+    pid = read_pid()
+    if pid and is_alive(pid):
+        return {"ok": False, "error": f"Servidor já rodando (PID: {pid})", "pid": pid}
+
+    if IS_WINDOWS:
+        return _start_windows()
+    else:
+        return _start_linux()
+
+
+def _stop_windows(pid: int, force: bool) -> dict:
+    """Para processo no Windows."""
+    try:
+        if force:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            _log(f"Servidor morto à força (PID: {pid})")
+        else:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid)],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            _log(f"Servidor finalizado (PID: {pid})")
+
+        for _ in range(10):
+            if not is_alive(pid):
+                break
+            time.sleep(0.5)
+
+        PID_FILE.unlink(missing_ok=True)
+        return {"ok": True, "pid": pid}
+    except Exception as e:
+        _log(f"Erro parando (Windows): {e}")
+        return {"ok": False, "error": str(e)}
+
+
+def _stop_linux(pid: int, force: bool) -> dict:
+    """Para processo no Linux (mata grupo)."""
+    try:
+        if force:
+            os.killpg(os.getpgid(pid), 9)  # SIGKILL
+            _log(f"Servidor morto à força (PID: {pid})")
+        else:
+            os.killpg(os.getpgid(pid), 15)  # SIGTERM
+            _log(f"Servidor finalizado (PID: {pid})")
+
+        for _ in range(20):
+            if not is_alive(pid):
+                break
+            time.sleep(0.5)
+
+        PID_FILE.unlink(missing_ok=True)
+        return {"ok": True, "pid": pid}
+    except Exception as e:
+        _log(f"Erro parando (Linux): {e}")
         return {"ok": False, "error": str(e)}
 
 
@@ -174,27 +237,10 @@ def stop_server(force: bool = False) -> dict:
         PID_FILE.unlink(missing_ok=True)
         return {"ok": False, "error": "Servidor não está rodando (PID órfão removido)"}
 
-    try:
-        if force:
-            # Mata o grupo de processos (SIGKILL)
-            os.killpg(os.getpgid(pid), 9)  # SIGKILL
-            _log(f"Servidor morto à força (PID: {pid})")
-        else:
-            # Termina graciosamente (SIGTERM no grupo)
-            os.killpg(os.getpgid(pid), 15)  # SIGTERM
-            _log(f"Servidor finalizado (PID: {pid})")
-
-        # Aguarda morte
-        for _ in range(20):
-            if not is_alive(pid):
-                break
-            time.sleep(0.5)
-
-        PID_FILE.unlink(missing_ok=True)
-        return {"ok": True, "pid": pid}
-    except Exception as e:
-        _log(f"Erro parando: {e}")
-        return {"ok": False, "error": str(e)}
+    if IS_WINDOWS:
+        return _stop_windows(pid, force)
+    else:
+        return _stop_linux(pid, force)
 
 
 def restart_server(force: bool = False) -> dict:
@@ -208,7 +254,6 @@ def get_status() -> dict:
     """Status atual."""
     pid = read_pid()
     if pid and is_alive(pid):
-        # Tenta uptime via tempo de criação do arquivo PID
         try:
             ctime = os.path.getctime(PID_FILE)
             uptime = time.time() - ctime
@@ -216,7 +261,6 @@ def get_status() -> dict:
             uptime = None
         return {"running": True, "pid": pid, "uptime_seconds": round(uptime, 1) if uptime else None}
     else:
-        # Limpa PID órfão
         if pid:
             PID_FILE.unlink(missing_ok=True)
         return {"running": False, "pid": None, "uptime_seconds": None}
@@ -225,7 +269,7 @@ def get_status() -> dict:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="NEXA Server Launcher (Linux)")
+    parser = argparse.ArgumentParser(description="NEXA Server Launcher (Cross-platform)")
     parser.add_argument("action", choices=["start", "stop", "restart", "status"], nargs="?", default="start")
     parser.add_argument("--force", action="store_true", help="Forçar kill (stop/restart)")
     args = parser.parse_args()
