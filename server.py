@@ -454,6 +454,7 @@ REMINDERS_LOCK = threading.Lock()
 REMINDERS_TICK_SECONDS = 30
 REMINDERS_LIMIT = 50
 PENDING_LIMIT = 50
+PENDING_RETENTION_SECONDS = 7 * 86400
 REMINDER_FILE_SUFFIX = ".reminders.json"
 
 # Índice = número do dia usado pela ferramenta (0=domingo).
@@ -600,16 +601,18 @@ def load_reminder_data(path):
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {"reminders": [], "pending": []}
+        return {"reminders": [], "pending": [], "seq": 0}
 
     if not isinstance(data, dict):
-        return {"reminders": [], "pending": []}
+        return {"reminders": [], "pending": [], "seq": 0}
 
     reminders = data.get("reminders")
     pending = data.get("pending")
+    seq = data.get("seq")
     return {
         "reminders": reminders if isinstance(reminders, list) else [],
         "pending": pending if isinstance(pending, list) else [],
+        "seq": seq if isinstance(seq, int) and not isinstance(seq, bool) else 0,
     }
 
 def save_reminder_data(path, data):
@@ -788,7 +791,7 @@ def delete_reminder(user_id, reminder_id):
     return True
 
 def take_pending_reminders(user_id):
-    """Devolve e esvazia a fila de mensagens disparadas (a página consome)."""
+    """Cliente antigo (poll sem cursor): devolve e esvazia a fila."""
     path = reminder_path(user_id)
 
     with REMINDERS_LOCK:
@@ -799,6 +802,40 @@ def take_pending_reminders(user_id):
             save_reminder_data(path, data)
 
     return pending
+
+def pending_reminders_since(user_id, after_seq):
+    """
+    Itens com seq > cursor, sem esvaziar a fila: cada aparelho recebe tudo
+    uma vez e avança o próprio cursor. Itens antigos (sem seq) ganham
+    número aqui; itens fora da retenção são podados.
+    """
+    path = reminder_path(user_id)
+
+    with REMINDERS_LOCK:
+        data = load_reminder_data(path)
+        changed = False
+
+        for item in data["pending"]:
+            if not isinstance(item.get("seq"), int):
+                data["seq"] += 1
+                item["seq"] = data["seq"]
+                changed = True
+
+        cutoff = int(time.time()) - PENDING_RETENTION_SECONDS
+        kept = [
+            item for item in data["pending"]
+            if int(item.get("at") or 0) >= cutoff
+        ]
+        if len(kept) != len(data["pending"]):
+            data["pending"] = kept
+            changed = True
+
+        items = [item for item in data["pending"] if item["seq"] > after_seq]
+
+        if changed:
+            save_reminder_data(path, data)
+
+    return items
 
 def run_reminder_agent(tarefa, when_text):
     """Agente do lembrete: system prompt próprio e resposta curta ('' em falha)."""
@@ -874,7 +911,10 @@ def process_reminder_file(path):
             if current is None:
                 continue
 
-            data["pending"].append({"at": int(time.time()), "message": message})
+            data["seq"] += 1
+            data["pending"].append(
+                {"at": int(time.time()), "message": message, "seq": data["seq"]}
+            )
             data["pending"] = data["pending"][-PENDING_LIMIT:]
 
             if current.get("tipo") == "unico":
@@ -2721,7 +2761,20 @@ def due_reminders():
         return key_error
 
     user_id = "acct_%d" % user["id"]
-    return jsonify({"due": take_pending_reminders(user_id)})
+
+    since = request.args.get("since")
+    if since is None:
+        # Cliente antigo, sem cursor: mantém o comportamento de esvaziar.
+        return jsonify({"due": take_pending_reminders(user_id)})
+
+    try:
+        after_seq = max(0, int(since))
+    except (TypeError, ValueError):
+        after_seq = 0
+
+    items = pending_reminders_since(user_id, after_seq)
+    cursor = max([after_seq] + [item["seq"] for item in items])
+    return jsonify({"due": items, "cursor": cursor})
 
 @app.post("/api/push-token")
 def register_push_token():

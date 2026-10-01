@@ -290,10 +290,14 @@ final entregue ao usuário. Se o agente falhar, a própria descrição da tarefa
 
 A entrega é dupla:
 
-- **Página aberta** — o chat busca os lembretes pendentes a cada 30 s
-  (`GET /api/reminders/due`) e mostra a mensagem no lugar de sempre; com a
-  permissão ativada (Configurações > Lembretes > Ativar notificações),
-  também dispara uma notificação do navegador.
+- **Página aberta** — o chat busca os lembretes novos a cada 30 s
+  (`GET /api/reminders/due?since=<cursor>`) e mostra a mensagem no lugar de
+  sempre; com a permissão ativada (Configurações > Lembretes > Ativar
+  notificações), também dispara uma notificação do navegador. Cada aparelho
+  guarda o próprio cursor no navegador e recebe cada lembrete uma vez: PC e
+  celular com a página aberta veem a mesma mensagem, um não "rouba" a
+  entrega do outro. O servidor retém os disparos por 7 dias para quem ficou
+  offline — passado isso, o lembrete antigo não é mais entregue.
 - **App / push (FCM)** — o app envia o token do Firebase pelo evento
   `nativeFcmToken` (ou `window.NexaNative.getFcmToken()`), a página registra
   em `POST /api/push-token` e o servidor envia o push pelo FCM HTTP v1. Para

@@ -1685,6 +1685,7 @@ async function loadMemories() {
 }
 
 const REMINDER_POLL_MS = 30000;
+const REMINDER_CURSOR_PREFIX = "nexa_reminder_cursor";
 let reminderPollTimer = null;
 let pushToken = "";
 
@@ -1754,8 +1755,11 @@ async function pollDueReminders() {
     return;
   }
 
+  const cursorKey = REMINDER_CURSOR_PREFIX + ":" + currentUser.username;
+  const cursor = parseInt(localStorage.getItem(cursorKey), 10) || 0;
+
   try {
-    const data = await api("GET", "/api/reminders/due");
+    const data = await api("GET", `/api/reminders/due?since=${cursor}`);
 
     (data.due || []).forEach(function (item) {
       if (!item || !item.message) {
@@ -1773,6 +1777,11 @@ async function pollDueReminders() {
         }
       }
     });
+
+    // Só avança depois de mostrar tudo: no pior caso, repete uma vez.
+    if (typeof data.cursor === "number" && data.cursor > cursor) {
+      localStorage.setItem(cursorKey, String(data.cursor));
+    }
   } catch (error) {
     // Servidor ou sessão fora do ar: tenta de novo no próximo ciclo.
   }
