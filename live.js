@@ -403,7 +403,7 @@ initializeLivePage();
   ==========================================
   GESTOS NA TELA
   ==========================================
-  Puxar para a esquerda volta para a conversa.
+  Puxar para a direita volta para a conversa.
 */
 
 (function () {
@@ -448,7 +448,7 @@ initializeLivePage();
       const dx = touch.clientX - startX;
       const dy = touch.clientY - startY;
 
-      if (-dx >= SIDE_MIN && -dx >= 2 * Math.abs(dy)) {
+      if (dx >= SIDE_MIN && dx >= 2 * Math.abs(dy)) {
         window.location.href = "/";
       }
     },
