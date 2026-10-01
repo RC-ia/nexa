@@ -1248,6 +1248,16 @@ function createThinkingBlock() {
       render("done");
     },
 
+    expand() {
+      open = true;
+      render("thinking");
+    },
+
+    collapse() {
+      open = false;
+      render("done");
+    },
+
     setContent(value) {
       content = typeof value === "string"
         ? value
@@ -1391,6 +1401,15 @@ async function askNexa(text, deep) {
     searchNotice
   } = createStreamingMessage();
 
+  /*
+    Na pesquisa profunda o painel de pensamento já abre mostrando a
+    cadeia do pesquisador; fecha quando a resposta começa a chegar.
+  */
+
+  if (deep) {
+    thinking.expand();
+  }
+
   const reader =
     response.body.getReader();
 
@@ -1441,6 +1460,15 @@ async function askNexa(text, deep) {
         data.type === "text" &&
         typeof data.text === "string"
       ) {
+        /*
+          Pesquisa profunda: o pesquisador terminou e a resposta
+          começou — o painel fecha sozinho.
+        */
+
+        if (deep && !fullReply) {
+          thinking.collapse();
+        }
+
         fullReply += data.text;
         appendText(data.text);
       }

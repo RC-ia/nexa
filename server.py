@@ -2,6 +2,7 @@ import calendar
 import html
 import json
 import os
+import queue
 import re
 import threading
 import time
@@ -1970,17 +1971,26 @@ DEEP_RESEARCH_PROMPT = (
     "nada de perguntas de volta."
 )
 
-def run_deep_research(user_id, topic):
+def run_deep_research(user_id, topic, progress=None):
     """
     Pesquisa profunda: agente novo, sem o contexto da conversa, com as
     ferramentas de busca. Devolve o relatório final (ou um aviso de falha
     para o modelo principal repassar ao usuário).
+
+    "progress" é um callback opcional: cada passo da investigação vira uma
+    linha na cadeia de pensamento mostrada no chat.
     """
     if not API_KEY or not isinstance(topic, str) or not topic.strip():
         return "Pesquisa profunda indisponível: tópico vazio."
 
     topic = topic.strip()[:400]
     cache_key = (user_id or "anon") + "::pesquisa_profunda"
+
+    def note(text):
+        if progress:
+            progress(text)
+
+    note("Tema: «%s». Montando a primeira rodada de buscas." % topic)
 
     messages = [
         {"role": "system", "content": DEEP_RESEARCH_PROMPT},
@@ -2014,10 +2024,16 @@ def run_deep_research(user_id, topic):
         return response.json()
 
     for round_number in range(1, DEEP_RESEARCH_MAX_ROUNDS + 1):
+        note(
+            "Rodada %d de %d: decidindo os próximos passos."
+            % (round_number, DEEP_RESEARCH_MAX_ROUNDS)
+        )
+
         try:
             payload = ask()
         except (requests.RequestException, RuntimeError, ValueError) as error:
             print("[NEXA-PROFUNDA] falha na rodada %d: %s" % (round_number, error))
+            note("Falha na rodada %d: %s" % (round_number, str(error)[:120]))
             return (
                 "A pesquisa profunda falhou no meio do caminho (%s). Avise o "
                 "usuário que não completou e responda com o que ele já sabe."
@@ -2060,9 +2076,14 @@ def run_deep_research(user_id, topic):
                     "[NEXA-PROFUNDA] busca %r (rodada %d)."
                     % (term, round_number)
                 )
+                note("Buscando na web: «%s»" % term)
                 found, error = run_web_search(term, patience=0)
 
                 if found:
+                    note(
+                        "«%s»: %d resultado(s) encontrados."
+                        % (term, len(found))
+                    )
                     content = format_search_results(term, found, cache_key)
                 elif error:
                     content = error
@@ -2072,6 +2093,11 @@ def run_deep_research(user_id, topic):
                 paginas = arguments.get("paginas", [])
                 if not isinstance(paginas, list):
                     paginas = []
+                if paginas:
+                    note(
+                        "Lendo página(s): %s."
+                        % ", ".join(str(p) for p in paginas)
+                    )
                 content = fetch_pages(cache_key, paginas)
             else:
                 content = "Ferramenta desconhecida para este pesquisador."
@@ -2086,6 +2112,7 @@ def run_deep_research(user_id, topic):
         "[NEXA-PROFUNDA] limite de %d rodadas atingido; pedindo fechamento."
         % DEEP_RESEARCH_MAX_ROUNDS
     )
+    note("Limite de rodadas atingido: pedindo o relatório final.")
 
     messages.append({
         "role": "user",
@@ -2570,14 +2597,17 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
         yield sse({
             "type": "reasoning",
             "text": "Pesquisa profunda em andamento: o pesquisador está "
-                    "investigando o tema. Isso pode demorar um pouco.",
+                    "investigando o tema. Isso pode demorar um pouco.\n\n",
         })
 
         box = {}
+        progress = queue.Queue()
 
         def worker():
             try:
-                box["report"] = run_deep_research(user_id, user_message)
+                box["report"] = run_deep_research(
+                    user_id, user_message, progress.put
+                )
             except Exception as error:  # noqa: BLE001
                 print("[NEXA-PROFUNDA] falha inesperada:", error)
                 box["report"] = (
@@ -2588,17 +2618,37 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
         pump = threading.Thread(target=worker, daemon=True)
         pump.start()
 
+        last_ping = time.monotonic()
+
         while pump.is_alive():
-            pump.join(timeout=SEARCH_HEARTBEAT)
-            if pump.is_alive():
+            pump.join(timeout=1)
+
+            # A cadeia de pensamento anda a cada passo do pesquisador.
+            while not progress.empty():
+                yield sse({
+                    "type": "reasoning",
+                    "text": progress.get() + "\n\n",
+                })
+
+            if (
+                pump.is_alive()
+                and time.monotonic() - last_ping >= SEARCH_HEARTBEAT
+            ):
+                last_ping = time.monotonic()
                 yield sse({"type": "ping"})
+
+        while not progress.empty():
+            yield sse({
+                "type": "reasoning",
+                "text": progress.get() + "\n\n",
+            })
 
         report = box.get("report") or ""
 
         yield sse({"type": "search"})
         yield sse({
             "type": "reasoning",
-            "text": "Relatório pronto. A NEXA está escrevendo a resposta.",
+            "text": "Relatório pronto. A NEXA está escrevendo a resposta.\n\n",
         })
 
         try:
