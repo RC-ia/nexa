@@ -2236,7 +2236,7 @@ DEEP_RESEARCH_PROMPT = (
     "nada de perguntas de volta."
 )
 
-def run_deep_research(user_id, topic, progress=None):
+def run_deep_research(user_id, topic, progress=None, reasoning=None):
     """
     Pesquisa profunda: agente novo, sem o contexto da conversa, com as
     ferramentas de busca. Devolve o relatório final (ou um aviso de falha
@@ -2274,7 +2274,7 @@ def run_deep_research(user_id, topic, progress=None):
 
     def ask(with_tools=True):
         body = {
-            "model": MODEL,
+            "model": model_for_reasoning(reasoning),
             "messages": messages,
             "stream": False,
             "max_tokens": MAX_OUTPUT_TOKENS,
@@ -2409,7 +2409,7 @@ def run_deep_research(user_id, topic, progress=None):
         print("[NEXA-PROFUNDA] falha no fechamento: %s" % error)
         return "A pesquisa profunda não conseguiu fechar o relatório."
 
-def run_tools(user_id, calls):
+def run_tools(user_id, calls, reasoning=None):
     """
     Executa todas as ferramentas chamadas pelo modelo e devolve
     (resultados_por_id, memoria_atualizada, pesquisa_realizada).
@@ -2475,7 +2475,7 @@ def run_tools(user_id, calls):
         if name == "pesquisa_profunda":
             topic = arguments.get("topico")
             print("[NEXA-PROFUNDA] ferramenta chamada: %r" % topic)
-            results[call_id] = run_deep_research(user_id, topic)
+            results[call_id] = run_deep_research(user_id, topic, reasoning=reasoning)
             searched = True
             continue
 
@@ -2622,7 +2622,9 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
     current_text = assistant_text or ""
 
     for _ in range(MAX_TOOL_ROUNDS):
-        results, memory_now, search_now = run_tools(user_id, current_calls)
+        results, memory_now, search_now = run_tools(
+            user_id, current_calls, reasoning
+        )
 
         if not results:
             break
@@ -2889,7 +2891,7 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
         def worker():
             try:
                 box["report"] = run_deep_research(
-                    user_id, user_message, progress.put
+                    user_id, user_message, progress.put, reasoning
                 )
             except Exception as error:  # noqa: BLE001
                 print("[NEXA-PROFUNDA] falha inesperada:", error)
