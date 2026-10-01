@@ -1434,6 +1434,10 @@ SEARCH_UNAVAILABLE_MESSAGE = (
     "espera, responda com o que você já sabe e deixe claro o que não deu "
     "para verificar. Não invente fatos, números, datas ou fontes."
 )
+SEARCH_REASON_LABELS = {
+    "rede": "falha de rede",
+    "limitado": "o buscador está limitando as requisições",
+}
 # Enquanto a busca insiste, o proxy (Cloudflare) pode cortar a conexão se
 # ficarmos sem escrever nada. Mandamos um keep-alive no SSE durante a espera.
 SEARCH_HEARTBEAT = int(os.environ.get("SEARCH_HEARTBEAT", "15"))
@@ -1547,7 +1551,7 @@ def search_once(term, limit, deadline):
     return [], last_error
 
 
-def run_web_search(term, limit=SEARCH_RESULT_LIMIT, patience=None):
+def run_web_search(term, limit=SEARCH_RESULT_LIMIT, patience=None, progress=None):
     """
     Busca no DuckDuckGo insistindo até conseguir, dentro de SEARCH_PATIENCE
     segundos (2 minutos por padrão). Se nada voltar nesse tempo, devolve a
@@ -1558,6 +1562,10 @@ def run_web_search(term, limit=SEARCH_RESULT_LIMIT, patience=None):
     responder. Resposta vazia conta como resposta — aí devolve sem
     resultados para o agente tentar outro termo. A pesquisa profunda usa
     esse modo.
+
+    progress, quando informado, recebe uma nota a cada punhado de
+    tentativas falhas — é o que mantém a cadeia de pensamento viva
+    enquanto o buscador não responde.
 
     Devolve (resultados, erro).
     """
@@ -1594,6 +1602,15 @@ def run_web_search(term, limit=SEARCH_RESULT_LIMIT, patience=None):
                     "(modo sem limite de tempo)." % term
                 )
                 return [], "A pesquisa não retornou nada útil."
+
+            if progress and (attempt == 1 or attempt % 5 == 0):
+                label = SEARCH_REASON_LABELS.get(
+                    reason, "erro do buscador (%s)" % reason
+                )
+                progress(
+                    "«%s»: %s (tentativa %d). Continuo tentando."
+                    % (term, label, attempt)
+                )
 
             print(
                 "[NEXA-PESQUISA] %r falhou (%s); nova tentativa em %.1fs "
@@ -2146,7 +2163,7 @@ def run_deep_research(user_id, topic, progress=None):
                     % (term, round_number)
                 )
                 note("Buscando na web: «%s»" % term)
-                found, error = run_web_search(term, patience=0)
+                found, error = run_web_search(term, patience=0, progress=note)
 
                 if found:
                     note(
