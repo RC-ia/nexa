@@ -26,6 +26,7 @@ const settingsViews = {
   memory: document.getElementById("settingsMemory"),
   instructions: document.getElementById("settingsInstructions"),
   deep: document.getElementById("settingsDeep"),
+  time: document.getElementById("settingsTime"),
   reminders: document.getElementById("settingsReminders"),
   more: document.getElementById("settingsMore")
 };
@@ -2186,6 +2187,7 @@ function showSettingsView(viewName) {
     memory: "Memória",
     instructions: "Instruções",
     deep: "Pesquisa profunda",
+    time: "Data e hora",
     reminders: "Lembretes",
     more: "Mais"
   };
@@ -2205,6 +2207,8 @@ function showSettingsView(viewName) {
     loadSystemPrompt();
   } else if (viewName === "deep") {
     loadDeepSettings();
+  } else if (viewName === "time") {
+    loadTimeSettings();
   } else if (viewName === "reminders") {
     loadServerReminders();
   }
@@ -2221,6 +2225,24 @@ async function loadDeepSettings() {
     const data = await api("GET", "/api/deep-settings");
     agentInput.value = data.agent || "";
     roundsInput.value = data.rounds || "";
+    status.textContent = "";
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+async function loadTimeSettings() {
+  const input = document.getElementById("timeOffsetInput");
+  const status = document.getElementById("timeSettingsStatus");
+  const hint = document.getElementById("timeDeviceHint");
+  const deviceOffset = Math.round(-new Date().getTimezoneOffset() / 60 * 2) / 2;
+
+  status.textContent = "Carregando…";
+  hint.textContent = "Fuso detectado neste navegador: " + deviceOffset + " em relação ao UTC.";
+
+  try {
+    const data = await api("GET", "/api/time-settings");
+    input.value = data.offset;
     status.textContent = "";
   } catch (error) {
     status.textContent = error.message;
@@ -2903,6 +2925,31 @@ document.getElementById("saveDeepSettings").addEventListener("click", async func
     agentInput.value = data.agent || "";
     roundsInput.value = data.rounds || "";
     status.textContent = "Configuração salva. Vale na próxima pesquisa profunda.";
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById("saveTimeSettings").addEventListener("click", async function () {
+  const button = document.getElementById("saveTimeSettings");
+  const status = document.getElementById("timeSettingsStatus");
+  const input = document.getElementById("timeOffsetInput");
+
+  if (input.value === "") {
+    status.textContent = "Informe o fuso em horas em relação ao UTC (ex.: -3).";
+    return;
+  }
+
+  button.disabled = true;
+
+  try {
+    const data = await api("PUT", "/api/time-settings", {
+      offset: Number(input.value)
+    });
+    input.value = data.offset;
+    status.textContent = "Fuso salvo. O modelo e os lembretes passam a usar esse horário.";
   } catch (error) {
     status.textContent = error.message;
   } finally {

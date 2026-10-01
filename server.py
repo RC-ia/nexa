@@ -245,6 +245,62 @@ def save_deep_settings(user_id, agent, rounds):
 
     return settings
 
+# Fuso do usuário: deslocamento em horas a partir do UTC, por conta
+# (arquivo <conta>.tz.json). A máquina pode estar em outro continente; o
+# horário que o modelo usa é sempre o do usuário.
+
+TIME_DEFAULT_OFFSET = float(os.environ.get("NEXA_UTC_OFFSET", "-3"))
+
+def time_offset(value):
+    """Deslocamento válido, em horas, dentro de -12..14; senão, o padrão."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return TIME_DEFAULT_OFFSET
+
+    if not -12 <= value <= 14:
+        return TIME_DEFAULT_OFFSET
+
+    return round(value, 2)
+
+def time_settings_path(user_id):
+    safe_id = "".join(
+        char if char.isalnum() or char in "-_" else "_" for char in str(user_id)
+    )
+    return MEMORY_DIR / ("%s.tz.json" % safe_id)
+
+def get_time_settings(user_id):
+    """Fuso da conta: {'offset': horas}. Sem arquivo, usa o padrão."""
+    settings = {"offset": TIME_DEFAULT_OFFSET}
+
+    if not user_id:
+        return settings
+
+    try:
+        raw = json.loads(time_settings_path(user_id).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return settings
+
+    if isinstance(raw, dict) and "offset" in raw:
+        settings["offset"] = time_offset(raw.get("offset"))
+
+    return settings
+
+def save_time_settings(user_id, offset):
+    """Grava o fuso da conta; devolve o efetivo."""
+    settings = {"offset": time_offset(offset)}
+    path = time_settings_path(user_id)
+
+    with SYSTEM_PROMPT_LOCK:
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(
+            json.dumps(settings, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+
+    return settings
+
 
 SEARCH_TOOL = {
     "type": "function",
@@ -433,6 +489,19 @@ REMINDER_TOOL = {
     },
 }
 
+TIME_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "data_hora",
+        "description": (
+            "Devolve a data e a hora atuais do usuário, no fuso horário "
+            "configurado por ele. Use quando precisar saber 'hoje', 'agora', "
+            "o dia da semana ou para calcular datas e horários de lembretes."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
+
 app = Flask(__name__)
 app.register_blueprint(auth_bp)
 
@@ -561,6 +630,44 @@ WEEK_DAYS = [
     "quinta-feira", "sexta-feira", "sábado",
 ]
 
+def format_offset(offset):
+    """Deslocamento formatado para exibição: 'UTC-3', 'UTC+5:30'."""
+    sign = "+" if offset >= 0 else "-"
+    hours = abs(offset)
+    whole = int(hours)
+    minutes = int(round((hours - whole) * 60))
+
+    if minutes:
+        return "UTC%s%d:%02d" % (sign, whole, minutes)
+
+    return "UTC%s%d" % (sign, whole)
+
+def user_now(user_id):
+    """Agora no fuso do usuário (naive), em vez do fuso da máquina."""
+    offset = get_time_settings(user_id)["offset"]
+    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=offset)
+
+def user_epoch(user_id, moment):
+    """Epoch de um datetime naive interpretado no fuso do usuário."""
+    offset = get_time_settings(user_id)["offset"]
+    return int(moment.replace(tzinfo=timezone(timedelta(hours=offset))).timestamp())
+
+def user_moment(user_id, epoch):
+    """Datetime naive no fuso do usuário a partir de um epoch."""
+    offset = get_time_settings(user_id)["offset"]
+    return datetime.fromtimestamp(
+        float(epoch), timezone(timedelta(hours=offset))
+    ).replace(tzinfo=None)
+
+def current_time_text(user_id):
+    """Resposta da ferramenta data_hora: agora no fuso do usuário."""
+    agora = user_now(user_id)
+    return "Agora: %s, %s (%s)." % (
+        WEEK_DAYS[(agora.weekday() + 1) % 7],
+        agora.strftime("%d/%m/%Y %H:%M"),
+        format_offset(get_time_settings(user_id)["offset"]),
+    )
+
 REMINDER_AGENT_PROMPT = (
     "Você é o agente de lembretes da NEXA. Recebe a tarefa de um lembrete e "
     "o horário do disparo e devolve a mensagem final que será mostrada ao "
@@ -606,9 +713,9 @@ def parse_when(value):
 
     return parsed
 
-def format_epoch(epoch):
+def format_epoch(user_id, epoch):
     try:
-        return datetime.fromtimestamp(int(epoch)).strftime("%d/%m/%Y %H:%M")
+        return user_moment(user_id, epoch).strftime("%d/%m/%Y %H:%M")
     except (TypeError, ValueError, OSError):
         return "—"
 
@@ -639,7 +746,7 @@ def next_monthly(now, day, hour, minute):
         )
     return target
 
-def compute_next_fire(reminder, now_epoch):
+def compute_next_fire(reminder, now_epoch, user_id):
     """Próximo disparo de um recorrente; None quando o lembrete está corrompido."""
     frequencia = reminder.get("frequencia")
 
@@ -655,22 +762,22 @@ def compute_next_fire(reminder, now_epoch):
     if parsed is None:
         return None
     hour, minute = parsed
-    now = datetime.fromtimestamp(now_epoch)
+    now = user_moment(user_id, now_epoch)
 
     if frequencia == "diario":
-        return int(next_daily(now, hour, minute).timestamp())
+        return user_epoch(user_id, next_daily(now, hour, minute))
 
     if frequencia == "semanal":
         day = reminder.get("dia_semana")
         if not isinstance(day, int) or not 0 <= day <= 6:
             return None
-        return int(next_weekly(now, day, hour, minute).timestamp())
+        return user_epoch(user_id, next_weekly(now, day, hour, minute))
 
     if frequencia == "mensal":
         day = reminder.get("dia_mes")
         if not isinstance(day, int) or not 1 <= day <= 31:
             return None
-        return int(next_monthly(now, day, hour, minute).timestamp())
+        return user_epoch(user_id, next_monthly(now, day, hour, minute))
 
     return None
 
@@ -745,7 +852,7 @@ def create_reminder(user_id, arguments):
     if not tarefa:
         return "Não deu para criar o lembrete: 'tarefa' vazia. Descreva o que o agente faz no disparo.", False
 
-    now = datetime.now()
+    now = user_now(user_id)
     now_epoch = int(time.time())
     path = reminder_path(user_id)
 
@@ -781,7 +888,7 @@ def create_reminder(user_id, arguments):
                     % (quando.strftime("%d/%m/%Y %H:%M"), now.strftime("%d/%m/%Y %H:%M")),
                     False,
                 )
-            reminder["next_at"] = int(quando.timestamp())
+            reminder["next_at"] = user_epoch(user_id, quando)
         else:
             frequencia = str(arguments.get("frequencia") or "").strip().lower()
             if frequencia not in ("hora_em_hora", "diario", "semanal", "mensal"):
@@ -836,19 +943,27 @@ def create_reminder(user_id, arguments):
                     reminder["dia_mes"] = dia_mes
                     target = next_monthly(now, dia_mes, hour, minute)
 
-                reminder["next_at"] = int(target.timestamp())
+                reminder["next_at"] = user_epoch(user_id, target)
 
         data["reminders"].append(reminder)
         save_reminder_data(path, data)
 
     print(
         "[NEXA-LEMBRETE] criado para %s: %s (%s)"
-        % (format_epoch(reminder["next_at"]), describe_reminder(reminder), tarefa)
+        % (
+            format_epoch(user_id, reminder["next_at"]),
+            describe_reminder(reminder),
+            tarefa,
+        )
     )
     return (
         "Lembrete criado: %s. Próximo disparo: %s. Tarefa do agente: %s. "
         "Confirme isso ao usuário em uma frase curta."
-        % (describe_reminder(reminder), format_epoch(reminder["next_at"]), tarefa),
+        % (
+            describe_reminder(reminder),
+            format_epoch(user_id, reminder["next_at"]),
+            tarefa,
+        ),
         True,
     )
 
@@ -976,6 +1091,7 @@ def run_reminder_agent(tarefa, when_text):
 def process_reminder_file(path):
     """Dispara os lembretes vencidos de um arquivo de conta."""
     now_epoch = time.time()
+    user_id = path.name[: -len(REMINDER_FILE_SUFFIX)]
 
     with REMINDERS_LOCK:
         data = load_reminder_data(path)
@@ -997,7 +1113,7 @@ def process_reminder_file(path):
             continue
 
         tarefa = reminder.get("tarefa") or ""
-        when_text = format_epoch(reminder.get("next_at") or now_epoch)
+        when_text = format_epoch(user_id, reminder.get("next_at") or now_epoch)
         message = run_reminder_agent(tarefa, when_text) or tarefa or "Lembrete da NEXA."
 
         with REMINDERS_LOCK:
@@ -1021,7 +1137,7 @@ def process_reminder_file(path):
                     if item.get("id") != reminder_id
                 ]
             else:
-                next_at = compute_next_fire(current, int(time.time()))
+                next_at = compute_next_fire(current, int(time.time()), user_id)
                 if next_at is None:
                     data["reminders"] = [
                         item for item in data["reminders"]
@@ -1033,7 +1149,6 @@ def process_reminder_file(path):
             save_reminder_data(path, data)
 
         print("[NEXA-LEMBRETE] disparado: %s" % message[:120])
-        user_id = path.name[: -len(REMINDER_FILE_SUFFIX)]
         send_push_notification(user_id, "Lembrete da NEXA", message)
 
 def tick_reminders():
@@ -1898,11 +2013,13 @@ def build_messages(messages, memories, custom_instructions="", user_id="",
             "do que ele traz:\n\n" + deep_report
         )
 
-    agora = datetime.now()
+    agora = user_now(user_id)
     system_prompt += (
-        "\n\nData e hora atuais (horário local): %s, %s. Use como referência "
-        "para calcular datas e horários relativos ao criar lembretes."
+        "\n\nData e hora atuais (fuso do usuário, %s): %s, %s. Use como "
+        "referência para calcular datas e horários relativos ao criar "
+        "lembretes."
         % (
+            format_offset(get_time_settings(user_id)["offset"]),
             WEEK_DAYS[(agora.weekday() + 1) % 7],
             agora.strftime("%d/%m/%Y %H:%M"),
         )
@@ -2000,6 +2117,7 @@ def request_body(stream, messages, memories, reasoning, custom_instructions="",
             VISIT_TOOL,
             REMINDER_TOOL,
             DEEP_RESEARCH_TOOL,
+            TIME_TOOL,
         ]
         body["tool_choice"] = "auto"
 
@@ -2163,7 +2281,7 @@ def run_deep_research(user_id, topic, progress=None):
         }
 
         if with_tools:
-            body["tools"] = [SEARCH_TOOL, VISIT_TOOL]
+            body["tools"] = [SEARCH_TOOL, VISIT_TOOL, TIME_TOOL]
             body["tool_choice"] = "auto"
 
         response = requests.post(
@@ -2256,6 +2374,8 @@ def run_deep_research(user_id, topic, progress=None):
                         % ", ".join(str(p) for p in paginas)
                     )
                 content = fetch_pages(cache_key, paginas)
+            elif name == "data_hora":
+                content = current_time_text(user_id)
             else:
                 content = "Ferramenta desconhecida para este pesquisador."
 
@@ -2328,6 +2448,10 @@ def run_tools(user_id, calls):
                 % ("criado" if created else text)
             )
             results[call_id] = text
+            continue
+
+        if name == "data_hora":
+            results[call_id] = current_time_text(user_id)
             continue
 
         if name == "pesquisar":
@@ -3388,6 +3512,53 @@ def update_deep_settings():
 
     return jsonify({"ok": True, **settings})
 
+
+@app.get("/api/time-settings")
+def read_time_settings():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para ver a data e a hora."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    return jsonify(get_time_settings("acct_%d" % user["id"]))
+
+@app.put("/api/time-settings")
+def update_time_settings():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para editar o horário."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    body = request.get_json(force=True, silent=True) or {}
+
+    try:
+        offset = float(body.get("offset"))
+    except (TypeError, ValueError):
+        return jsonify({
+            "error": "Deslocamento inválido: use horas em relação ao UTC, "
+            "de -12 a 14 (ex.: -3)."
+        }), 400
+
+    if not -12 <= offset <= 14:
+        return jsonify({
+            "error": "Deslocamento fora do intervalo: use de -12 a 14 horas."
+        }), 400
+
+    user_id = "acct_%d" % user["id"]
+
+    try:
+        settings = save_time_settings(user_id, offset)
+    except OSError as error:
+        print("[NEXA] falha ao salvar o fuso horário:", error)
+        return jsonify({"error": "Não foi possível salvar a configuração."}), 500
+
+    return jsonify({"ok": True, **settings})
 
 @app.get("/api/memories")
 def list_memories():

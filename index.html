@@ -470,6 +470,10 @@
               <strong>Pesquisa profunda</strong>
               <span>Nome do agente e rodadas da investigação</span>
             </button>
+            <button type="button" class="settings-category" data-settings-open="time">
+              <strong>Data e hora</strong>
+              <span>Fuso horário usado nas conversas e lembretes</span>
+            </button>
             <button type="button" class="settings-category" data-settings-open="memory">
               <strong>Memória</strong>
               <span>Preferências lembradas pela NEXA</span>
@@ -561,6 +565,20 @@
           <div class="settings-page-actions">
             <span id="deepSettingsStatus" class="settings-status" role="status"></span>
             <button type="button" id="saveDeepSettings" class="settings-action">Salvar</button>
+          </div>
+        </section>
+
+        <section id="settingsTime" class="settings-view" hidden>
+          <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
+          <label class="settings-field" for="timeOffsetInput">
+            <span>Fuso horário (diferença do UTC)</span>
+            <input type="number" id="timeOffsetInput" min="-12" max="14" step="0.5" inputmode="decimal" placeholder="-3" autocomplete="off">
+          </label>
+          <p class="settings-description">Horas de diferença em relação ao UTC. Ex.: -3 para o horário de Brasília; 0 para UTC; use .5 para meia hora (ex.: -3.5 para UTC-3:30). Vale para o modelo (ferramenta de data e hora) e para os lembretes.</p>
+          <p id="timeDeviceHint" class="settings-description"></p>
+          <div class="settings-page-actions">
+            <span id="timeSettingsStatus" class="settings-status" role="status"></span>
+            <button type="button" id="saveTimeSettings" class="settings-action">Salvar</button>
           </div>
         </section>
 
@@ -679,7 +697,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
-  <script src="script.js?v=49"></script>
+  <script src="script.js?v=50"></script>
 
 </body>
 
