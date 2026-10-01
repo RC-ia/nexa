@@ -1,6 +1,7 @@
 """
 Gerenciador do processo do servidor NEXA.
-Wrapper sobre o launcher.py que inicia o servidor desanexado (sobrevive ao fechar terminal).
+Wrapper sobre o launcher.py, que sobe o run.py (supervisor com auto-update)
+desanexado (sobrevive ao fechar o terminal).
 """
 
 import sys
@@ -10,7 +11,8 @@ BASE_DIR = Path(__file__).resolve().parent
 
 # Importa funções do launcher
 sys.path.insert(0, str(BASE_DIR))
-from launcher import start_detached, stop_server, restart_server, get_status, is_alive
+from launcher import start_detached as start_server
+from launcher import stop_server, restart_server, get_status, is_alive
 
 
 def is_running() -> bool:
@@ -29,7 +31,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.action == "start":
-        result = start_detached()
+        result = start_server()
     elif args.action == "stop":
         result = stop_server(force=args.force)
     elif args.action == "restart":

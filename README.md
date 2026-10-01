@@ -92,8 +92,8 @@ A aplicação sobe em `http://localhost:8000`.
 
 ### Opção C — Processo desanexado/daemon (sobrevive ao fechar o terminal)
 
-Para rodar o servidor em background e poder fechá-lo depois pelo **Painel
-admin** (ou linha de comando), use o `launcher.py`:
+Para rodar o **supervisor** em background (com auto-update) e poder controlá-lo
+depois pelo **Painel admin** (ou linha de comando), use o `launcher.py`:
 
 ```bash
 # Inicia desanexado (Windows) ou daemon (Linux)
@@ -116,19 +116,21 @@ python launcher.py restart
 **Como funciona:**
 
 - **Windows:** usa `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | CREATE_NO_WINDOW`
-  + `start_new_session=True`. O processo não tem console e não morre quando o
-  terminal fecha.
+  + `start_new_session=True`; stdio redirecionado para `.nexa_server.log`. O
+  processo não tem console e não morre quando o terminal fecha.
 - **Linux:** double-fork POSIX (`os.fork()` × 2) + `os.setsid()`; stdio
   redirecionado para `.nexa_server.log`. O PID do **neto** (daemon real) é
   salvo em `.nexa_server.pid`.
-- Em ambos os SOs, o `server_manager.py` expõe a mesma API (`is_running`,
-  `get_status`, `start_server`, `stop_server`, `restart_server`) que o
-  **Painel admin** consome (rotas `GET/POST /api/admin/server/*`).
+- Em ambos os SOs, o `launcher.py` sobe o `run.py` (o supervisor), que por sua
+  vez roda o `server.py` — então o **auto-update continua funcionando** com o
+  processo desanexado. O `stop` mata a árvore inteira (supervisor + servidor).
+- O `server_manager.py` expõe a mesma API (`is_running`, `get_status`,
+  `start_server`, `stop_server`, `restart_server`) que o **Painel admin**
+  consome (rotas `GET/POST /api/admin/server/*`).
 
-> **Dica:** o `run.py` continua sendo o supervisor recomendado para produção
-> (auto-update + restart automático). O `launcher.py` é útil quando você quer
-> subir o servidor manualmente, fechar o terminal e controlar depois pela UI
-> de admin.
+> **Dica:** rode `python run.py` no terminal só quando quiser acompanhar os
+> logs ao vivo; para produção desanexada, `python launcher.py start` faz o
+> mesmo com auto-update e sobrevive ao fechar o terminal.
 
 ## Atualização automática (git)
 
@@ -146,11 +148,14 @@ Configurações no `.env`:
 Observações:
 
 - Usa `--ff-only`, então **não** sobrescreve mudanças locais: se houver
-  alterações não commitadas em arquivos versionados, o pull falha e é
-  registrado no log (sem reiniciar).
+  alterações não commitadas em arquivos versionados (ou arquivos novos que o
+  remoto também adiciona), o pull falha e é registrado no log (sem reiniciar).
+  Commit ou stash das mudanças locais destrava o update.
 - Arquivos como `index.html`, `style.css` e `script.js` passam a valer
   imediatamente; mudanças em `server.py` só valem após o reinício (que o
   próprio `run.py` faz).
+- Rodando desanexado pelo `launcher.py`, o log do supervisor fica em
+  `.nexa_server.log`.
 
 ## 4. Expor com o túnel do Cloudflare
 
@@ -279,8 +284,9 @@ Dentro dela:
   Instruções e preferências de memória ficam separadas por usuário neste
   navegador; lembretes são locais e só disparam enquanto a página estiver aberta.
   Na seção **Instruções**, o **system prompt** completo que o servidor usa pode
-  ser visto e editado: ele fica em `system_prompt_custom.txt` (fora do git) e
-  substitui o padrão embutido, com botão para restaurar o padrão.
+  ser visto e editado: ele fica em `memoria/<conta>.prompt.txt` (fora do git),
+  separado por conta, e substitui o padrão embutido, com botão para restaurar
+  o padrão.
 
 A gaveta fecha pelo **✕**, clicando fora dela ou com `Esc`.
 

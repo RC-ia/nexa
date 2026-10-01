@@ -1,7 +1,8 @@
 """
 Launcher do servidor NEXA - Cross-platform (Windows + Linux).
-Inicia o server.py como processo **desanexado/daemon** (sobrevive ao fechar o terminal).
-Guarda o PID em arquivo para o server_manager poder controlar depois.
+Inicia o run.py (supervisor com auto-update) como processo **desanexado/daemon**
+(sobrevive ao fechar o terminal). Guarda o PID em arquivo para o server_manager
+poder controlar depois.
 """
 
 import os
@@ -12,7 +13,7 @@ import platform
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-SERVER_SCRIPT = BASE_DIR / "server.py"
+SUPERVISOR_SCRIPT = BASE_DIR / "run.py"
 PYTHON_EXE = sys.executable
 PID_FILE = BASE_DIR / ".nexa_server.pid"
 LOG_FILE = BASE_DIR / ".nexa_server.log"
@@ -67,20 +68,32 @@ def is_alive(pid: int) -> bool:
 
 
 def _start_windows() -> dict:
-    """Inicia desanexado no Windows."""
+    """Inicia o supervisor desanexado no Windows."""
     try:
+        log = open(LOG_FILE, "a", encoding="utf-8")
+
         proc = subprocess.Popen(
-            [PYTHON_EXE, str(SERVER_SCRIPT)],
+            [PYTHON_EXE, str(SUPERVISOR_SCRIPT)],
             cwd=str(BASE_DIR),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | CREATE_NO_WINDOW,
             start_new_session=True,
         )
+        log.close()
+
         time.sleep(1.5)
+
+        if not is_alive(proc.pid):
+            _log("Supervisor saiu logo após iniciar; veja .nexa_server.log")
+            return {
+                "ok": False,
+                "error": "Supervisor saiu logo após iniciar (veja .nexa_server.log)",
+            }
+
         write_pid(proc.pid)
-        _log(f"Servidor iniciado desanexado (PID: {proc.pid})")
+        _log(f"Supervisor iniciado desanexado (PID: {proc.pid})")
         return {"ok": True, "pid": proc.pid}
     except Exception as e:
         _log(f"Falha ao iniciar (Windows): {e}")
@@ -95,7 +108,7 @@ import os, sys
 from pathlib import Path
 
 BASE_DIR = Path(r"{BASE_DIR}")
-SERVER_SCRIPT = BASE_DIR / "server.py"
+SUPERVISOR_SCRIPT = BASE_DIR / "run.py"
 PID_FILE = BASE_DIR / ".nexa_server.pid"
 LOG_FILE = BASE_DIR / ".nexa_server.log"
 PYTHON_EXE = r"{PYTHON_EXE}"
@@ -130,8 +143,8 @@ daemonize()
 with open(PID_FILE, "w") as f:
     f.write(str(os.getpid()))
 
-# Executa o servidor
-os.execve(PYTHON_EXE, [PYTHON_EXE, str(SERVER_SCRIPT)], dict(os.environ))
+# Executa o supervisor
+os.execve(PYTHON_EXE, [PYTHON_EXE, str(SUPERVISOR_SCRIPT)], dict(os.environ))
 """
 
     try:
@@ -164,7 +177,7 @@ os.execve(PYTHON_EXE, [PYTHON_EXE, str(SERVER_SCRIPT)], dict(os.environ))
 
 
 def start_detached() -> dict:
-    """Inicia server.py desanexado/daemon conforme o SO."""
+    """Inicia o supervisor desanexado/daemon conforme o SO."""
     pid = read_pid()
     if pid and is_alive(pid):
         return {"ok": False, "error": f"Servidor já rodando (PID: {pid})", "pid": pid}
@@ -176,29 +189,41 @@ def start_detached() -> dict:
 
 
 def _stop_windows(pid: int, force: bool) -> dict:
-    """Para processo no Windows."""
+    """Para a árvore do supervisor no Windows (run.py + server.py)."""
     try:
+        command = ["taskkill", "/T", "/PID", str(pid)]
         if force:
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(pid)],
-                capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            _log(f"Servidor morto à força (PID: {pid})")
-        else:
-            subprocess.run(
-                ["taskkill", "/PID", str(pid)],
-                capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            _log(f"Servidor finalizado (PID: {pid})")
+            command.insert(1, "/F")
+
+        subprocess.run(
+            command,
+            capture_output=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
 
         for _ in range(10):
             if not is_alive(pid):
                 break
             time.sleep(0.5)
 
+        # taskkill sem /F não derruba processos de console: força a árvore.
+        if is_alive(pid):
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            for _ in range(10):
+                if not is_alive(pid):
+                    break
+                time.sleep(0.5)
+
+        if is_alive(pid):
+            _log(f"Não consegui parar o PID {pid}")
+            return {"ok": False, "error": f"Não consegui parar o PID {pid}"}
+
         PID_FILE.unlink(missing_ok=True)
+        _log(f"Supervisor finalizado (PID: {pid})")
         return {"ok": True, "pid": pid}
     except Exception as e:
         _log(f"Erro parando (Windows): {e}")
@@ -220,7 +245,12 @@ def _stop_linux(pid: int, force: bool) -> dict:
                 break
             time.sleep(0.5)
 
+        if is_alive(pid):
+            _log(f"Não consegui parar o PID {pid}")
+            return {"ok": False, "error": f"Não consegui parar o PID {pid}"}
+
         PID_FILE.unlink(missing_ok=True)
+        _log(f"Supervisor finalizado (PID: {pid})")
         return {"ok": True, "pid": pid}
     except Exception as e:
         _log(f"Erro parando (Linux): {e}")

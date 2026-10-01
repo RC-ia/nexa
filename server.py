@@ -42,11 +42,8 @@ PORT = int(os.environ.get("PORT", "8000"))
 MEMORY_DIR = BASE_DIR / os.environ.get("MEMORY_DIR", "memoria")
 VERSION_FILE = BASE_DIR / os.environ.get("VERSION_FILE", ".nexa_version")
 DEFAULT_VERSION = "0.01"
-# System prompt editável nas configurações. Quando o arquivo existe, ele
-# substitui o SYSTEM_PROMPT embutido.
-SYSTEM_PROMPT_FILE = BASE_DIR / os.environ.get(
-    "SYSTEM_PROMPT_FILE", "system_prompt_custom.txt"
-)
+# System prompt editável nas configurações: um arquivo por conta na pasta de
+# memória (<conta>.prompt.txt). Quando existe, substitui o SYSTEM_PROMPT.
 SYSTEM_PROMPT_MAX = 20000
 
 MAX_HISTORY_MESSAGES = 12
@@ -138,19 +135,29 @@ SYSTEM_PROMPT = "\n".join([
 ])
 
 
-def get_custom_system_prompt():
-    """Devolve o system prompt salvo nas configurações (ou None se não houver)."""
+def system_prompt_path(user_id):
+    safe_id = "".join(
+        char if char.isalnum() or char in "-_" else "_" for char in str(user_id)
+    )
+    return MEMORY_DIR / ("%s.prompt.txt" % safe_id)
+
+
+def get_custom_system_prompt(user_id):
+    """Devolve o system prompt salvo pela conta (ou None se não houver)."""
+    if not user_id:
+        return None
+
     try:
-        content = SYSTEM_PROMPT_FILE.read_text(encoding="utf-8").strip()
+        content = system_prompt_path(user_id).read_text(encoding="utf-8").strip()
     except OSError:
         return None
 
     return content or None
 
 
-def current_system_prompt():
-    """System prompt efetivo: o salvo nas configurações ou o padrão embutido."""
-    return get_custom_system_prompt() or SYSTEM_PROMPT
+def current_system_prompt(user_id=""):
+    """System prompt efetivo da conta: o salvo ou o padrão embutido."""
+    return get_custom_system_prompt(user_id) or SYSTEM_PROMPT
 
 
 SEARCH_TOOL = {
@@ -805,8 +812,8 @@ def log_upstream_error(response):
     )
 
 
-def build_messages(messages, memories, custom_instructions=""):
-    system_prompt = current_system_prompt()
+def build_messages(messages, memories, custom_instructions="", user_id=""):
+    system_prompt = current_system_prompt(user_id)
 
     if memories:
         system_prompt += (
@@ -894,10 +901,12 @@ def model_for_reasoning(level):
 
 
 def request_body(stream, messages, memories, reasoning, custom_instructions="",
-                 memory_enabled=True):
+                 memory_enabled=True, user_id=""):
     body = {
         "model": model_for_reasoning(reasoning),
-        "messages": build_messages(messages, memories, custom_instructions),
+        "messages": build_messages(
+            messages, memories, custom_instructions, user_id
+        ),
         "stream": stream,
         "max_tokens": MAX_OUTPUT_TOKENS,
     }
@@ -1225,7 +1234,7 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
                 headers=auth_headers(),
                 json=request_body(
                     False, follow_up, memories, reasoning, custom_instructions,
-                    memory_enabled,
+                    memory_enabled, user_id,
                 ),
                 timeout=(10, 60),
             )
@@ -1403,7 +1412,7 @@ def make_blocking_response(
             headers=auth_headers(),
             json=request_body(
                 False, messages, memories, reasoning, custom_instructions,
-                memory_enabled,
+                memory_enabled, user_id,
             ),
             timeout=(10, 60),
         )
@@ -1732,7 +1741,7 @@ def chat():
             headers=auth_headers(),
             json=request_body(
                 True, messages, memories, reasoning, custom_instructions,
-                memory_enabled,
+                memory_enabled, user_id,
             ),
             stream=True,
             timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
@@ -1786,9 +1795,10 @@ def read_system_prompt():
     if key_error:
         return key_error
 
+    user_id = "acct_%d" % user["id"]
     return jsonify({
-        "prompt": current_system_prompt(),
-        "is_custom": get_custom_system_prompt() is not None,
+        "prompt": current_system_prompt(user_id),
+        "is_custom": get_custom_system_prompt(user_id) is not None,
     })
 
 
@@ -1814,18 +1824,21 @@ def update_system_prompt():
     if len(prompt) > SYSTEM_PROMPT_MAX:
         prompt = prompt[:SYSTEM_PROMPT_MAX]
 
+    user_id = "acct_%d" % user["id"]
+    path = system_prompt_path(user_id)
+
     with SYSTEM_PROMPT_LOCK:
-        temporary = SYSTEM_PROMPT_FILE.with_suffix(".txt.tmp")
+        temporary = path.with_suffix(".txt.tmp")
         try:
             temporary.write_text(prompt, encoding="utf-8")
-            temporary.replace(SYSTEM_PROMPT_FILE)
+            temporary.replace(path)
         except OSError as error:
             print("[NEXA] falha ao salvar o system prompt:", error)
             return jsonify({"error": "Não foi possível salvar o system prompt."}), 500
 
     return jsonify({
         "ok": True,
-        "prompt": current_system_prompt(),
+        "prompt": current_system_prompt(user_id),
         "is_custom": True,
     })
 
@@ -1840,9 +1853,11 @@ def reset_system_prompt():
     if key_error:
         return key_error
 
+    user_id = "acct_%d" % user["id"]
+
     with SYSTEM_PROMPT_LOCK:
         try:
-            SYSTEM_PROMPT_FILE.unlink()
+            system_prompt_path(user_id).unlink()
         except FileNotFoundError:
             pass
         except OSError as error:
@@ -1851,7 +1866,7 @@ def reset_system_prompt():
 
     return jsonify({
         "ok": True,
-        "prompt": current_system_prompt(),
+        "prompt": current_system_prompt(user_id),
         "is_custom": False,
     })
 
