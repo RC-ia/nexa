@@ -466,6 +466,10 @@
               <strong>Chamada</strong>
               <span>Voz e acesso da chamada de voz</span>
             </button>
+            <button type="button" class="settings-category" data-settings-open="deep">
+              <strong>Pesquisa profunda</strong>
+              <span>Nome do agente e rodadas da investigação</span>
+            </button>
             <button type="button" class="settings-category" data-settings-open="memory">
               <strong>Memória</strong>
               <span>Preferências lembradas pela NEXA</span>
@@ -539,6 +543,24 @@
           <div class="settings-page-actions">
             <span id="instructionStatus" class="settings-status" role="status"></span>
             <button type="button" id="saveInstructions" class="settings-action">Salvar</button>
+          </div>
+        </section>
+
+        <section id="settingsDeep" class="settings-view" hidden>
+          <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
+          <label class="settings-field" for="deepAgentInput">
+            <span>Nome do agente</span>
+            <input type="text" id="deepAgentInput" maxlength="40" placeholder="Pesquisador" autocomplete="off">
+          </label>
+          <p class="settings-description">Nome usado pelo pesquisador da pesquisa profunda no painel de pensamento e nas instruções que ele recebe.</p>
+          <label class="settings-field" for="deepRoundsInput">
+            <span>Rodadas (loops)</span>
+            <input type="number" id="deepRoundsInput" min="1" max="30" step="1" inputmode="numeric">
+          </label>
+          <p class="settings-description">Cada rodada é um ciclo do agente: decidir, buscar, ler páginas e continuar. Mais rodadas deixam a investigação mais completa e mais demorada.</p>
+          <div class="settings-page-actions">
+            <span id="deepSettingsStatus" class="settings-status" role="status"></span>
+            <button type="button" id="saveDeepSettings" class="settings-action">Salvar</button>
           </div>
         </section>
 
@@ -657,7 +679,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
-  <script src="script.js?v=48"></script>
+  <script src="script.js?v=49"></script>
 
 </body>
 

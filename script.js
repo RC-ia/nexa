@@ -25,6 +25,7 @@ const settingsViews = {
   live: document.getElementById("settingsLive"),
   memory: document.getElementById("settingsMemory"),
   instructions: document.getElementById("settingsInstructions"),
+  deep: document.getElementById("settingsDeep"),
   reminders: document.getElementById("settingsReminders"),
   more: document.getElementById("settingsMore")
 };
@@ -2184,6 +2185,7 @@ function showSettingsView(viewName) {
     live: "Chamada",
     memory: "Memória",
     instructions: "Instruções",
+    deep: "Pesquisa profunda",
     reminders: "Lembretes",
     more: "Mais"
   };
@@ -2201,8 +2203,27 @@ function showSettingsView(viewName) {
   } else if (viewName === "instructions") {
     customInstructionsInput.value = customInstructions;
     loadSystemPrompt();
+  } else if (viewName === "deep") {
+    loadDeepSettings();
   } else if (viewName === "reminders") {
     loadServerReminders();
+  }
+}
+
+async function loadDeepSettings() {
+  const agentInput = document.getElementById("deepAgentInput");
+  const roundsInput = document.getElementById("deepRoundsInput");
+  const status = document.getElementById("deepSettingsStatus");
+
+  status.textContent = "Carregando…";
+
+  try {
+    const data = await api("GET", "/api/deep-settings");
+    agentInput.value = data.agent || "";
+    roundsInput.value = data.rounds || "";
+    status.textContent = "";
+  } catch (error) {
+    status.textContent = error.message;
   }
 }
 
@@ -2859,6 +2880,31 @@ document.getElementById("saveSystemPrompt").addEventListener("click", async func
     systemPromptStatus.textContent = "System prompt salvo.";
   } catch (error) {
     systemPromptStatus.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById("saveDeepSettings").addEventListener("click", async function () {
+  const button = document.getElementById("saveDeepSettings");
+  const status = document.getElementById("deepSettingsStatus");
+  const agentInput = document.getElementById("deepAgentInput");
+  const roundsInput = document.getElementById("deepRoundsInput");
+
+  button.disabled = true;
+
+  try {
+    const data = await api("PUT", "/api/deep-settings", {
+      agent: agentInput.value.trim(),
+      rounds: roundsInput.value === ""
+        ? null
+        : Number(roundsInput.value)
+    });
+    agentInput.value = data.agent || "";
+    roundsInput.value = data.rounds || "";
+    status.textContent = "Configuração salva. Vale na próxima pesquisa profunda.";
+  } catch (error) {
+    status.textContent = error.message;
   } finally {
     button.disabled = false;
   }

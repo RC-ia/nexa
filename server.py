@@ -191,6 +191,59 @@ def current_system_prompt(user_id=""):
     """System prompt efetivo da conta: o salvo ou o padrão embutido."""
     return get_custom_system_prompt(user_id) or SYSTEM_PROMPT
 
+def deep_settings_path(user_id):
+    safe_id = "".join(
+        char if char.isalnum() or char in "-_" else "_" for char in str(user_id)
+    )
+    return MEMORY_DIR / ("%s.deep.json" % safe_id)
+
+def get_deep_settings(user_id):
+    """
+    Configuração da pesquisa profunda da conta: nome do agente e limite de
+    rodadas (cada rodada é um loop do pesquisador). Sem arquivo, padrões.
+    """
+    settings = {"agent": DEEP_RESEARCH_AGENT, "rounds": DEEP_RESEARCH_MAX_ROUNDS}
+
+    if not user_id:
+        return settings
+
+    try:
+        raw = json.loads(deep_settings_path(user_id).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return settings
+
+    if not isinstance(raw, dict):
+        return settings
+
+    agent = raw.get("agent")
+    if isinstance(agent, str) and agent.strip():
+        settings["agent"] = agent.strip()[:40]
+
+    rounds = raw.get("rounds")
+    if isinstance(rounds, int) and not isinstance(rounds, bool):
+        settings["rounds"] = max(1, min(DEEP_ROUNDS_LIMIT, rounds))
+
+    return settings
+
+def save_deep_settings(user_id, agent, rounds):
+    """Grava a configuração da pesquisa profunda; devolve a efetiva."""
+    settings = {
+        "agent": agent.strip()[:40] or DEEP_RESEARCH_AGENT,
+        "rounds": max(1, min(DEEP_ROUNDS_LIMIT, rounds)),
+    }
+
+    path = deep_settings_path(user_id)
+
+    with SYSTEM_PROMPT_LOCK:
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(
+            json.dumps(settings, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+
+    return settings
+
 
 SEARCH_TOOL = {
     "type": "function",
@@ -1954,6 +2007,12 @@ def run_memory_tool(user_id, calls):
 
 DEEP_RESEARCH_MAX_ROUNDS = int(os.environ.get("DEEP_RESEARCH_MAX_ROUNDS", "10"))
 DEEP_RESEARCH_TIMEOUT = int(os.environ.get("DEEP_RESEARCH_TIMEOUT", "120"))
+# Padrões da pesquisa profunda; cada conta pode ajustar o nome do agente e
+# o limite de rodadas nas configurações (arquivo <conta>.deep.json).
+DEEP_RESEARCH_AGENT = (
+    os.environ.get("DEEP_RESEARCH_AGENT", "Pesquisador").strip() or "Pesquisador"
+)
+DEEP_ROUNDS_LIMIT = 30
 
 DEEP_RESEARCH_PROMPT = (
     "Você é o pesquisador da NEXA numa pesquisa profunda. Você não tem "
@@ -1986,14 +2045,24 @@ def run_deep_research(user_id, topic, progress=None):
     topic = topic.strip()[:400]
     cache_key = (user_id or "anon") + "::pesquisa_profunda"
 
+    settings = get_deep_settings(user_id)
+    agent = settings["agent"]
+    max_rounds = settings["rounds"]
+
     def note(text):
         if progress:
             progress(text)
 
-    note("Tema: «%s». Montando a primeira rodada de buscas." % topic)
+    note(
+        "%s: tema «%s». Montando a primeira rodada de buscas."
+        % (agent, topic)
+    )
 
     messages = [
-        {"role": "system", "content": DEEP_RESEARCH_PROMPT},
+        {
+            "role": "system",
+            "content": "Seu nome é %s.\n\n%s" % (agent, DEEP_RESEARCH_PROMPT),
+        },
         {"role": "user", "content": "Tópico da pesquisa: %s" % topic},
     ]
 
@@ -2023,10 +2092,10 @@ def run_deep_research(user_id, topic, progress=None):
 
         return response.json()
 
-    for round_number in range(1, DEEP_RESEARCH_MAX_ROUNDS + 1):
+    for round_number in range(1, max_rounds + 1):
         note(
             "Rodada %d de %d: decidindo os próximos passos."
-            % (round_number, DEEP_RESEARCH_MAX_ROUNDS)
+            % (round_number, max_rounds)
         )
 
         try:
@@ -2110,7 +2179,7 @@ def run_deep_research(user_id, topic, progress=None):
 
     print(
         "[NEXA-PROFUNDA] limite de %d rodadas atingido; pedindo fechamento."
-        % DEEP_RESEARCH_MAX_ROUNDS
+        % max_rounds
     )
     note("Limite de rodadas atingido: pedindo o relatório final.")
 
@@ -2593,11 +2662,13 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
     conversa) e, com o relatório em mãos, o modelo normal escreve a
     resposta final. O ping do SSE segura a conexão durante a investigação.
     """
+    agent = get_deep_settings(user_id)["agent"]
+
     def generate():
         yield sse({
             "type": "reasoning",
-            "text": "Pesquisa profunda em andamento: o pesquisador está "
-                    "investigando o tema. Isso pode demorar um pouco.\n\n",
+            "text": "Pesquisa profunda em andamento: %s está investigando "
+                    "o tema. Isso pode demorar um pouco.\n\n" % agent,
         })
 
         box = {}
@@ -2648,7 +2719,8 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
         yield sse({"type": "search"})
         yield sse({
             "type": "reasoning",
-            "text": "Relatório pronto. A NEXA está escrevendo a resposta.\n\n",
+            "text": "%s terminou o relatório. A NEXA está escrevendo a "
+                    "resposta.\n\n" % agent,
         })
 
         try:
@@ -3179,6 +3251,54 @@ def reset_system_prompt():
         "prompt": current_system_prompt(user_id),
         "is_custom": False,
     })
+
+
+@app.get("/api/deep-settings")
+def read_deep_settings():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para ver a pesquisa profunda."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    return jsonify(get_deep_settings("acct_%d" % user["id"]))
+
+
+@app.put("/api/deep-settings")
+def update_deep_settings():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para editar a pesquisa profunda."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    body = request.get_json(force=True, silent=True) or {}
+
+    agent = body.get("agent", "")
+    if not isinstance(agent, str):
+        return jsonify({"error": "Nome do agente inválido."}), 400
+
+    try:
+        rounds = int(body.get("rounds"))
+    except (TypeError, ValueError):
+        return jsonify({
+            "error": "Número de rodadas inválido (use de 1 a %d)."
+            % DEEP_ROUNDS_LIMIT
+        }), 400
+
+    user_id = "acct_%d" % user["id"]
+
+    try:
+        settings = save_deep_settings(user_id, agent, rounds)
+    except OSError as error:
+        print("[NEXA] falha ao salvar a pesquisa profunda:", error)
+        return jsonify({"error": "Não foi possível salvar a configuração."}), 500
+
+    return jsonify({"ok": True, **settings})
 
 
 @app.get("/api/memories")
