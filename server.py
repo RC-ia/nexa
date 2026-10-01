@@ -1073,10 +1073,12 @@ def fcm_credentials():
 def send_push_notification(user_id, title, body):
     tokens = get_push_tokens(user_id)
     if not tokens:
+        print("[NEXA] push ignorado: nenhum aparelho registrado para %s" % user_id)
         return
 
     credentials = fcm_credentials()
     if credentials is None:
+        print("[NEXA] push ignorado: chave FCM ausente/inválida ou google-auth não instalado")
         return
 
     url = "https://fcm.googleapis.com/v1/projects/%s/messages:send" % _fcm_project_id
@@ -3027,6 +3029,22 @@ def register_push_token():
     save_push_token("acct_%d" % user["id"], token.strip())
     return jsonify({"ok": True})
 
+@app.get("/api/push-status")
+def push_status():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para ver o status das notificações."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    return jsonify({
+        "key_file": FCM_KEY_FILE.name if FCM_KEY_FILE.exists() else "",
+        "google_auth": GOOGLE_AUTH_AVAILABLE,
+        "tokens": len(get_push_tokens("acct_%d" % user["id"])),
+    })
+
 init_db()
 init_auth_db()
 
@@ -3037,6 +3055,11 @@ if __name__ == "__main__":
         print(
             "[NEXA] sem %s — push FCM desativado (lembretes só pela página)."
             % FCM_KEY_FILE.name
+        )
+    elif not GOOGLE_AUTH_AVAILABLE:
+        print(
+            "[NEXA] sem google-auth — push FCM desativado "
+            "(instale com: pip install -r requirements.txt)."
         )
     threading.Thread(
         target=reminder_scheduler_loop, daemon=True, name="nexa-reminders"

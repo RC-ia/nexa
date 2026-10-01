@@ -40,6 +40,7 @@ const systemPromptInput = document.getElementById("systemPromptInput");
 const systemPromptStatus = document.getElementById("systemPromptStatus");
 const reminderList = document.getElementById("reminderList");
 const reminderStatus = document.getElementById("reminderStatus");
+const pushStatusLine = document.getElementById("pushStatus");
 const reminderNotificationButton = document.getElementById("reminderNotification");
 
 const MEMORY_KEY = "nexa_conversation";
@@ -2162,8 +2163,50 @@ async function loadServerReminders() {
     const data = await api("GET", "/api/reminders");
     renderReminderList(data.reminders || []);
     reminderStatus.textContent = "";
+    updatePushStatus();
   } catch (error) {
     reminderStatus.textContent = error.message;
+  }
+}
+
+/*
+  Diagnóstico do push FCM: mostra se o servidor tem chave e google-auth
+  e quantos aparelhos registrados — assim dá para saber por que a
+  notificação do app não chegou.
+*/
+async function updatePushStatus() {
+  if (!pushStatusLine) {
+    return;
+  }
+
+  pushStatusLine.textContent = "";
+
+  try {
+    const data = await api("GET", "/api/push-status");
+    const parts = [];
+
+    if (!data.key_file) {
+      parts.push("Servidor sem a chave do Firebase — push desligado.");
+    } else if (!data.google_auth) {
+      parts.push("Servidor sem a biblioteca google-auth — push desligado.");
+    }
+
+    if (data.tokens > 0) {
+      parts.push(
+        "Push ativo: " + data.tokens +
+        (data.tokens === 1
+          ? " aparelho registrado."
+          : " aparelhos registrados.")
+      );
+    } else {
+      parts.push(
+        "Nenhum aparelho registrado para push — abra o app logado para registrar."
+      );
+    }
+
+    pushStatusLine.textContent = parts.join(" ");
+  } catch (error) {
+    // Servidor antigo (sem o endpoint) ou sessão fora: deixa em branco.
   }
 }
 
