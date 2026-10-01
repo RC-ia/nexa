@@ -298,13 +298,14 @@ A entrega é dupla:
   `nativeFcmToken` (ou `window.NexaNative.getFcmToken()`), a página registra
   em `POST /api/push-token` e o servidor envia o push pelo FCM HTTP v1. Para
   ativar, coloque a chave de serviço (Console do Firebase → Configurações do
-  projeto → Contas de serviço → Gerar nova chave privada) como
-  `firebase-key.json` na raiz. Sem a chave ou sem a lib `google-auth`, o push
-  é ignorado em silêncio — os lembretes continuam chegando pela página.
+  projeto → Contas de serviço → Gerar nova chave privada) na raiz como
+  `firebase-key.json` ou `chave-firebase.json`. Sem a chave ou sem a lib
+  `google-auth`, o push é ignorado em silêncio — os lembretes continuam
+  chegando pela página.
 
 | Variável | Padrão | Para que serve |
 | --- | --- | --- |
-| `FCM_KEY` | `firebase-key.json` | Nome do arquivo da chave de serviço |
+| `FCM_KEY` | `firebase-key.json` (ou `chave-firebase.json`) | Nome do arquivo da chave de serviço |
 | `SITE_URL` | `https://nexa2.rcscan.online/` | URL aberta ao tocar na notificação |
 
 A lista de lembretes ativos fica em **Configurações > Lembretes**, com o

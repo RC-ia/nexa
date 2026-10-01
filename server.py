@@ -925,12 +925,21 @@ def reminder_scheduler_loop():
 # =========================
 # O app captura o token FCM e manda para cá (POST /api/push-token); o
 # lembrete disparado vira push pelo HTTP v1. Sem a chave de serviço
-# (firebase-key.json) ou sem a lib google-auth, o push é ignorado em
-# silêncio — a página continua recebendo pela fila de pendentes.
+# (firebase-key.json ou chave-firebase.json) ou sem a lib google-auth, o
+# push é ignorado em silêncio — a página continua recebendo pela fila de
+# pendentes.
 
 PUSH_LOCK = threading.Lock()
 PUSH_TOKENS_LIMIT = 10
-FCM_KEY_FILE = BASE_DIR / os.environ.get("FCM_KEY", "firebase-key.json")
+FCM_KEY_CANDIDATES = ("firebase-key.json", "chave-firebase.json")
+# FCM_KEY no .env manda; sem ele, usa o primeiro arquivo que existir.
+FCM_KEY_FILE = BASE_DIR / (
+    os.environ.get("FCM_KEY", "").strip()
+    or next(
+        (name for name in FCM_KEY_CANDIDATES if (BASE_DIR / name).exists()),
+        FCM_KEY_CANDIDATES[0],
+    )
+)
 SITE_URL = os.environ.get("SITE_URL", "https://nexa2.rcscan.online/")
 FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
 
