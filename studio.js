@@ -8,10 +8,12 @@ const fileView = document.getElementById("fileView");
 const filesToggle = document.getElementById("filesToggle");
 const filesRefresh = document.getElementById("filesRefresh");
 const filesClose = document.getElementById("filesClose");
+const filesResize = document.getElementById("filesResize");
 
 const HISTORY_KEY = "nexa_studio_history";
 const HISTORY_LIMIT = 40;
 const KEY_PREFIX = "nexa_message_key:";
+const WIDTH_KEY = "nexa_studio_files_width";
 
 let accountUsername = "";
 let messageKey = "";
@@ -297,20 +299,65 @@ input.addEventListener("keydown", (event) => {
   }
 });
 
-filesToggle.addEventListener("click", () => {
-  filesPane.hidden = !filesPane.hidden;
+function setPaneOpen(open) {
+  filesPane.hidden = !open;
+  document.body.classList.toggle("files-open", open);
 
-  if (!filesPane.hidden) {
+  if (open) {
     refreshFiles();
   }
+}
+
+filesToggle.addEventListener("click", () => {
+  setPaneOpen(filesPane.hidden);
 });
 
 filesClose.addEventListener("click", () => {
-  filesPane.hidden = true;
+  setPaneOpen(false);
   fileView.hidden = true;
 });
 
 filesRefresh.addEventListener("click", refreshFiles);
+
+let resizing = false;
+
+filesResize.addEventListener("pointerdown", (event) => {
+  resizing = true;
+  filesResize.setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+
+filesResize.addEventListener("pointermove", (event) => {
+  if (!resizing) {
+    return;
+  }
+
+  const width = Math.min(Math.max(event.clientX, 200), window.innerWidth * 0.7);
+  document.documentElement.style.setProperty("--files-width", width + "px");
+});
+
+filesResize.addEventListener("pointerup", () => {
+  resizing = false;
+
+  try {
+    localStorage.setItem(
+      WIDTH_KEY,
+      document.documentElement.style.getPropertyValue("--files-width")
+    );
+  } catch (error) {
+    /* sem espaço no navegador */
+  }
+});
+
+try {
+  const savedWidth = localStorage.getItem(WIDTH_KEY);
+
+  if (savedWidth) {
+    document.documentElement.style.setProperty("--files-width", savedWidth);
+  }
+} catch (error) {
+  /* sem localStorage */
+}
 
 async function initializeStudio() {
   try {

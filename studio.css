@@ -2,6 +2,7 @@
   --studio-accent: #86e5d1;
   --studio-panel: rgba(13, 9, 19, 0.96);
   --studio-bubble: rgba(255, 255, 255, 0.045);
+  --files-width: 320px;
 }
 
 .studio-body {
@@ -20,6 +21,18 @@
   min-height: 100svh;
   margin: 0 auto;
   padding: 20px 22px 16px;
+}
+
+body.files-open .studio-page {
+  width: min(calc(100% - var(--files-width)), 900px);
+  margin: 0 auto 0 var(--files-width);
+}
+
+@media (max-width: 860px) {
+  body.files-open .studio-page {
+    width: min(100%, 900px);
+    margin: 0 auto;
+  }
 }
 
 .studio-topbar {
@@ -181,10 +194,20 @@
   bottom: 0;
   display: flex;
   flex-direction: column;
-  width: min(400px, 94vw);
+  width: min(var(--files-width), 94vw);
   border-right: 1px solid var(--line, rgba(255, 255, 255, 0.12));
   background: var(--studio-panel);
   backdrop-filter: blur(14px);
+}
+
+.studio-files-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
 }
 
 .studio-files > header {
