@@ -2692,7 +2692,7 @@ footer {
 ========================= */
 
 html.keyboard-open .app {
-  padding-bottom: var(--keyboard-height, 0px);
+  padding-bottom: calc(var(--keyboard-height, 0px) + 10px);
 }
 
 html.keyboard-open footer {
