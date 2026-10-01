@@ -2471,6 +2471,92 @@ body {
   color: #d4c7ea;
 }
 
+/* =========================
+   BOTÃO "+" (ANEXOS E PESQUISA PROFUNDA)
+========================= */
+
+.attach-wrap {
+  position: relative;
+}
+
+.attach-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 40px;
+  height: 40px;
+
+  border: 1px solid transparent;
+
+  border-radius: 12px;
+
+  background: #171021;
+
+  color: var(--accent-light);
+
+  font-size: 22px;
+
+  line-height: 1;
+
+  cursor: pointer;
+
+  transition:
+    transform 0.15s ease,
+    background 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.attach-button:hover {
+  background: #241438;
+
+  color: #fff;
+
+  box-shadow:
+    0 0 18px rgba(139, 92, 246, 0.18);
+}
+
+.attach-button:active {
+  transform: scale(0.94);
+}
+
+.attach-button.active {
+  color: #fff;
+
+  border-color:
+    rgba(167, 139, 250, 0.55);
+
+  background:
+    linear-gradient(
+      135deg,
+      #7c3aed,
+      #5b21b6
+    );
+
+  box-shadow:
+    0 0 20px rgba(139, 92, 246, 0.32);
+}
+
+/* O menu abre alinhado à direita para não vazar da tela. */
+.attach-menu {
+  left: auto;
+  right: 0;
+}
+
+.attach-menu .reasoning-item:disabled {
+  opacity: 0.45;
+
+  cursor: not-allowed;
+}
+
+.attach-menu .reasoning-item:disabled:hover {
+  color: var(--muted);
+
+  background: transparent;
+}
+
 
 /* =========================
    FOOTER
@@ -2565,6 +2651,13 @@ footer {
     font-size: 15px;
 
     gap: 0;
+  }
+
+  .attach-button {
+    width: 50px;
+    height: 50px;
+
+    font-size: 24px;
   }
 
   /* Sem espaço para o ícone + medidor + caret: fica só o raio. */

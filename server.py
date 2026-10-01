@@ -134,6 +134,21 @@ SYSTEM_PROMPT = "\n".join([
     "uma vez: [\"P1\", \"P3\"].",
     "Depois de pesquisar, responda normalmente sem comentar a chamada da "
     "ferramenta.",
+    "Se a ferramenta de pesquisa não responder dentro do limite (tempo "
+    "esgotado ou busca fora do ar), avise o usuário e pergunte se ele quer "
+    "que você tente de novo — não repita a busca sozinha nem esconda a falha.",
+    "",
+    "PESQUISA PROFUNDA:",
+    "Você também tem a ferramenta pesquisa_profunda: um pesquisador "
+    "separado, sem o contexto desta conversa, investiga o tópico a fundo "
+    "(várias buscas e leituras) e devolve um relatório completo com tudo "
+    "que encontrou.",
+    "Use quando o usuário pedir pesquisa profunda, 'tudo sobre' ou quando o "
+    "assunto exigir o máximo de informação possível.",
+    "É bem mais lenta que a busca comum: avise que vai demorar e mande um "
+    "tópico por chamada, específico e completo.",
+    "Quando o relatório voltar, use-o na resposta e cite as fontes que "
+    "vierem nele.",
     "",
     "LEMBRETES:",
     "Você tem a ferramenta criar_lembrete para programar avisos e tarefas "
@@ -225,6 +240,34 @@ VISIT_TOOL = {
                 },
             },
             "required": ["paginas"],
+        },
+    },
+}
+
+DEEP_RESEARCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "pesquisa_profunda",
+        "description": (
+            "Pesquisa profunda: um pesquisador separado, sem o contexto "
+            "desta conversa, investiga o tópico a fundo (várias buscas e "
+            "leituras de páginas) e devolve um relatório completo. Muito "
+            "mais lenta que a busca comum. Use quando o usuário pedir "
+            "pesquisa profunda ou quando o assunto exigir o máximo de "
+            "informação possível."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "topico": {
+                    "type": "string",
+                    "description": (
+                        "O que investigar, específico e completo, com o "
+                        "que o usuário quer saber."
+                    ),
+                },
+            },
+            "required": ["topico"],
         },
     },
 }
@@ -1331,10 +1374,11 @@ SEARCH_PATIENCE = int(os.environ.get("SEARCH_PATIENCE", "120"))
 SEARCH_RETRY_DELAY = float(os.environ.get("SEARCH_RETRY_DELAY", "4"))
 SEARCH_MAX_ATTEMPTS = int(os.environ.get("SEARCH_MAX_ATTEMPTS", "12"))
 SEARCH_UNAVAILABLE_MESSAGE = (
-    "A ferramenta de pesquisa está fora do ar no momento. Responda com o que "
-    "você já sabe sobre o assunto e diga claramente que a busca está "
-    "indisponível e que não conseguiu verificar. Não invente fatos, números, "
-    "datas ou fontes para compensar."
+    "A busca não respondeu dentro do tempo limite. Avise o usuário que a "
+    "pesquisa na web não respondeu a tempo e pergunte se ele quer que você "
+    "tente de novo (não refaça a busca sozinha nesta resposta). Enquanto "
+    "espera, responda com o que você já sabe e deixe claro o que não deu "
+    "para verificar. Não invente fatos, números, datas ou fontes."
 )
 # Enquanto a busca insiste, o proxy (Cloudflare) pode cortar a conexão se
 # ficarmos sem escrever nada. Mandamos um keep-alive no SSE durante a espera.
@@ -1408,7 +1452,7 @@ def search_once(term, limit, deadline):
     last_error = "A pesquisa não retornou nada útil."
 
     for endpoint in SEARCH_ENDPOINTS:
-        if time.monotonic() >= deadline:
+        if deadline is not None and time.monotonic() >= deadline:
             return [], "tempo_esgotado"
 
         try:
@@ -1449,11 +1493,17 @@ def search_once(term, limit, deadline):
     return [], last_error
 
 
-def run_web_search(term, limit=SEARCH_RESULT_LIMIT):
+def run_web_search(term, limit=SEARCH_RESULT_LIMIT, patience=None):
     """
     Busca no DuckDuckGo insistindo até conseguir, dentro de SEARCH_PATIENCE
     segundos (2 minutos por padrão). Se nada voltar nesse tempo, devolve a
     mensagem genérica de ferramenta fora do ar.
+
+    patience=0 desliga o limite de tempo: se o buscador não responder
+    (rede, limite de requisições, HTTP ruim), insiste para sempre até ele
+    responder. Resposta vazia conta como resposta — aí devolve sem
+    resultados para o agente tentar outro termo. A pesquisa profunda usa
+    esse modo.
 
     Devolve (resultados, erro).
     """
@@ -1465,9 +1515,12 @@ def run_web_search(term, limit=SEARCH_RESULT_LIMIT):
     if not term:
         return [], "Informe um termo de busca."
 
-    deadline = time.monotonic() + SEARCH_PATIENCE
+    if patience is None:
+        patience = SEARCH_PATIENCE
+
+    unlimited = patience <= 0
+    deadline = None if unlimited else time.monotonic() + patience
     attempt = 0
-    last_error = "vazio"
 
     while True:
         attempt += 1
@@ -1480,7 +1533,21 @@ def run_web_search(term, limit=SEARCH_RESULT_LIMIT):
             )
             return results, ""
 
-        last_error = reason
+        if unlimited:
+            if reason == "vazio":
+                print(
+                    "[NEXA-PESQUISA] %r respondeu sem resultados "
+                    "(modo sem limite de tempo)." % term
+                )
+                return [], "A pesquisa não retornou nada útil."
+
+            print(
+                "[NEXA-PESQUISA] %r falhou (%s); nova tentativa em %.1fs "
+                "(sem limite de tempo)."
+                % (term, reason, SEARCH_RETRY_DELAY)
+            )
+            time.sleep(SEARCH_RETRY_DELAY)
+            continue
 
         remaining = deadline - time.monotonic()
 
@@ -1488,7 +1555,7 @@ def run_web_search(term, limit=SEARCH_RESULT_LIMIT):
             print(
                 "[NEXA-PESQUISA] %r sem resultado apos %d tentativa(s) em %ds "
                 "(ultima: %s). Devolvendo aviso de ferramenta fora do ar."
-                % (term, attempt, SEARCH_PATIENCE, reason)
+                % (term, attempt, patience, reason)
             )
             return [], SEARCH_UNAVAILABLE_MESSAGE
 
@@ -1665,7 +1732,8 @@ def log_upstream_error(response):
     )
 
 
-def build_messages(messages, memories, custom_instructions="", user_id=""):
+def build_messages(messages, memories, custom_instructions="", user_id="",
+                   deep_report=""):
     system_prompt = current_system_prompt(user_id)
 
     if memories:
@@ -1677,6 +1745,15 @@ def build_messages(messages, memories, custom_instructions="", user_id=""):
         system_prompt += (
             "\n\nInstruções adicionais do usuário (siga quando forem compatíveis "
             "com as instruções do sistema):\n" + custom_instructions
+        )
+
+    if deep_report:
+        system_prompt += (
+            "\n\nRelatório de pesquisa profunda sobre a última pergunta do "
+            "usuário (feito por um pesquisador separado, sem o contexto da "
+            "conversa). Responda à última pergunta usando este relatório "
+            "como fonte principal, sem refazer buscas e sem inventar além "
+            "do que ele traz:\n\n" + deep_report
         )
 
     agora = datetime.now()
@@ -1764,18 +1841,24 @@ def model_for_reasoning(level):
 
 
 def request_body(stream, messages, memories, reasoning, custom_instructions="",
-                 memory_enabled=True, user_id=""):
+                 memory_enabled=True, user_id="", deep_report=""):
     body = {
         "model": model_for_reasoning(reasoning),
         "messages": build_messages(
-            messages, memories, custom_instructions, user_id
+            messages, memories, custom_instructions, user_id, deep_report
         ),
         "stream": stream,
         "max_tokens": MAX_OUTPUT_TOKENS,
     }
 
     if memory_enabled:
-        body["tools"] = [MEMORY_TOOL, SEARCH_TOOL, VISIT_TOOL, REMINDER_TOOL]
+        body["tools"] = [
+            MEMORY_TOOL,
+            SEARCH_TOOL,
+            VISIT_TOOL,
+            REMINDER_TOOL,
+            DEEP_RESEARCH_TOOL,
+        ]
         body["tool_choice"] = "auto"
 
     body.update(reasoning_payload(reasoning))
@@ -1861,6 +1944,167 @@ def run_memory_tool(user_id, calls):
     return "Memória atualizada."
 
 
+# =========================
+# PESQUISA PROFUNDA
+# =========================
+# Agente separado (sem o contexto da conversa) que investiga o tópico a
+# fundo e devolve um relatório. As buscas dele usam run_web_search com
+# patience=0: se o DuckDuckGo não responder, insiste sem limite de tempo.
+
+DEEP_RESEARCH_MAX_ROUNDS = int(os.environ.get("DEEP_RESEARCH_MAX_ROUNDS", "10"))
+DEEP_RESEARCH_TIMEOUT = int(os.environ.get("DEEP_RESEARCH_TIMEOUT", "120"))
+
+DEEP_RESEARCH_PROMPT = (
+    "Você é o pesquisador da NEXA numa pesquisa profunda. Você não tem "
+    "contexto de nenhuma conversa: recebeu só um tópico e a missão de "
+    "trazer todas as informações possíveis sobre ele.\n\n"
+    "Use a ferramenta pesquisar várias vezes, com termos diferentes (em "
+    "português e em inglês quando ajudar), e a visitar_pagina para ler as "
+    "páginas mais promissoras por completo. Busque definições, números, "
+    "datas, versões, comparações, exemplos, vantagens, desvantagens e "
+    "opiniões relevantes; confirme o que for importante em mais de uma "
+    "fonte quando der.\n\n"
+    "Quando esgotar as buscas úteis, escreva o relatório final em português "
+    "do Brasil: seções curtas, fatos com fonte (nome + site), links e uma "
+    "lista do que não deu para confirmar. O relatório é a resposta final — "
+    "nada de perguntas de volta."
+)
+
+def run_deep_research(user_id, topic):
+    """
+    Pesquisa profunda: agente novo, sem o contexto da conversa, com as
+    ferramentas de busca. Devolve o relatório final (ou um aviso de falha
+    para o modelo principal repassar ao usuário).
+    """
+    if not API_KEY or not isinstance(topic, str) or not topic.strip():
+        return "Pesquisa profunda indisponível: tópico vazio."
+
+    topic = topic.strip()[:400]
+    cache_key = (user_id or "anon") + "::pesquisa_profunda"
+
+    messages = [
+        {"role": "system", "content": DEEP_RESEARCH_PROMPT},
+        {"role": "user", "content": "Tópico da pesquisa: %s" % topic},
+    ]
+
+    def ask(with_tools=True):
+        body = {
+            "model": MODEL,
+            "messages": messages,
+            "stream": False,
+            "max_tokens": MAX_OUTPUT_TOKENS,
+        }
+
+        if with_tools:
+            body["tools"] = [SEARCH_TOOL, VISIT_TOOL]
+            body["tool_choice"] = "auto"
+
+        response = requests.post(
+            API_BASE + "/chat/completions",
+            headers=auth_headers(),
+            json=body,
+            timeout=(CONNECT_TIMEOUT, DEEP_RESEARCH_TIMEOUT),
+        )
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                "HTTP %d: %s" % (response.status_code, response.text[:300])
+            )
+
+        return response.json()
+
+    for round_number in range(1, DEEP_RESEARCH_MAX_ROUNDS + 1):
+        try:
+            payload = ask()
+        except (requests.RequestException, RuntimeError, ValueError) as error:
+            print("[NEXA-PROFUNDA] falha na rodada %d: %s" % (round_number, error))
+            return (
+                "A pesquisa profunda falhou no meio do caminho (%s). Avise o "
+                "usuário que não completou e responda com o que ele já sabe."
+                % error
+            )
+
+        calls = extract_tool_calls(payload)
+        text = (extract_text(payload) or "").strip()
+
+        if not calls:
+            print("[NEXA-PROFUNDA] relatório pronto na rodada %d." % round_number)
+            return text or "A pesquisa profunda terminou sem texto útil."
+
+        messages.append({
+            "role": "assistant",
+            "content": text or None,
+            "tool_calls": [
+                {
+                    "id": tool_call_id(call),
+                    "type": "function",
+                    "function": {
+                        "name": tool_call_name(call),
+                        "arguments": json.dumps(
+                            parse_tool_arguments(call), ensure_ascii=False
+                        ),
+                    },
+                }
+                for call in calls
+            ],
+        })
+
+        for call in calls:
+            name = tool_call_name(call)
+            call_id = tool_call_id(call)
+            arguments = parse_tool_arguments(call)
+
+            if name == "pesquisar":
+                term = arguments.get("termo")
+                print(
+                    "[NEXA-PROFUNDA] busca %r (rodada %d)."
+                    % (term, round_number)
+                )
+                found, error = run_web_search(term, patience=0)
+
+                if found:
+                    content = format_search_results(term, found, cache_key)
+                elif error:
+                    content = error
+                else:
+                    content = "A pesquisa não retornou nada útil."
+            elif name == "visitar_pagina":
+                paginas = arguments.get("paginas", [])
+                if not isinstance(paginas, list):
+                    paginas = []
+                content = fetch_pages(cache_key, paginas)
+            else:
+                content = "Ferramenta desconhecida para este pesquisador."
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": content,
+            })
+
+    print(
+        "[NEXA-PROFUNDA] limite de %d rodadas atingido; pedindo fechamento."
+        % DEEP_RESEARCH_MAX_ROUNDS
+    )
+
+    messages.append({
+        "role": "user",
+        "content": (
+            "Chega de ferramentas: escreva agora o relatório final em "
+            "português do Brasil com tudo que já encontrou, mesmo que "
+            "incompleto, e liste o que ficou sem confirmar."
+        ),
+    })
+
+    try:
+        payload = ask(with_tools=False)
+        return (extract_text(payload) or "").strip() or (
+            "A pesquisa profunda terminou sem texto útil."
+        )
+    except (requests.RequestException, RuntimeError, ValueError) as error:
+        print("[NEXA-PROFUNDA] falha no fechamento: %s" % error)
+        return "A pesquisa profunda não conseguiu fechar o relatório."
+
 def run_tools(user_id, calls):
     """
     Executa todas as ferramentas chamadas pelo modelo e devolve
@@ -1918,6 +2162,13 @@ def run_tools(user_id, calls):
             else:
                 results[call_id] = "A pesquisa não retornou nada útil."
 
+            continue
+
+        if name == "pesquisa_profunda":
+            topic = arguments.get("topico")
+            print("[NEXA-PROFUNDA] ferramenta chamada: %r" % topic)
+            results[call_id] = run_deep_research(user_id, topic)
+            searched = True
             continue
 
         if name == "visitar_pagina":
@@ -2135,12 +2386,15 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
     return current_text, memory_saved, searched
 
 
-def make_stream_response(lines, user_id, user_message, memory_enabled=True,
-                         messages=None, memories=None, reasoning=None,
-                         custom_instructions=""):
-    # Num modelo com pensamento, o raciocínio chega antes do texto. A sondagem
-    # precisa guardar esses pedacos, senao o stream comeca a responder no meio
-    # da resposta e todo o raciocinio some.
+def probe_stream(lines):
+    """
+    Sonda o começo do stream antes de montar a resposta SSE.
+
+    Num modelo com pensamento, o raciocínio chega antes do texto: a
+    sondagem guarda esses pedaços para não perder o raciocínio quando o
+    stream principal começar. Devolve (reasoning_chunks, first_text,
+    tool_calls) ou None quando o stream acaba sem nada útil.
+    """
     reasoning_chunks = []
     first_text = None
     tool_calls = []
@@ -2168,7 +2422,7 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
 
     except requests.RequestException as error:
         print(
-            "[NEXA] stream interrompido (%s). Indo pelo caminho bloqueante."
+            "[NEXA] stream interrompido (%s)."
             % type(error).__name__
         )
         return None
@@ -2176,6 +2430,16 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
     if first_text is None and not tool_calls:
         return None
 
+    return reasoning_chunks, first_text, tool_calls
+
+def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
+                       user_id, memory_enabled=True, messages=None,
+                       memories=None, reasoning=None, custom_instructions=""):
+    """
+    Traduz o stream do modelo nos eventos SSE da NEXA. Fica em função
+    separada para a pesquisa profunda reaproveitar: lá o relatório entra
+    no request_body e o stream segue o mesmo caminho.
+    """
     def generate():
         full_text = ""
         reason = None
@@ -2270,6 +2534,122 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
         except requests.RequestException as error:
             print("[NEXA] erro durante o stream:", error)
             yield sse({"type": "error", "error": "Erro durante a resposta da NEXA."})
+
+    return generate()
+
+def make_stream_response(lines, user_id, user_message, memory_enabled=True,
+                         messages=None, memories=None, reasoning=None,
+                         custom_instructions=""):
+    probe = probe_stream(lines)
+
+    if probe is None:
+        return None
+
+    reasoning_chunks, first_text, tool_calls = probe
+
+    return Response(
+        stream_with_context(
+            stream_chat_events(
+                lines, reasoning_chunks, first_text, tool_calls,
+                user_id, memory_enabled, messages, memories, reasoning,
+                custom_instructions,
+            )
+        ),
+        headers=sse_headers(),
+    )
+
+def make_deep_response(user_id, user_message, messages, memories, reasoning,
+                       custom_instructions="", memory_enabled=True):
+    """
+    Pesquisa profunda pedida pelo botão "+" do composer: a pergunta vai
+    direto para o pesquisador (agente separado, sem o contexto da
+    conversa) e, com o relatório em mãos, o modelo normal escreve a
+    resposta final. O ping do SSE segura a conexão durante a investigação.
+    """
+    def generate():
+        yield sse({
+            "type": "reasoning",
+            "text": "Pesquisa profunda em andamento: o pesquisador está "
+                    "investigando o tema. Isso pode demorar um pouco.",
+        })
+
+        box = {}
+
+        def worker():
+            try:
+                box["report"] = run_deep_research(user_id, user_message)
+            except Exception as error:  # noqa: BLE001
+                print("[NEXA-PROFUNDA] falha inesperada:", error)
+                box["report"] = (
+                    "A pesquisa profunda falhou. Avise o usuário que não "
+                    "deu certo e responda com o que você já sabe."
+                )
+
+        pump = threading.Thread(target=worker, daemon=True)
+        pump.start()
+
+        while pump.is_alive():
+            pump.join(timeout=SEARCH_HEARTBEAT)
+            if pump.is_alive():
+                yield sse({"type": "ping"})
+
+        report = box.get("report") or ""
+
+        yield sse({"type": "search"})
+        yield sse({
+            "type": "reasoning",
+            "text": "Relatório pronto. A NEXA está escrevendo a resposta.",
+        })
+
+        try:
+            upstream = requests.post(
+                API_BASE + "/chat/completions",
+                headers=auth_headers(),
+                json=request_body(
+                    True, messages, memories, reasoning, custom_instructions,
+                    memory_enabled, user_id, report,
+                ),
+                stream=True,
+                timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
+            )
+        except requests.RequestException as error:
+            print("[NEXA-PROFUNDA] modelo principal falhou:", error)
+            upstream = None
+
+        if upstream is None or upstream.status_code != 200:
+            if upstream is not None:
+                log_upstream_error(upstream)
+                upstream.close()
+            yield sse({
+                "type": "error",
+                "error": (
+                    "A pesquisa terminou, mas a NEXA não conseguiu escrever "
+                    "a resposta. Tente de novo."
+                ),
+            })
+            return
+
+        lines = upstream.iter_lines(decode_unicode=False)
+        probe = probe_stream(lines)
+
+        if probe is None:
+            upstream.close()
+            yield sse({
+                "type": "error",
+                "error": (
+                    "A pesquisa terminou, mas a NEXA não conseguiu escrever "
+                    "a resposta. Tente de novo."
+                ),
+            })
+            return
+
+        reasoning_chunks, first_text, tool_calls = probe
+
+        yield from stream_chat_events(
+            lines, reasoning_chunks, first_text, tool_calls, user_id,
+            memory_enabled, messages, memories, reasoning,
+            custom_instructions,
+        )
 
     return Response(stream_with_context(generate()), headers=sse_headers())
 
@@ -2606,6 +2986,14 @@ def chat():
         return jsonify({"error": "Nenhuma mensagem foi enviada para a NEXA."}), 400
 
     memories = get_memories(user_id) if memory_enabled else []
+
+    # Botão "+" do composer: manda a pergunta direto para o pesquisador e
+    # devolve o relatório para o modelo normal escrever a resposta.
+    if body.get("deep") is True and user_message:
+        return make_deep_response(
+            user_id, user_message, messages, memories, reasoning,
+            custom_instructions, memory_enabled,
+        )
 
     try:
         upstream = requests.post(

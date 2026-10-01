@@ -236,6 +236,138 @@ function setupReasoningUI() {
   );
 }
 
+/*
+  ==========================================
+  BOTÃO "+" DO COMPOSER
+  Menu com as opções de anexo (ainda desativadas) e a pesquisa
+  profunda, que manda a pergunta direto para o pesquisador da NEXA.
+  ==========================================
+*/
+
+let deepMode = false;
+
+function renderDeepMode() {
+  const button =
+    document.getElementById("attachButton");
+  const option =
+    document.getElementById("attachDeep");
+  const input =
+    document.getElementById("messageInput");
+
+  if (button) {
+    button.classList.toggle("active", deepMode);
+
+    button.setAttribute(
+      "aria-pressed",
+      deepMode ? "true" : "false"
+    );
+  }
+
+  if (option) {
+    option.classList.toggle("active", deepMode);
+
+    option.setAttribute(
+      "aria-checked",
+      deepMode ? "true" : "false"
+    );
+  }
+
+  if (input) {
+    input.placeholder = deepMode
+      ? "Descreva o tema da pesquisa profunda..."
+      : "Digite uma mensagem...";
+  }
+}
+
+function setDeepMode(isOn) {
+  deepMode = isOn === true;
+  renderDeepMode();
+}
+
+function setupAttachUI() {
+  const button =
+    document.getElementById("attachButton");
+  const menu =
+    document.getElementById("attachMenu");
+
+  if (!button || !menu) {
+    return;
+  }
+
+  function setOpen(isOpen) {
+    menu.classList.toggle("open", isOpen);
+
+    button.setAttribute(
+      "aria-expanded",
+      isOpen ? "true" : "false"
+    );
+  }
+
+  button.addEventListener(
+    "click",
+    function () {
+      setOpen(
+        !menu.classList.contains("open")
+      );
+    }
+  );
+
+  menu.addEventListener(
+    "click",
+    function (event) {
+      const item =
+        event.target.closest(".reasoning-item");
+
+      if (!item || item.disabled) {
+        return;
+      }
+
+      if (item.id === "attachDeep") {
+        setDeepMode(!deepMode);
+      }
+
+      setOpen(false);
+
+      const input =
+        document.getElementById("messageInput");
+
+      if (input) {
+        input.focus();
+      }
+    }
+  );
+
+  /*
+    Na fase de captura o clique fecha o menu mesmo quando outro
+    botão interrompe a propagação do evento.
+  */
+  document.addEventListener(
+    "click",
+    function (event) {
+      const target = event.target;
+
+      if (
+        target instanceof Element &&
+        target.closest("#attachWrap")
+      ) {
+        return;
+      }
+
+      setOpen(false);
+    },
+    true
+  );
+
+  document.addEventListener(
+    "keydown",
+    function (event) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+  );
+}
+
 
 /*
   ==========================================
@@ -1187,7 +1319,7 @@ function createStreamingMessage() {
   ==========================================
 */
 
-async function askNexa(text) {
+async function askNexa(text, deep) {
   const response =
     await fetch("/api/chat", {
       method: "POST",
@@ -1206,7 +1338,8 @@ async function askNexa(text) {
 
         reasoning: reasoningLevel,
         memoryEnabled,
-        customInstructions
+        customInstructions,
+        deep: deep === true
       })
     });
 
@@ -2476,6 +2609,16 @@ composer.addEventListener(
       return;
     }
 
+    /*
+      A pesquisa profunda vale só para esta mensagem: guarda o
+      modo e desliga o botão antes de enviar.
+    */
+    const deep = deepMode;
+
+    if (deep) {
+      setDeepMode(false);
+    }
+
     sendButton.disabled = true;
     micButton.disabled = true;
     newChatButton.disabled = true;
@@ -2518,7 +2661,7 @@ composer.addEventListener(
     showTyping();
 
     try {
-      await askNexa(text);
+      await askNexa(text, deep);
 
       /* 
         Se foi a primeira mensagem, gera título pela IA
@@ -2911,6 +3054,8 @@ function bootApp() {
   loadReasoning();
   setupReasoningUI();
   renderReasoning();
+  setupAttachUI();
+  renderDeepMode();
 }
 
 /*

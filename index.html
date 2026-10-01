@@ -21,7 +21,7 @@
 
   <title>NEXA</title>
 
-  <link rel="stylesheet" href="style.css?v=18">
+  <link rel="stylesheet" href="style.css?v=19">
 </head>
 
 <body>
@@ -331,6 +331,76 @@
         </div>
       </div>
 
+      <div class="attach-wrap" id="attachWrap">
+        <button
+          type="button"
+          id="attachButton"
+          class="attach-button"
+          aria-label="Mais opções"
+          aria-haspopup="menu"
+          aria-expanded="false"
+          aria-pressed="false"
+          title="Mais opções"
+        >
+          <span aria-hidden="true">+</span>
+        </button>
+
+        <div
+          class="reasoning-dropdown attach-menu"
+          id="attachMenu"
+          role="menu"
+        >
+          <button
+            type="button"
+            class="reasoning-item"
+            role="menuitem"
+            disabled
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Imagem</span>
+              <span class="reasoning-item-hint">Em breve</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            role="menuitem"
+            disabled
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Vídeo</span>
+              <span class="reasoning-item-hint">Em breve</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            role="menuitem"
+            disabled
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Arquivos</span>
+              <span class="reasoning-item-hint">Em breve</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            id="attachDeep"
+            role="menuitemcheckbox"
+            aria-checked="false"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Pesquisa profunda</span>
+              <span class="reasoning-item-hint">Manda a pergunta direto para o pesquisador da NEXA; demora mais</span>
+            </span>
+          </button>
+        </div>
+      </div>
+
       <button
         type="button"
         id="micButton"
@@ -587,7 +657,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
-  <script src="script.js?v=46"></script>
+  <script src="script.js?v=47"></script>
 
 </body>
 
