@@ -1041,14 +1041,9 @@ body {
   border-color: var(--line-hover);
 }
 
-.settings-reminder-form,
 .settings-more-actions {
   display: grid;
   gap: 14px;
-}
-
-.settings-reminder-form .settings-action {
-  justify-self: end;
 }
 
 .settings-close {
