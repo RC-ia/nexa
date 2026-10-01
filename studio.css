@@ -24,8 +24,8 @@
 }
 
 body.files-open .studio-page {
-  width: min(calc(100% - var(--files-width)), 900px);
-  margin: 0 auto 0 var(--files-width);
+  width: auto;
+  margin: 0 0 0 var(--files-width);
 }
 
 @media (max-width: 860px) {
