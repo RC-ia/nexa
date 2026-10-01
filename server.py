@@ -1,3 +1,4 @@
+import base64
 import calendar
 import html
 import json
@@ -1413,10 +1414,12 @@ def tool_call_id(call):
 # dependência do projeto.
 
 SEARCH_URL = "https://html.duckduckgo.com/html/"
-# O 202 significa limite de requisições: tentamos o lite antes de desistir.
+# O 202 significa limite de requisições. Tentamos o html, o lite e, se os
+# dois falharem por rede ou limite, o Bing — que responde em outro domínio.
 SEARCH_ENDPOINTS = (
-    "https://html.duckduckgo.com/html/",
-    "https://lite.duckduckgo.com/lite/",
+    ("https://html.duckduckgo.com/html/", "post"),
+    ("https://lite.duckduckgo.com/lite/", "post"),
+    ("https://www.bing.com/search", "get"),
 )
 SEARCH_TIMEOUT = (5, 15)
 SEARCH_RESULT_LIMIT = 5
@@ -1434,10 +1437,16 @@ SEARCH_UNAVAILABLE_MESSAGE = (
     "espera, responda com o que você já sabe e deixe claro o que não deu "
     "para verificar. Não invente fatos, números, datas ou fontes."
 )
-SEARCH_REASON_LABELS = {
-    "rede": "falha de rede",
-    "limitado": "o buscador está limitando as requisições",
-}
+def search_reason_label(reason):
+    """Traduz o motivo de uma falha de busca para a cadeia de pensamento."""
+    if reason == "limitado":
+        return "o buscador está limitando as requisições"
+    if reason.startswith("rede"):
+        detail = reason.split(":", 1)[-1].strip()
+        return "falha de rede (%s)" % detail if detail else "falha de rede"
+    if reason.startswith("http_"):
+        return "erro do buscador (HTTP %s)" % reason[5:]
+    return "erro do buscador (%s)" % reason
 # Enquanto a busca insiste, o proxy (Cloudflare) pode cortar a conexão se
 # ficarmos sem escrever nada. Mandamos um keep-alive no SSE durante a espera.
 SEARCH_HEARTBEAT = int(os.environ.get("SEARCH_HEARTBEAT", "15"))
@@ -1469,6 +1478,13 @@ LITE_LINK_PATTERN = re.compile(
 )
 LITE_SNIPPET_PATTERN = re.compile(
     "<td[^>]+class=['\"]result-snippet['\"][^>]*>(.*?)</td>", re.S
+)
+# O Bing responde no /search com <h2><a href=...> e <p class="b_lineclamp..">.
+BING_LINK_PATTERN = re.compile(
+    "<h2[^>]*><a[^>]+href=\"([^\"]+)\"[^>]*>(.*?)</a></h2>", re.S
+)
+BING_SNIPPET_PATTERN = re.compile(
+    "<p class=\"b_lineclamp[^\"]*\"[^>]*>(.*?)</p>", re.S
 )
 TAG_PATTERN = re.compile(r"<[^>]+>")
 
@@ -1509,6 +1525,32 @@ def unwrap_duckduckgo_url(url):
     return target[0] if target else url
 
 
+def unwrap_bing_url(url):
+    """
+    O Bing embrulha os links em /ck/a?u=a1<base64 url-safe>; sem abrir, o
+    modelo receberia um redirecionamento do buscador.
+    """
+    if not url or "/ck/a" not in url:
+        return url
+
+    # O atributo href chega com &amp; no lugar de &.
+    url = html.unescape(url)
+
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    target = (query.get("u") or [""])[0]
+
+    if not target.startswith("a1"):
+        return url
+
+    data = target[2:]
+    data += "=" * (-len(data) % 4)
+
+    try:
+        return base64.urlsafe_b64decode(data).decode("utf-8", "replace")
+    except (ValueError, TypeError):
+        return url
+
+
 def search_once(term, limit, deadline):
     """
     Uma passada pelas tentativas: cada endpoint do buscador é chamado uma
@@ -1517,20 +1559,28 @@ def search_once(term, limit, deadline):
     throttled = False
     last_error = "A pesquisa não retornou nada útil."
 
-    for endpoint in SEARCH_ENDPOINTS:
+    for endpoint, method in SEARCH_ENDPOINTS:
         if deadline is not None and time.monotonic() >= deadline:
             return [], "tempo_esgotado"
 
         try:
-            response = requests.post(
-                endpoint,
-                headers=SEARCH_HEADERS,
-                data={"q": term},
-                timeout=SEARCH_TIMEOUT,
-            )
+            if method == "get":
+                response = requests.get(
+                    endpoint,
+                    headers=SEARCH_HEADERS,
+                    params={"q": term},
+                    timeout=SEARCH_TIMEOUT,
+                )
+            else:
+                response = requests.post(
+                    endpoint,
+                    headers=SEARCH_HEADERS,
+                    data={"q": term},
+                    timeout=SEARCH_TIMEOUT,
+                )
         except requests.RequestException as error:
             print("[NEXA-PESQUISA] rede falhou em %s: %s" % (endpoint, error))
-            last_error = "rede"
+            last_error = "rede: %s" % error.__class__.__name__
             continue
 
         if response.status_code == 202:
@@ -1612,12 +1662,9 @@ def run_web_search(term, limit=SEARCH_RESULT_LIMIT, patience=None, progress=None
                 return [], "A pesquisa não retornou nada útil."
 
             if progress and (attempt == 1 or attempt % 5 == 0):
-                label = SEARCH_REASON_LABELS.get(
-                    reason, "erro do buscador (%s)" % reason
-                )
                 progress(
                     "«%s»: %s (tentativa %d). Continuo tentando."
-                    % (term, label, attempt)
+                    % (term, search_reason_label(reason), attempt)
                 )
 
             print(
@@ -1675,6 +1722,14 @@ def parse_search_results(page, limit):
             for item in LITE_SNIPPET_PATTERN.findall(page)
         ]
 
+    if not links:
+        # Layout do Bing (entra quando os dois do DuckDuckGo falham).
+        links = BING_LINK_PATTERN.findall(page)
+        snippets = [
+            clean_search_text(item)
+            for item in BING_SNIPPET_PATTERN.findall(page)
+        ]
+
     results = []
     seen = set()
 
@@ -1684,7 +1739,7 @@ def parse_search_results(page, limit):
         if not title:
             continue
 
-        final_url = unwrap_duckduckgo_url(url)
+        final_url = unwrap_duckduckgo_url(unwrap_bing_url(url))
 
         if not final_url or final_url in seen:
             continue
