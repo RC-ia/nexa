@@ -54,7 +54,7 @@ const INSTRUCTIONS_KEY = "nexa_custom_instructions:";
 const REMINDERS_KEY = "nexa_reminders:";
 
 const REASONING_LABELS = {
-  none: "Nenhum",
+  none: "Rápido",
   low: "Baixo",
   medium: "Médio",
   high: "Alto",
@@ -129,7 +129,7 @@ function renderReasoning() {
   if (label) {
     label.textContent =
       REASONING_LABELS[reasoningLevel] ||
-      "Nenhum";
+      "Rápido";
   }
 
   if (button) {

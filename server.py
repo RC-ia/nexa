@@ -22,6 +22,8 @@ API_KEY = os.environ.get("API_KEY", "").strip()
 API_GEMA = os.environ.get("API_GEMA", "").strip()
 API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip("/")
 MODEL = os.environ.get("MODEL", "nada")
+# Modelo próprio para o modo Rápido (sem raciocínio). Vazio usa o MODEL.
+MODEL_FLASK = os.environ.get("MODEL_FLASK", "").strip()
 LIVE_MODEL = "models/gemini-3.8-live"
 DEFAULT_LIVE_VOICE = "Kore"
 LIVE_VOICES = {
@@ -855,10 +857,21 @@ def reasoning_payload(level):
     return {REASONING_PARAM: value}
 
 
+def model_for_reasoning(level):
+    """
+    O modo Rápido (sem raciocínio) pode usar um modelo próprio, definido no
+    .env como MODEL_FLASK. Vazio ou outro nível usa o MODEL padrão.
+    """
+    if level == "none" and MODEL_FLASK:
+        return MODEL_FLASK
+
+    return MODEL
+
+
 def request_body(stream, messages, memories, reasoning, custom_instructions="",
                  memory_enabled=True):
     body = {
-        "model": MODEL,
+        "model": model_for_reasoning(reasoning),
         "messages": build_messages(messages, memories, custom_instructions),
         "stream": stream,
         "max_tokens": MAX_OUTPUT_TOKENS,
@@ -1346,7 +1359,7 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
                 if memory_updated:
                     yield sse({"type": "memory"})
 
-            yield sse({"type": "done", "model": MODEL})
+            yield sse({"type": "done", "model": model_for_reasoning(reasoning)})
 
         except requests.RequestException as error:
             print("[NEXA] erro durante o stream:", error)
@@ -1425,7 +1438,7 @@ def make_blocking_response(
         if memory_updated:
             yield sse({"type": "memory"})
 
-        yield sse({"type": "done", "model": MODEL})
+        yield sse({"type": "done", "model": model_for_reasoning(reasoning)})
 
     return Response(stream_with_context(generate()), headers=sse_headers())
 
