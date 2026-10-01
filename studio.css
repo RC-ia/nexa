@@ -1,0 +1,256 @@
+:root {
+  --studio-accent: #86e5d1;
+  --studio-panel: rgba(13, 9, 19, 0.96);
+  --studio-bubble: rgba(255, 255, 255, 0.045);
+}
+
+.studio-body {
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(19, 92, 82, 0.16), transparent 38rem),
+    var(--bg, #07050b);
+}
+
+.studio-page {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  width: min(100%, 900px);
+  min-height: 100vh;
+  min-height: 100svh;
+  margin: 0 auto;
+  padding: 20px 22px 16px;
+}
+
+.studio-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.studio-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text, #f2eef7);
+  text-decoration: none;
+}
+
+.studio-back span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 9px;
+  color: var(--studio-accent);
+  font-size: 25px;
+  line-height: 1;
+}
+
+.studio-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.studio-title strong {
+  color: var(--text, #f2eef7);
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+
+.studio-title span {
+  color: var(--muted, rgba(242, 238, 247, 0.55));
+  font-size: 11px;
+}
+
+.studio-files-toggle {
+  padding: 8px 12px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text, #f2eef7);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.studio-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 0;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.message {
+  display: flex;
+}
+
+.message-user {
+  justify-content: flex-end;
+}
+
+.bubble {
+  max-width: 84%;
+  padding: 10px 13px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 12px;
+  background: var(--studio-bubble);
+  color: var(--text, #f2eef7);
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.message-user .bubble {
+  background: rgba(134, 229, 209, 0.09);
+  border-color: rgba(134, 229, 209, 0.28);
+}
+
+.bubble pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.38);
+  overflow-x: auto;
+}
+
+.bubble code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+}
+
+.bubble :not(pre) > code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.message-note .bubble {
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted, rgba(242, 238, 247, 0.55));
+  font-size: 12px;
+}
+
+.studio-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.studio-composer textarea {
+  flex: 1;
+  min-height: 46px;
+  max-height: 180px;
+  padding: 12px 14px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 11px;
+  background: rgba(13, 9, 19, 0.62);
+  color: var(--text, #f2eef7);
+  font: inherit;
+  font-size: 14px;
+  resize: none;
+  outline: none;
+}
+
+.studio-composer textarea:focus {
+  border-color: rgba(134, 229, 209, 0.45);
+}
+
+.studio-composer button {
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgba(134, 229, 209, 0.35);
+  border-radius: 11px;
+  background: rgba(134, 229, 209, 0.1);
+  color: var(--studio-accent);
+  font-size: 17px;
+  cursor: pointer;
+}
+
+.studio-files {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(400px, 94vw);
+  border-left: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  background: var(--studio-panel);
+  backdrop-filter: blur(14px);
+}
+
+.studio-files > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 16px 10px;
+  color: var(--text, #f2eef7);
+}
+
+.studio-files-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.studio-files-actions button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text, #f2eef7);
+  cursor: pointer;
+}
+
+.studio-files ul {
+  margin: 0;
+  padding: 0 10px 12px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.studio-files li button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text, #f2eef7);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.studio-files li button:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.studio-empty {
+  padding: 8px 10px;
+  color: var(--muted, rgba(242, 238, 247, 0.55));
+  font-size: 12.5px;
+}
+
+.studio-files pre {
+  flex: 1;
+  margin: 0;
+  padding: 12px 16px 18px;
+  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  color: var(--text, #f2eef7);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <meta
+    name="theme-color"
+    content="#07050B"
+  >
+
+  <meta
+    name="description"
+    content="Estúdio — agente de código da NEXA"
+  >
+
+  <title>Estúdio | NEXA</title>
+
+  <link rel="stylesheet" href="style.css?v=19">
+  <link rel="stylesheet" href="studio.css?v=1">
+</head>
+
+<body class="studio-body">
+
+  <main class="studio-page">
+
+    <header class="studio-topbar">
+
+      <a class="studio-back" href="/" title="Voltar para a NEXA">
+        <span aria-hidden="true">‹</span>
+        NEXA
+      </a>
+
+      <div class="studio-title">
+        <strong>Estúdio</strong>
+        <span id="studioStatus">Verificando sessão…</span>
+      </div>
+
+      <button type="button" id="filesToggle" class="studio-files-toggle">
+        Arquivos
+      </button>
+
+    </header>
+
+    <section
+      class="studio-chat"
+      id="chat"
+      aria-live="polite"
+      aria-label="Conversa com o agente de código"
+    ></section>
+
+    <form class="studio-composer" id="composer">
+
+      <textarea
+        id="input"
+        rows="1"
+        placeholder="Peça algo: um site, um script, um jogo…"
+        aria-label="Mensagem para o agente de código"
+      ></textarea>
+
+      <button type="submit" aria-label="Enviar" title="Enviar">➤</button>
+
+    </form>
+
+  </main>
+
+  <aside class="studio-files" id="filesPane" hidden>
+
+    <header>
+      <strong>Arquivos</strong>
+      <div class="studio-files-actions">
+        <button type="button" id="filesRefresh" title="Atualizar">⟳</button>
+        <button type="button" id="filesClose" title="Fechar">✕</button>
+      </div>
+    </header>
+
+    <ul id="fileList"></ul>
+
+    <pre id="fileView" hidden></pre>
+
+  </aside>
+
+  <script src="studio.js?v=1"></script>
+</body>
+
+</html>

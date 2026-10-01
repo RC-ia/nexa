@@ -2898,6 +2898,14 @@ drawerNewChat.addEventListener(
   startNewChat
 );
 
+const studioButton = document.getElementById("studioButton");
+
+if (studioButton) {
+  studioButton.addEventListener("click", () => {
+    window.location.assign("/studio.html");
+  });
+}
+
 
 /*
   ==========================================
