@@ -27,6 +27,7 @@ const settingsViews = {
   instructions: document.getElementById("settingsInstructions"),
   deep: document.getElementById("settingsDeep"),
   time: document.getElementById("settingsTime"),
+  listen: document.getElementById("settingsListen"),
   reminders: document.getElementById("settingsReminders"),
   more: document.getElementById("settingsMore")
 };
@@ -2188,6 +2189,7 @@ function showSettingsView(viewName) {
     instructions: "Instruções",
     deep: "Pesquisa profunda",
     time: "Data e hora",
+    listen: "Escuta",
     reminders: "Lembretes",
     more: "Mais"
   };
@@ -2209,6 +2211,8 @@ function showSettingsView(viewName) {
     loadDeepSettings();
   } else if (viewName === "time") {
     loadTimeSettings();
+  } else if (viewName === "listen") {
+    loadListenSettings();
   } else if (viewName === "reminders") {
     loadServerReminders();
   }
@@ -2247,6 +2251,47 @@ async function loadTimeSettings() {
   } catch (error) {
     status.textContent = error.message;
   }
+}
+
+function nativeListen() {
+  return window.NexaNative || null;
+}
+
+function renderListenStatus(active) {
+  const status = document.getElementById("listenStatus");
+  const toggle = document.getElementById("listenToggle");
+  const battery = document.getElementById("listenBattery");
+  const autostart = document.getElementById("listenAutostart");
+  const bridge = nativeListen();
+
+  if (!bridge) {
+    status.textContent = "Disponível apenas no app Android.";
+    toggle.hidden = true;
+    battery.hidden = true;
+    autostart.hidden = true;
+    return;
+  }
+
+  status.textContent = active
+    ? "Escuta em segundo plano ativa."
+    : "Escuta em segundo plano desativada.";
+  toggle.textContent = active ? "Desativar escuta" : "Ativar escuta";
+  toggle.hidden = false;
+  battery.hidden = false;
+  autostart.hidden = false;
+}
+
+function loadListenSettings() {
+  const bridge = nativeListen();
+  let active = false;
+
+  try {
+    active = Boolean(bridge && bridge.isListeningServiceActive());
+  } catch (error) {
+    active = false;
+  }
+
+  renderListenStatus(active);
 }
 
 async function loadSystemPrompt() {
@@ -2955,6 +3000,41 @@ document.getElementById("saveTimeSettings").addEventListener("click", async func
   } finally {
     button.disabled = false;
   }
+});
+
+document.getElementById("listenToggle").addEventListener("click", function () {
+  const bridge = nativeListen();
+  if (!bridge) {
+    return;
+  }
+
+  const active = Boolean(bridge.isListeningServiceActive());
+
+  if (active) {
+    bridge.stopListeningService();
+  } else {
+    bridge.startListeningService();
+  }
+
+  renderListenStatus(!active);
+});
+
+document.getElementById("listenBattery").addEventListener("click", function () {
+  const bridge = nativeListen();
+  if (bridge) {
+    bridge.requestBatteryOptimizationExemption();
+  }
+});
+
+document.getElementById("listenAutostart").addEventListener("click", function () {
+  const bridge = nativeListen();
+  if (bridge) {
+    bridge.openAutostartSettings();
+  }
+});
+
+window.addEventListener("nativeListeningChange", function (event) {
+  renderListenStatus(Boolean((event.detail || {}).active));
 });
 
 document.getElementById("resetSystemPrompt").addEventListener("click", async function () {

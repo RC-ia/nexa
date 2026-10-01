@@ -474,6 +474,10 @@
               <strong>Data e hora</strong>
               <span>Fuso horário usado nas conversas e lembretes</span>
             </button>
+            <button type="button" class="settings-category" data-settings-open="listen">
+              <strong>Escuta</strong>
+              <span>Serviço de voz em segundo plano (app Android)</span>
+            </button>
             <button type="button" class="settings-category" data-settings-open="memory">
               <strong>Memória</strong>
               <span>Preferências lembradas pela NEXA</span>
@@ -580,6 +584,18 @@
             <span id="timeSettingsStatus" class="settings-status" role="status"></span>
             <button type="button" id="saveTimeSettings" class="settings-action">Salvar</button>
           </div>
+        </section>
+
+        <section id="settingsListen" class="settings-view" hidden>
+          <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
+          <p class="settings-description">Escuta em segundo plano com a palavra "Nexa", direto no app Android. No navegador este recurso não existe — use o microfone da barra de mensagens.</p>
+          <p id="listenStatus" class="settings-status" role="status"></p>
+          <button type="button" id="listenToggle" class="settings-action">Ativar escuta</button>
+          <div class="settings-page-actions">
+            <button type="button" id="listenBattery" class="settings-inline-button">Liberar bateria</button>
+            <button type="button" id="listenAutostart" class="settings-inline-button">Abrir autostart</button>
+          </div>
+          <p class="settings-description">No HyperOS (Xiaomi/Redmi), sem liberar a bateria e o autostart o serviço é encerrado sozinho pelo sistema.</p>
         </section>
 
         <section id="settingsReminders" class="settings-view" hidden>
@@ -697,7 +713,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
-  <script src="script.js?v=50"></script>
+  <script src="script.js?v=51"></script>
 
 </body>
 

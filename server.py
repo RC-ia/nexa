@@ -1141,18 +1141,23 @@ def run_reminder_action(user_id, instrucao, when_text):
     last_text = ""
 
     for _ in range(REMINDER_ACTION_ROUNDS):
+        body = {
+            "model": model_for_reasoning("xhigh"),
+            "messages": messages,
+            "tools": [SEARCH_TOOL, VISIT_TOOL, TIME_TOOL],
+            "tool_choice": "auto",
+            "stream": False,
+            "max_tokens": MAX_OUTPUT_TOKENS,
+        }
+        # Lembrete de ação não é conversa: vale o modelo normal no
+        # raciocínio máximo para o resultado sair com mais qualidade.
+        body.update(reasoning_payload("xhigh"))
+
         try:
             response = requests.post(
                 API_BASE + "/chat/completions",
                 headers=auth_headers(),
-                json={
-                    "model": model_for_reasoning("none"),
-                    "messages": messages,
-                    "tools": [SEARCH_TOOL, VISIT_TOOL, TIME_TOOL],
-                    "tool_choice": "auto",
-                    "stream": False,
-                    "max_tokens": MAX_OUTPUT_TOKENS,
-                },
+                json=body,
                 timeout=(CONNECT_TIMEOUT, DEEP_RESEARCH_TIMEOUT),
             )
         except requests.RequestException as error:
