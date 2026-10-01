@@ -39,6 +39,22 @@ function setStatus(message, state) {
   visual.dataset.state = state || "idle";
 }
 
+/*
+  Avisa o app Android do estado da chamada — ele usa isso para
+  pausar a escuta nativa enquanto o microfone é da chamada.
+*/
+function notifyNativeLive(state) {
+  const bridge = window.NexaNative;
+
+  try {
+    if (bridge && typeof bridge.onLiveState === "function") {
+      bridge.onLiveState(state);
+    }
+  } catch (error) {
+    console.error("Erro ao avisar o app sobre a chamada:", error);
+  }
+}
+
 function pcm16FromFloat(input, sampleRate) {
   const ratio = sampleRate / 16000;
   const outputLength = Math.floor(input.length / ratio);
@@ -199,6 +215,7 @@ function endCall(message) {
   startButton.disabled = false;
   endButton.hidden = true;
   setStatus(message || "Chamada encerrada", "idle");
+  notifyNativeLive("ended");
 }
 
 function handleServerMessage(activeSocket, message) {
@@ -212,6 +229,7 @@ function handleServerMessage(activeSocket, message) {
     endButton.hidden = false;
     setStatus("Conectado · pode falar", "listening");
     startMicrophone(activeSocket);
+    notifyNativeLive("live");
     return;
   }
 
@@ -321,6 +339,7 @@ async function startCall() {
   const generation = ++callGeneration;
   startButton.disabled = true;
   endButton.hidden = false;
+  notifyNativeLive("connecting");
   setStatus("Solicitando acesso ao microfone…", "connecting");
 
   try {
@@ -447,6 +466,27 @@ async function startCall() {
   }
 }
 
+/*
+  O app Android chama ao ouvir "Nexa": a chamada inicia sozinha; se a
+  sessão ainda estiver sendo verificada, espera e dispara depois.
+*/
+let liveReady = false;
+let liveStartQueued = false;
+
+window.NexaLive = {
+  start() {
+    if (!liveReady) {
+      liveStartQueued = true;
+      return true;
+    }
+    if (socket || startButton.disabled) {
+      return true;
+    }
+    startCall();
+    return true;
+  },
+};
+
 async function initializeLivePage() {
   try {
     const response = await fetch("/api/auth/me");
@@ -465,6 +505,12 @@ async function initializeLivePage() {
 
     startButton.disabled = false;
     setStatus("Pronto para iniciar", "idle");
+    liveReady = true;
+
+    if (liveStartQueued) {
+      liveStartQueued = false;
+      startCall();
+    }
   } catch (error) {
     setStatus("Não foi possível verificar sua sessão", "error");
   }
