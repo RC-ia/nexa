@@ -2198,9 +2198,16 @@ async function updatePushStatus() {
           ? " aparelho registrado."
           : " aparelhos registrados.")
       );
+    } else if (
+      window.NexaNative &&
+      typeof window.NexaNative.registerPushToken === "function"
+    ) {
+      parts.push(
+        "Nenhum aparelho registrado ainda — ponte do app detectada; reabra o app logado."
+      );
     } else {
       parts.push(
-        "Nenhum aparelho registrado para push — abra o app logado para registrar."
+        "Nenhum aparelho registrado — abra o site dentro do app logado para registrar."
       );
     }
 

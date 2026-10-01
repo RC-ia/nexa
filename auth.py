@@ -290,6 +290,40 @@ def valid_message_key(user_id, message_key):
     )
 
 
+def user_from_message_key():
+    """
+    Autentica pelo header X-Nexa-Message-Key sozinho, sem cookie de sessão.
+    O app nativo registra o token de push por esse caminho.
+    """
+    message_key = request.headers.get("X-Nexa-Message-Key", "")
+    if not isinstance(message_key, str) or len(message_key) != 64:
+        return None
+
+    now = int(time.time())
+
+    try:
+        with db() as conn:
+            row = conn.execute(
+                "SELECT users.id AS id, users.username AS username, "
+                "users.is_admin AS is_admin, "
+                "sessions.message_key_created_at AS created_at "
+                "FROM sessions "
+                "JOIN users ON users.id = sessions.user_id "
+                "WHERE sessions.message_key_hash = ? AND sessions.expires_at > ?",
+                (hash_token(message_key), now),
+            ).fetchone()
+    except sqlite3.Error as err:
+        print("[NEXA-auth] falha ao ler credencial de mensagem:", err)
+        return None
+
+    if not row or row["created_at"] is None:
+        return None
+
+    if not (row["created_at"] <= now < row["created_at"] + MESSAGE_KEY_TTL):
+        return None
+
+    return {"id": row["id"], "username": row["username"], "is_admin": row["is_admin"]}
+
 def admin_required(view):
     @wraps(view)
     def wrapper(*args, **kwargs):

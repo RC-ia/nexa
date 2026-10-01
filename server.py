@@ -18,7 +18,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 load_dotenv(BASE_DIR / ".env")
 
-from auth import auth_bp, current_user, init_auth_db, valid_message_key  # noqa: E402  (precisa do .env já carregado)
+from auth import auth_bp, current_user, init_auth_db, user_from_message_key, valid_message_key  # noqa: E402  (precisa do .env já carregado)
 
 API_KEY = os.environ.get("API_KEY", "").strip()
 API_GEMA = os.environ.get("API_GEMA", "").strip()
@@ -3014,12 +3014,17 @@ def delete_all_chats():
 @app.post("/api/push-token")
 def register_push_token():
     user = current_user()
-    if user is None:
-        return jsonify({"error": "Faça login para ativar as notificações."}), 401
 
-    key_error = message_key_error(user)
-    if key_error:
-        return key_error
+    if user is not None:
+        key_error = message_key_error(user)
+        if key_error:
+            return key_error
+    else:
+        # App nativo: manda só o header X-Nexa-Message-Key, sem cookie.
+        user = user_from_message_key()
+        if user is None:
+            print("[NEXA] push-token recusado: sessão e chave de mensagem ausentes ou inválidas.")
+            return jsonify({"error": "Faça login para ativar as notificações."}), 401
 
     body = request.get_json(force=True, silent=True) or {}
     token = body.get("token", "")
@@ -3027,6 +3032,7 @@ def register_push_token():
         return jsonify({"error": "Token de notificação inválido."}), 400
 
     save_push_token("acct_%d" % user["id"], token.strip())
+    print("[NEXA] push-token registrado para", user["username"])
     return jsonify({"ok": True})
 
 @app.get("/api/push-status")
