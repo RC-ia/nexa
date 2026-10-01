@@ -559,7 +559,7 @@ const md = window.markdownit
   document.head.appendChild(script);
 })();
 
-function addMessage(text, type, thinkingText, memoryUpdated, searched) {
+function addMessage(text, type, thinkingText, memoryUpdated) {
   const message = document.createElement("div");
   message.className = "message " + type;
 
@@ -587,10 +587,6 @@ function addMessage(text, type, thinkingText, memoryUpdated, searched) {
     thinking.setContent(thinkingText || "");
     message.appendChild(thinking.button);
     message.appendChild(thinking.panel);
-
-    const searchNotice = createSearchNotice();
-    searchNotice.restore(searched === true);
-    message.appendChild(searchNotice.element);
 
     const memoryNotice = createMemoryNotice();
     memoryNotice.restore(memoryUpdated === true);
@@ -876,13 +872,11 @@ function createStreamingMessage() {
 
   const thinking = createThinkingBlock();
   const memoryNotice = createMemoryNotice();
-  const searchNotice = createSearchNotice();
 
   message.appendChild(label);
   message.appendChild(thinking.button);
   message.appendChild(thinking.panel);
   message.appendChild(contentDiv);
-  message.appendChild(searchNotice.element);
   message.appendChild(memoryNotice.element);
 
   chat.appendChild(message);
@@ -909,8 +903,7 @@ function createStreamingMessage() {
     appendText,
     flushText,
     thinking,
-    memoryNotice,
-    searchNotice
+    memoryNotice
   };
 }
 
@@ -1076,7 +1069,16 @@ async function askNexa(text) {
 
       if (data.type === "search") {
         searched = true;
-        searchNotice.show();
+        thinking.append("\n\n🔍 **Pesquisa na web**");
+      }
+
+      /*
+        A memória foi atualizada.
+      */
+
+      if (data.type === "memory") {
+        memoryUpdated = true;
+        thinking.append("\n\n💾 **Memória atualizada**");
       }
 
       /*
@@ -1746,7 +1748,7 @@ function scheduleReminder(reminder) {
     if ("Notification" in window && Notification.permission === "granted") {
       new Notification("Lembrete da NEXA", { body: reminder.text });
     } else {
-      addMessage("Lembrete: " + reminder.text, "nexa");
+      addMessage("Lembrete: " + reminder.text, "nexa", "", false);
     }
   }, Math.min(delay, 2147483000));
 
@@ -1898,7 +1900,9 @@ composer.addEventListener(
           error?.message ||
           "erro desconhecido"
         ),
-        "nexa"
+        "nexa",
+        "",
+        false
       );
 
     } finally {
@@ -2123,7 +2127,9 @@ micButton.addEventListener(
     if (!SpeechRecognition) {
       addMessage(
         "Seu navegador não disponibilizou reconhecimento de voz nesta versão.",
-        "nexa"
+        "nexa",
+        "",
+        false
       );
 
       return;
@@ -2160,7 +2166,9 @@ micButton.addEventListener(
       function () {
         addMessage(
           "Não consegui entender o áudio. Tente falar novamente.",
-          "nexa"
+          "nexa",
+          "",
+          false
         );
       };
 
@@ -2197,8 +2205,7 @@ function restoreConversation() {
         ? "user"
         : "nexa",
       item.thinking,
-      item.memoryUpdated,
-      item.searched
+      item.memoryUpdated
     );
   });
 }
