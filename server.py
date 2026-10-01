@@ -446,6 +446,17 @@ REMINDER_TOOL = {
                         "remédio da pressão'."
                     ),
                 },
+                "instrucao": {
+                    "type": "string",
+                    "description": (
+                        "Opcional. Para lembretes de ação: o que o agente "
+                        "deve EXECUTAR no disparo, com busca na web e "
+                        "leitura de páginas, e o resultado vira a mensagem "
+                        "enviada. Ex.: 'Pesquisar as principais notícias de "
+                        "tecnologia do dia e resumir'. Sem este campo, o "
+                        "agente apenas escreve o aviso."
+                    ),
+                },
                 "frequencia": {
                     "type": "string",
                     "enum": ["hora_em_hora", "diario", "semanal", "mensal"],
@@ -677,6 +688,18 @@ REMINDER_AGENT_PROMPT = (
     "para exibição."
 )
 
+REMINDER_ACTION_PROMPT = (
+    "Você é o agente de ações dos lembretes da NEXA. Recebe uma instrução "
+    "programada pelo usuário e a executa agora, usando as ferramentas de "
+    "busca e de leitura de páginas quando ajudarem. Entregue o resultado "
+    "final em português brasileiro, pronto para ser enviado como a mensagem "
+    "do lembrete: objetivo, com os fatos que encontrou e as fontes; sem "
+    "saudações, sem perguntas, sem citar regras ou ferramentas. Se não "
+    "conseguiu cumprir a instrução, diga o que faltou de forma direta."
+)
+
+REMINDER_ACTION_ROUNDS = int(os.environ.get("REMINDER_ACTION_ROUNDS", "5"))
+
 def reminder_path(user_id):
     safe_id = "".join(
         char if char.isalnum() or char in "-_" else "_" for char in str(user_id)
@@ -847,6 +870,11 @@ def create_reminder(user_id, arguments):
         tarefa = ""
     tarefa = " ".join(tarefa.split())[:1000]
 
+    instrucao = arguments.get("instrucao")
+    if not isinstance(instrucao, str):
+        instrucao = ""
+    instrucao = " ".join(instrucao.split())[:500]
+
     if tipo not in ("recorrente", "unico"):
         return "Não deu para criar o lembrete: 'tipo' deve ser recorrente ou unico.", False
     if not tarefa:
@@ -872,6 +900,9 @@ def create_reminder(user_id, arguments):
             "tipo": tipo,
             "created_at": now_epoch,
         }
+
+        if instrucao:
+            reminder["instrucao"] = instrucao
 
         if tipo == "unico":
             quando = parse_when(arguments.get("quando"))
@@ -1088,6 +1119,96 @@ def run_reminder_agent(tarefa, when_text):
         print("[NEXA-LEMBRETE] agente falhou:", error)
         return ""
 
+def run_reminder_action(user_id, instrucao, when_text):
+    """Agente de ação do lembrete: executa a instrução (busca na web,
+    leitura de páginas, data e hora) e devolve o texto final ('' em falha).
+
+    Roda dentro do ciclo do agendador; uma ação demorada atrasa o próximo
+    tick dos lembretes.
+    """
+    if not API_KEY or not instrucao:
+        return ""
+
+    messages = [
+        {"role": "system", "content": REMINDER_ACTION_PROMPT},
+        {
+            "role": "user",
+            "content": "Instrução: %s\nHorário do disparo: %s"
+            % (instrucao, when_text),
+        },
+    ]
+
+    last_text = ""
+
+    for _ in range(REMINDER_ACTION_ROUNDS):
+        try:
+            response = requests.post(
+                API_BASE + "/chat/completions",
+                headers=auth_headers(),
+                json={
+                    "model": model_for_reasoning("none"),
+                    "messages": messages,
+                    "tools": [SEARCH_TOOL, VISIT_TOOL, TIME_TOOL],
+                    "tool_choice": "auto",
+                    "stream": False,
+                    "max_tokens": MAX_OUTPUT_TOKENS,
+                },
+                timeout=(CONNECT_TIMEOUT, DEEP_RESEARCH_TIMEOUT),
+            )
+        except requests.RequestException as error:
+            print("[NEXA-LEMBRETE] ação falhou:", error)
+            return last_text
+
+        if response.status_code != 200:
+            print(
+                "[NEXA-LEMBRETE] ação HTTP %d: %s"
+                % (response.status_code, response.text[:300])
+            )
+            return last_text
+
+        try:
+            payload = response.json()
+        except ValueError:
+            return last_text
+
+        calls = extract_tool_calls(payload)
+        text = (extract_text(payload) or "").strip()
+
+        if not calls:
+            return text or last_text
+
+        last_text = text or last_text
+
+        messages.append({
+            "role": "assistant",
+            "content": text or None,
+            "tool_calls": [
+                {
+                    "id": tool_call_id(call),
+                    "type": "function",
+                    "function": {
+                        "name": tool_call_name(call),
+                        "arguments": json.dumps(
+                            parse_tool_arguments(call), ensure_ascii=False
+                        ),
+                    },
+                }
+                for call in calls
+            ],
+        })
+
+        results, _, _ = run_tools(user_id, calls, "none")
+
+        for call in calls:
+            call_id = tool_call_id(call)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": results.get(call_id) or "Sem resultado.",
+            })
+
+    return last_text
+
 def process_reminder_file(path):
     """Dispara os lembretes vencidos de um arquivo de conta."""
     now_epoch = time.time()
@@ -1113,8 +1234,17 @@ def process_reminder_file(path):
             continue
 
         tarefa = reminder.get("tarefa") or ""
+        instrucao = reminder.get("instrucao") or ""
         when_text = format_epoch(user_id, reminder.get("next_at") or now_epoch)
-        message = run_reminder_agent(tarefa, when_text) or tarefa or "Lembrete da NEXA."
+
+        if instrucao:
+            message = (
+                run_reminder_action(user_id, instrucao, when_text)
+                or tarefa
+                or "Lembrete da NEXA."
+            )
+        else:
+            message = run_reminder_agent(tarefa, when_text) or tarefa or "Lembrete da NEXA."
 
         with REMINDERS_LOCK:
             data = load_reminder_data(path)
