@@ -1636,6 +1636,8 @@ async function askNexa(text, deep) {
 
   saveMemory();
 
+  notifyNativeVoice(fullReply, false);
+
   return {
     reply: fullReply,
     finished
@@ -2257,6 +2259,57 @@ function nativeListen() {
   return window.NexaNative || null;
 }
 
+/*
+  ==========================================
+  VOZ DO APP ANDROID
+  ==========================================
+*/
+
+let nativeVoicePending = false;
+
+function notifyNativeVoice(text, failed) {
+  if (!nativeVoicePending) {
+    return;
+  }
+
+  nativeVoicePending = false;
+
+  const bridge = nativeListen();
+
+  try {
+    if (failed) {
+      if (bridge && typeof bridge.onAssistantError === "function") {
+        bridge.onAssistantError(text || "");
+      }
+    } else if (bridge && typeof bridge.onAssistantReply === "function") {
+      bridge.onAssistantReply(text || "");
+    }
+  } catch (error) {
+    console.error("Erro ao avisar o app sobre a resposta:", error);
+  }
+}
+
+/*
+  O app manda o texto que ouviu; a resposta volta pela ponte
+  (onAssistantReply/onAssistantError) para o TTS falar.
+*/
+
+window.NexaVoice = {
+  ask(text) {
+    const clean = typeof text === "string" ? text.trim() : "";
+
+    if (!clean || nativeVoicePending || sendButton.disabled) {
+      return false;
+    }
+
+    nativeVoicePending = true;
+    input.value = clean;
+    composer.dispatchEvent(new Event("submit", { cancelable: true }));
+
+    return true;
+  },
+};
+
 function renderListenStatus(active) {
   const status = document.getElementById("listenStatus");
   const toggle = document.getElementById("listenToggle");
@@ -2815,6 +2868,8 @@ composer.addEventListener(
         "",
         false
       );
+
+      notifyNativeVoice(error?.message || "erro desconhecido", true);
 
     } finally {
       sendButton.disabled = false;
