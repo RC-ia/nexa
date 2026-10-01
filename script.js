@@ -50,7 +50,6 @@ const REASONING_KEY = "nexa_reasoning";
 const LIVE_VOICE_KEY = "nexa_live_voice";
 const MEMORY_ENABLED_KEY = "nexa_memory_enabled:";
 const INSTRUCTIONS_KEY = "nexa_custom_instructions:";
-const REMINDERS_KEY = "nexa_reminders:";
 
 const REASONING_LABELS = {
   none: "Rápido",
@@ -1481,7 +1480,6 @@ function loadAccountSettings(user) {
 
   memoryToggle.checked = memoryEnabled;
   customInstructionsInput.value = customInstructions;
-  loadReminders();
 }
 
 let liveVoices = [];
@@ -1577,7 +1575,7 @@ function showSettingsView(viewName) {
     customInstructionsInput.value = customInstructions;
     loadSystemPrompt();
   } else if (viewName === "reminders") {
-    renderReminderList();
+    loadServerReminders();
   }
 }
 
@@ -1686,21 +1684,27 @@ async function loadMemories() {
   }
 }
 
-function saveReminderData() {
+const REMINDER_POLL_MS = 30000;
+let reminderPollTimer = null;
+let pushToken = "";
+
+async function loadServerReminders() {
+  reminderList.replaceChildren();
+  reminderStatus.textContent = "Carregando…";
+
   try {
-    localStorage.setItem(
-      accountSettingKey(REMINDERS_KEY),
-      JSON.stringify(reminders)
-    );
+    const data = await api("GET", "/api/reminders");
+    renderReminderList(data.reminders || []);
+    reminderStatus.textContent = "";
   } catch (error) {
-    reminderStatus.textContent = "Não foi possível salvar os lembretes.";
+    reminderStatus.textContent = error.message;
   }
 }
 
-function renderReminderList() {
+function renderReminderList(items) {
   reminderList.replaceChildren();
 
-  if (!reminders.length) {
+  if (!items.length) {
     const empty = document.createElement("p");
     empty.className = "settings-status";
     empty.textContent = "Nenhum lembrete programado.";
@@ -1708,83 +1712,110 @@ function renderReminderList() {
     return;
   }
 
-  reminders
-    .slice()
-    .sort((first, second) => first.at - second.at)
-    .forEach(reminder => {
-      const row = document.createElement("div");
-      row.className = "settings-item";
+  items.forEach(reminder => {
+    const row = document.createElement("div");
+    row.className = "settings-item";
 
-      const copy = document.createElement("div");
-      copy.className = "settings-item-copy";
-      copy.textContent = reminder.text;
+    const copy = document.createElement("div");
+    copy.className = "settings-item-copy";
+    copy.textContent = reminder.tarefa;
 
-      const date = document.createElement("small");
-      date.textContent = new Date(reminder.at).toLocaleString("pt-BR");
-      copy.appendChild(date);
+    const when = document.createElement("small");
+    const date = new Date((reminder.next_at || 0) * 1000)
+      .toLocaleString("pt-BR");
+    when.textContent = reminder.tipo === "unico"
+      ? `Uma vez: ${date}`
+      : `${reminder.descricao} • próximo: ${date}`;
+    copy.appendChild(when);
 
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "settings-item-delete";
-      remove.textContent = "Apagar";
-      remove.addEventListener("click", function () {
-        const timer = reminderTimers.get(reminder.id);
-        if (timer) {
-          clearTimeout(timer);
-          reminderTimers.delete(reminder.id);
-        }
-        reminders = reminders.filter(item => item.id !== reminder.id);
-        saveReminderData();
-        renderReminderList();
-      });
-
-      row.append(copy, remove);
-      reminderList.appendChild(row);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "settings-item-delete";
+    remove.textContent = "Apagar";
+    remove.addEventListener("click", async function () {
+      remove.disabled = true;
+      try {
+        await api("DELETE", `/api/reminders/${reminder.id}`);
+        await loadServerReminders();
+        reminderStatus.textContent = "Lembrete apagado.";
+      } catch (error) {
+        reminderStatus.textContent = error.message;
+        remove.disabled = false;
+      }
     });
+
+    row.append(copy, remove);
+    reminderList.appendChild(row);
+  });
 }
 
-function scheduleReminder(reminder) {
-  const delay = Math.max(0, reminder.at - Date.now());
-  const timer = setTimeout(function () {
-    reminderTimers.delete(reminder.id);
-
-    if (Date.now() < reminder.at) {
-      scheduleReminder(reminder);
-      return;
-    }
-
-    reminders = reminders.filter(item => item.id !== reminder.id);
-    saveReminderData();
-    renderReminderList();
-
-    if ("Notification" in window && Notification.permission === "granted") {
-      new Notification("Lembrete da NEXA", { body: reminder.text });
-    } else {
-      addMessage("Lembrete: " + reminder.text, "nexa", "", false);
-    }
-  }, Math.min(delay, 2147483000));
-
-  reminderTimers.set(reminder.id, timer);
-}
-
-function loadReminders() {
-  reminderTimers.forEach(timer => clearTimeout(timer));
-  reminderTimers.clear();
-
-  try {
-    const saved = JSON.parse(
-      localStorage.getItem(accountSettingKey(REMINDERS_KEY)) || "[]"
-    );
-    reminders = Array.isArray(saved)
-      ? saved.filter(item => item && typeof item.id === "string" &&
-        typeof item.text === "string" && Number.isFinite(item.at))
-      : [];
-  } catch (error) {
-    reminders = [];
+async function pollDueReminders() {
+  if (!currentUser || !messageKey) {
+    return;
   }
 
-  reminders.forEach(scheduleReminder);
-  renderReminderList();
+  try {
+    const data = await api("GET", "/api/reminders/due");
+
+    (data.due || []).forEach(function (item) {
+      if (!item || !item.message) {
+        return;
+      }
+
+      addMessage(item.message, "nexa", "", false);
+
+      if ("Notification" in window && Notification.permission === "granted") {
+        try {
+          new Notification("Lembrete da NEXA", { body: item.message });
+        } catch (error) {
+          // Navegador móvel pode recusar Notification direto; a mensagem
+          // no chat já apareceu.
+        }
+      }
+    });
+  } catch (error) {
+    // Servidor ou sessão fora do ar: tenta de novo no próximo ciclo.
+  }
+}
+
+function startReminderPolling() {
+  if (reminderPollTimer) {
+    return;
+  }
+
+  pollDueReminders();
+  reminderPollTimer = setInterval(pollDueReminders, REMINDER_POLL_MS);
+}
+
+/*
+  Token do FCM: o app manda o token pelo evento nativeFcmToken (ou expõe em
+  window.NexaNative) e o servidor usa para enviar os lembretes por push.
+*/
+function syncPushToken() {
+  if (!pushToken || !currentUser || !messageKey) {
+    return;
+  }
+
+  api("POST", "/api/push-token", { token: pushToken }).catch(function () {
+    // Sem rede: o token é enviado de novo no próximo login.
+  });
+}
+
+window.addEventListener("nativeFcmToken", function (event) {
+  const detail = event.detail || {};
+
+  if (typeof detail.token === "string" && detail.token) {
+    pushToken = detail.token;
+    syncPushToken();
+  }
+});
+
+if (window.NexaNative && typeof window.NexaNative.getFcmToken === "function") {
+  try {
+    pushToken = window.NexaNative.getFcmToken() || "";
+  } catch (error) {
+    pushToken = "";
+  }
 }
 
 function openSettings() {
@@ -2330,8 +2361,6 @@ let appStarted = false;
 let messageKey = "";
 let memoryEnabled = true;
 let customInstructions = "";
-let reminders = [];
-const reminderTimers = new Map();
 
 function showMessage(element, message) {
   element.textContent = message || "";
@@ -2429,6 +2458,9 @@ function enterApp(user, issuedMessageKey) {
     appStarted = true;
     bootApp();
   }
+
+  startReminderPolling();
+  syncPushToken();
 }
 
 loginForm.addEventListener("submit", async function (event) {

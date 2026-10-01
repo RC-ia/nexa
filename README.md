@@ -9,6 +9,8 @@ Estrutura:
 - `server.py` — servidor Flask (serve o site + `/api/chat` com streaming SSE)
 - `auth.py` — login, sessões e painel admin
 - `run.py` — supervisor: roda o servidor e aplica auto-update via git
+- `launcher.py` — sobe/derruba o supervisor desanexado (daemon)
+- `server_manager.py` — status e controle do servidor para o Painel admin
 - `index.html`, `style.css`, `script.js` — frontend do chat
 - `live.html`, `live.css`, `live.js` — página da chamada Gemini Live
 - `requirements.txt` — dependências Python
@@ -268,6 +270,48 @@ footer) e devolve o conteúdo limpo — limitado a 8 000 caracteres por página.
 Se a página não carregar, o erro é devolvido ao modelo sem travar a
 resposta.
 
+## Lembretes
+
+A NEXA cria lembretes sozinha pela ferramenta `criar_lembrete`: você pede no
+chat ("me lembre de tomar remédio amanhã às 8", "toda sexta às 18h") e o
+modelo converte o pedido em data e hora usando a data atual que o servidor
+injeta no prompt.
+
+Dois tipos:
+
+- **Recorrente** — de hora em hora, todo dia, toda semana (com dia escolhido)
+  ou todo mês (dia 1 a 31; mês sem esse dia usa o último dia disponível).
+- **Único (gatilho único)** — dispara uma vez, em data e hora definidas.
+
+No horário marcado o servidor chama um **agente de lembrete**, com system
+prompt próprio e resposta curta, que cumpre a tarefa e escreve a mensagem
+final entregue ao usuário. Se o agente falhar, a própria descrição da tarefa
+é entregue.
+
+A entrega é dupla:
+
+- **Página aberta** — o chat busca os lembretes pendentes a cada 30 s
+  (`GET /api/reminders/due`) e mostra a mensagem no lugar de sempre; com a
+  permissão ativada (Configurações > Lembretes > Ativar notificações),
+  também dispara uma notificação do navegador.
+- **App / push (FCM)** — o app envia o token do Firebase pelo evento
+  `nativeFcmToken` (ou `window.NexaNative.getFcmToken()`), a página registra
+  em `POST /api/push-token` e o servidor envia o push pelo FCM HTTP v1. Para
+  ativar, coloque a chave de serviço (Console do Firebase → Configurações do
+  projeto → Contas de serviço → Gerar nova chave privada) como
+  `firebase-key.json` na raiz. Sem a chave ou sem a lib `google-auth`, o push
+  é ignorado em silêncio — os lembretes continuam chegando pela página.
+
+| Variável | Padrão | Para que serve |
+| --- | --- | --- |
+| `FCM_KEY` | `firebase-key.json` | Nome do arquivo da chave de serviço |
+| `SITE_URL` | `https://nexa2.rcscan.online/` | URL aberta ao tocar na notificação |
+
+A lista de lembretes ativos fica em **Configurações > Lembretes**, com o
+próximo disparo e botão de apagar (`GET/DELETE /api/reminders`). Cada conta
+tem o seu arquivo `memoria/<conta>.reminders.json` (fora do git), com os
+lembretes e a fila de mensagens ainda não lidas.
+
 ## Barra lateral
 
 O botão **☰** no canto esquerdo abre a gaveta de menu, que desliza por cima
@@ -282,7 +326,8 @@ Dentro dela:
   apagar. O título de cada chat é a primeira mensagem que você mandou.
 - **Configurações** — reúne Chamada, Memória, Instruções, Lembretes e Mais.
   Instruções e preferências de memória ficam separadas por usuário neste
-  navegador; lembretes são locais e só disparam enquanto a página estiver aberta.
+  navegador; os lembretes vivem no servidor (veja a seção **Lembretes**) e
+  disparam mesmo com a página fechada.
   Na seção **Instruções**, o **system prompt** completo que o servidor usa pode
   ser visto e editado: ele fica em `memoria/<conta>.prompt.txt` (fora do git),
   separado por conta, e substitui o padrão embutido, com botão para restaurar

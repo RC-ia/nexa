@@ -1,3 +1,4 @@
+import calendar
 import html
 import json
 import os
@@ -5,6 +6,7 @@ import re
 import threading
 import time
 import urllib.parse
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -132,6 +134,20 @@ SYSTEM_PROMPT = "\n".join([
     "uma vez: [\"P1\", \"P3\"].",
     "Depois de pesquisar, responda normalmente sem comentar a chamada da "
     "ferramenta.",
+    "",
+    "LEMBRETES:",
+    "Você tem a ferramenta criar_lembrete para programar avisos e tarefas "
+    "que disparam sozinhos em um horário definido.",
+    "Use quando o usuário pedir para ser lembrado ou avisado em hora certa "
+    "('me lembre', 'me avise', 'toda semana...', 'amanhã às...', "
+    "'sexta às...', 'todo dia...').",
+    "Converta o pedido em data e hora com base na data e hora atuais "
+    "informadas neste prompt: \"hoje\", \"amanhã\" e \"sexta\" sempre são "
+    "calculados por essa referência.",
+    "Na tarefa, escreva a instrução completa para o agente do lembrete, "
+    "incluindo o que o usuário deve receber no disparo; sem horário claro "
+    "no pedido, pergunte antes de criar.",
+    "Depois de criar, confirme em uma frase curta o horário programado.",
 ])
 
 
@@ -247,6 +263,78 @@ MEMORY_TOOL = {
     },
 }
 
+REMINDER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "criar_lembrete",
+        "description": (
+            "Cria um lembrete que dispara sozinho no horário definido: um "
+            "agente cumpre a tarefa e avisa o usuário. Use quando ele pedir "
+            "para ser lembrado ou avisado em hora certa."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tipo": {
+                    "type": "string",
+                    "enum": ["recorrente", "unico"],
+                    "description": (
+                        "recorrente: repete no tempo. unico: dispara uma vez "
+                        "e acaba."
+                    ),
+                },
+                "tarefa": {
+                    "type": "string",
+                    "description": (
+                        "Instrução completa para o agente do lembrete, "
+                        "incluindo o que o usuário deve receber no disparo. "
+                        "Ex.: 'Avisar o usuário que é hora de tomar o "
+                        "remédio da pressão'."
+                    ),
+                },
+                "frequencia": {
+                    "type": "string",
+                    "enum": ["hora_em_hora", "diario", "semanal", "mensal"],
+                    "description": (
+                        "Só para recorrente: de quanto em quanto tempo "
+                        "repete."
+                    ),
+                },
+                "hora": {
+                    "type": "string",
+                    "description": (
+                        "Horário no formato HH:MM (24h), ex.: '08:30'. "
+                        "Obrigatório para diario, semanal e mensal."
+                    ),
+                },
+                "dia_semana": {
+                    "type": "integer",
+                    "description": (
+                        "Só para recorrente semanal: 0=domingo, 1=segunda, "
+                        "... 6=sábado."
+                    ),
+                },
+                "dia_mes": {
+                    "type": "integer",
+                    "description": (
+                        "Só para recorrente mensal: dia do mês, de 1 a 31 "
+                        "(mês sem esse dia usa o último dia disponível)."
+                    ),
+                },
+                "quando": {
+                    "type": "string",
+                    "description": (
+                        "Só para único: data e hora local no formato "
+                        "YYYY-MM-DDTHH:MM, ex.: '2026-10-02T09:00'. Calcule "
+                        "com base na data e hora atuais do prompt."
+                    ),
+                },
+            },
+            "required": ["tipo", "tarefa"],
+        },
+    },
+}
+
 app = Flask(__name__)
 app.register_blueprint(auth_bp)
 
@@ -353,6 +441,626 @@ def sanitize_memory(text):
         document = MEMORY_HEADER + document
 
     return document[:MEMORY_FILE_LIMIT]
+
+# =========================
+# LEMBRETES (recorrente e gatilho único)
+# =========================
+# Um arquivo JSON por conta (<conta>.reminders.json) com os lembretes ativos
+# e a fila de mensagens já disparadas esperando o usuário. A ferramenta do
+# modelo grava na lista "reminders"; a thread de lembretes dispara os
+# vencidos chamando o agente de lembrete e guarda o resultado em "pending".
+
+REMINDERS_LOCK = threading.Lock()
+REMINDERS_TICK_SECONDS = 30
+REMINDERS_LIMIT = 50
+PENDING_LIMIT = 50
+REMINDER_FILE_SUFFIX = ".reminders.json"
+
+# Índice = número do dia usado pela ferramenta (0=domingo).
+WEEK_DAYS = [
+    "domingo", "segunda-feira", "terça-feira", "quarta-feira",
+    "quinta-feira", "sexta-feira", "sábado",
+]
+
+REMINDER_AGENT_PROMPT = (
+    "Você é o agente de lembretes da NEXA. Recebe a tarefa de um lembrete e "
+    "o horário do disparo e devolve a mensagem final que será mostrada ao "
+    "usuário, em português brasileiro. Seja curto, direto e natural; sem "
+    "saudações, sem perguntas, sem citar regras ou ferramentas. Não invente "
+    "dados que a tarefa não traz. Responda apenas com a mensagem, pronta "
+    "para exibição."
+)
+
+def reminder_path(user_id):
+    safe_id = "".join(
+        char if char.isalnum() or char in "-_" else "_" for char in str(user_id)
+    )
+    return MEMORY_DIR / ("%s%s" % (safe_id, REMINDER_FILE_SUFFIX))
+
+def parse_hour(value):
+    """Aceita 'HH:MM' (24h) e devolve (hora, minuto) ou None."""
+    if not isinstance(value, str):
+        return None
+
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", value.strip())
+    if not match:
+        return None
+
+    hour, minute = int(match.group(1)), int(match.group(2))
+    if hour > 23 or minute > 59:
+        return None
+
+    return hour, minute
+
+def parse_when(value):
+    """Aceita data e hora local em ISO ('2026-10-02T09:00') ou None."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", ""))
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+
+    return parsed
+
+def format_epoch(epoch):
+    try:
+        return datetime.fromtimestamp(int(epoch)).strftime("%d/%m/%Y %H:%M")
+    except (TypeError, ValueError, OSError):
+        return "—"
+
+def next_daily(now, hour, minute):
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return target
+
+def next_weekly(now, day, hour, minute):
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    # A ferramenta usa 0=domingo; o datetime usa 0=segunda.
+    target += timedelta(days=((day + 6) % 7 - target.weekday()) % 7)
+    if target <= now:
+        target += timedelta(days=7)
+    return target
+
+def next_monthly(now, day, hour, minute):
+    year, month = now.year, now.month
+    # Mês sem o dia pedido usa o último dia disponível (31 vira 28/29/30).
+    target = datetime(
+        year, month, min(day, calendar.monthrange(year, month)[1]), hour, minute
+    )
+    if target <= now:
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+        target = datetime(
+            year, month, min(day, calendar.monthrange(year, month)[1]), hour, minute
+        )
+    return target
+
+def compute_next_fire(reminder, now_epoch):
+    """Próximo disparo de um recorrente; None quando o lembrete está corrompido."""
+    frequencia = reminder.get("frequencia")
+
+    if frequencia == "hora_em_hora":
+        next_at = reminder.get("next_at")
+        if not isinstance(next_at, (int, float)):
+            next_at = now_epoch
+        while next_at <= now_epoch:
+            next_at += 3600
+        return int(next_at)
+
+    parsed = parse_hour(reminder.get("hora"))
+    if parsed is None:
+        return None
+    hour, minute = parsed
+    now = datetime.fromtimestamp(now_epoch)
+
+    if frequencia == "diario":
+        return int(next_daily(now, hour, minute).timestamp())
+
+    if frequencia == "semanal":
+        day = reminder.get("dia_semana")
+        if not isinstance(day, int) or not 0 <= day <= 6:
+            return None
+        return int(next_weekly(now, day, hour, minute).timestamp())
+
+    if frequencia == "mensal":
+        day = reminder.get("dia_mes")
+        if not isinstance(day, int) or not 1 <= day <= 31:
+            return None
+        return int(next_monthly(now, day, hour, minute).timestamp())
+
+    return None
+
+def describe_reminder(reminder):
+    """Descrição curta do padrão do lembrete, para a página e para o modelo."""
+    tipo = reminder.get("tipo")
+    if tipo == "unico":
+        return "Uma vez"
+
+    frequencia = reminder.get("frequencia")
+    hora = reminder.get("hora") or ""
+
+    if frequencia == "hora_em_hora":
+        return "De hora em hora"
+    if frequencia == "diario":
+        return "Todo dia às %s" % hora
+    if frequencia == "semanal":
+        day = reminder.get("dia_semana")
+        name = WEEK_DAYS[day] if isinstance(day, int) and 0 <= day <= 6 else "?"
+        return "Toda %s às %s" % (name, hora)
+    if frequencia == "mensal":
+        return "Todo dia %s às %s" % (reminder.get("dia_mes"), hora)
+    return "—"
+
+def load_reminder_data(path):
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"reminders": [], "pending": []}
+
+    if not isinstance(data, dict):
+        return {"reminders": [], "pending": []}
+
+    reminders = data.get("reminders")
+    pending = data.get("pending")
+    return {
+        "reminders": reminders if isinstance(reminders, list) else [],
+        "pending": pending if isinstance(pending, list) else [],
+    }
+
+def save_reminder_data(path, data):
+    temporary = path.with_suffix(".json.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(data, ensure_ascii=False), encoding="utf-8"
+        )
+        temporary.replace(path)
+    except OSError as error:
+        print("[NEXA] falha ao salvar lembretes:", error)
+
+def create_reminder(user_id, arguments):
+    """
+    Valida a chamada da ferramenta e grava o lembrete.
+    Devolve (mensagem_para_o_modelo, criado).
+    """
+    if not user_id:
+        return "Não deu para criar o lembrete: conta não identificada.", False
+
+    if not isinstance(arguments, dict):
+        arguments = {}
+
+    tipo = str(arguments.get("tipo") or "").strip().lower()
+    tarefa = arguments.get("tarefa")
+    if not isinstance(tarefa, str):
+        tarefa = ""
+    tarefa = " ".join(tarefa.split())[:1000]
+
+    if tipo not in ("recorrente", "unico"):
+        return "Não deu para criar o lembrete: 'tipo' deve ser recorrente ou unico.", False
+    if not tarefa:
+        return "Não deu para criar o lembrete: 'tarefa' vazia. Descreva o que o agente faz no disparo.", False
+
+    now = datetime.now()
+    now_epoch = int(time.time())
+    path = reminder_path(user_id)
+
+    with REMINDERS_LOCK:
+        data = load_reminder_data(path)
+
+        if len(data["reminders"]) >= REMINDERS_LIMIT:
+            return (
+                "Não deu para criar o lembrete: limite de %d lembretes ativos por conta."
+                % REMINDERS_LIMIT,
+                False,
+            )
+
+        reminder = {
+            "id": uuid.uuid4().hex[:10],
+            "tarefa": tarefa,
+            "tipo": tipo,
+            "created_at": now_epoch,
+        }
+
+        if tipo == "unico":
+            quando = parse_when(arguments.get("quando"))
+            if quando is None:
+                return (
+                    "Não deu para criar o lembrete: 'quando' inválido. Use "
+                    "YYYY-MM-DDTHH:MM, ex.: 2026-10-02T09:00.",
+                    False,
+                )
+            if quando <= now:
+                return (
+                    "Não deu para criar o lembrete: %s já passou (agora são %s). "
+                    "Use um horário futuro."
+                    % (quando.strftime("%d/%m/%Y %H:%M"), now.strftime("%d/%m/%Y %H:%M")),
+                    False,
+                )
+            reminder["next_at"] = int(quando.timestamp())
+        else:
+            frequencia = str(arguments.get("frequencia") or "").strip().lower()
+            if frequencia not in ("hora_em_hora", "diario", "semanal", "mensal"):
+                return (
+                    "Não deu para criar o lembrete: 'frequencia' deve ser "
+                    "hora_em_hora, diario, semanal ou mensal.",
+                    False,
+                )
+            reminder["frequencia"] = frequencia
+
+            if frequencia == "hora_em_hora":
+                reminder["next_at"] = now_epoch + 3600
+            else:
+                parsed = parse_hour(arguments.get("hora"))
+                if parsed is None:
+                    return (
+                        "Não deu para criar o lembrete: informe 'hora' no "
+                        "formato HH:MM (24h), ex.: 08:30.",
+                        False,
+                    )
+                hour, minute = parsed
+                reminder["hora"] = "%02d:%02d" % (hour, minute)
+
+                if frequencia == "diario":
+                    target = next_daily(now, hour, minute)
+                elif frequencia == "semanal":
+                    dia_semana = arguments.get("dia_semana")
+                    if (
+                        not isinstance(dia_semana, int)
+                        or isinstance(dia_semana, bool)
+                        or not 0 <= dia_semana <= 6
+                    ):
+                        return (
+                            "Não deu para criar o lembrete: informe "
+                            "'dia_semana' de 0 (domingo) a 6 (sábado).",
+                            False,
+                        )
+                    reminder["dia_semana"] = dia_semana
+                    target = next_weekly(now, dia_semana, hour, minute)
+                else:
+                    dia_mes = arguments.get("dia_mes")
+                    if (
+                        not isinstance(dia_mes, int)
+                        or isinstance(dia_mes, bool)
+                        or not 1 <= dia_mes <= 31
+                    ):
+                        return (
+                            "Não deu para criar o lembrete: informe 'dia_mes' "
+                            "de 1 a 31.",
+                            False,
+                        )
+                    reminder["dia_mes"] = dia_mes
+                    target = next_monthly(now, dia_mes, hour, minute)
+
+                reminder["next_at"] = int(target.timestamp())
+
+        data["reminders"].append(reminder)
+        save_reminder_data(path, data)
+
+    print(
+        "[NEXA-LEMBRETE] criado para %s: %s (%s)"
+        % (format_epoch(reminder["next_at"]), describe_reminder(reminder), tarefa)
+    )
+    return (
+        "Lembrete criado: %s. Próximo disparo: %s. Tarefa do agente: %s. "
+        "Confirme isso ao usuário em uma frase curta."
+        % (describe_reminder(reminder), format_epoch(reminder["next_at"]), tarefa),
+        True,
+    )
+
+def user_reminders(user_id):
+    """Lista dos lembretes ativos, já ordenada pelo próximo disparo."""
+    with REMINDERS_LOCK:
+        data = load_reminder_data(reminder_path(user_id))
+
+    items = sorted(
+        data["reminders"], key=lambda item: item.get("next_at") or 0
+    )
+
+    return [
+        {
+            "id": item.get("id") or "",
+            "tarefa": item.get("tarefa") or "",
+            "tipo": item.get("tipo") or "",
+            "descricao": describe_reminder(item),
+            "next_at": int(item.get("next_at") or 0),
+        }
+        for item in items
+        if item.get("id")
+    ]
+
+def delete_reminder(user_id, reminder_id):
+    path = reminder_path(user_id)
+
+    with REMINDERS_LOCK:
+        data = load_reminder_data(path)
+        remaining = [
+            item for item in data["reminders"] if item.get("id") != reminder_id
+        ]
+        if len(remaining) == len(data["reminders"]):
+            return False
+        data["reminders"] = remaining
+        save_reminder_data(path, data)
+
+    return True
+
+def take_pending_reminders(user_id):
+    """Devolve e esvazia a fila de mensagens disparadas (a página consome)."""
+    path = reminder_path(user_id)
+
+    with REMINDERS_LOCK:
+        data = load_reminder_data(path)
+        pending = data["pending"]
+        if pending:
+            data["pending"] = []
+            save_reminder_data(path, data)
+
+    return pending
+
+def run_reminder_agent(tarefa, when_text):
+    """Agente do lembrete: system prompt próprio e resposta curta ('' em falha)."""
+    if not API_KEY or not tarefa:
+        return ""
+
+    try:
+        response = requests.post(
+            API_BASE + "/chat/completions",
+            headers=auth_headers(),
+            json={
+                "model": model_for_reasoning("none"),
+                "messages": [
+                    {"role": "system", "content": REMINDER_AGENT_PROMPT},
+                    {
+                        "role": "user",
+                        "content": "Tarefa: %s\nHorário do disparo: %s" % (tarefa, when_text),
+                    },
+                ],
+                "stream": False,
+                "max_tokens": 200,
+            },
+            timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
+        )
+
+        if response.status_code != 200:
+            print(
+                "[NEXA-LEMBRETE] agente HTTP %d: %s"
+                % (response.status_code, response.text[:300])
+            )
+            return ""
+
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        return (content or "").strip()
+    except (requests.RequestException, ValueError, KeyError, IndexError) as error:
+        print("[NEXA-LEMBRETE] agente falhou:", error)
+        return ""
+
+def process_reminder_file(path):
+    """Dispara os lembretes vencidos de um arquivo de conta."""
+    now_epoch = time.time()
+
+    with REMINDERS_LOCK:
+        data = load_reminder_data(path)
+        due_ids = [
+            item.get("id")
+            for item in data["reminders"]
+            if isinstance(item.get("next_at"), (int, float))
+            and item["next_at"] <= now_epoch
+        ]
+
+    for reminder_id in due_ids:
+        with REMINDERS_LOCK:
+            data = load_reminder_data(path)
+            reminder = next(
+                (item for item in data["reminders"] if item.get("id") == reminder_id),
+                None,
+            )
+        if reminder is None:
+            continue
+
+        tarefa = reminder.get("tarefa") or ""
+        when_text = format_epoch(reminder.get("next_at") or now_epoch)
+        message = run_reminder_agent(tarefa, when_text) or tarefa or "Lembrete da NEXA."
+
+        with REMINDERS_LOCK:
+            data = load_reminder_data(path)
+            current = next(
+                (item for item in data["reminders"] if item.get("id") == reminder_id),
+                None,
+            )
+            if current is None:
+                continue
+
+            data["pending"].append({"at": int(time.time()), "message": message})
+            data["pending"] = data["pending"][-PENDING_LIMIT:]
+
+            if current.get("tipo") == "unico":
+                data["reminders"] = [
+                    item for item in data["reminders"]
+                    if item.get("id") != reminder_id
+                ]
+            else:
+                next_at = compute_next_fire(current, int(time.time()))
+                if next_at is None:
+                    data["reminders"] = [
+                        item for item in data["reminders"]
+                        if item.get("id") != reminder_id
+                    ]
+                else:
+                    current["next_at"] = next_at
+
+            save_reminder_data(path, data)
+
+        print("[NEXA-LEMBRETE] disparado: %s" % message[:120])
+        user_id = path.name[: -len(REMINDER_FILE_SUFFIX)]
+        send_push_notification(user_id, "Lembrete da NEXA", message)
+
+def tick_reminders():
+    """Uma passada do scheduler: verifica todas as contas."""
+    for path in MEMORY_DIR.glob("*" + REMINDER_FILE_SUFFIX):
+        try:
+            process_reminder_file(path)
+        except Exception as error:
+            print("[NEXA-LEMBRETE] erro ao processar %s: %s" % (path.name, error))
+
+def reminder_scheduler_loop():
+    print(
+        "[NEXA] agente de lembretes ativo (verificação a cada %d s)."
+        % REMINDERS_TICK_SECONDS
+    )
+
+    while True:
+        try:
+            tick_reminders()
+        except Exception as error:
+            # A thread é daemon e não pode morrer: um erro fica só no log.
+            print("[NEXA-LEMBRETE] erro no ciclo:", error)
+        time.sleep(REMINDERS_TICK_SECONDS)
+
+# =========================
+# NOTIFICAÇÕES PUSH (Firebase Cloud Messaging)
+# =========================
+# O app captura o token FCM e manda para cá (POST /api/push-token); o
+# lembrete disparado vira push pelo HTTP v1. Sem a chave de serviço
+# (firebase-key.json) ou sem a lib google-auth, o push é ignorado em
+# silêncio — a página continua recebendo pela fila de pendentes.
+
+PUSH_LOCK = threading.Lock()
+PUSH_TOKENS_LIMIT = 10
+FCM_KEY_FILE = BASE_DIR / os.environ.get("FCM_KEY", "firebase-key.json")
+SITE_URL = os.environ.get("SITE_URL", "https://nexa2.rcscan.online/")
+FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
+
+try:
+    from google.auth.transport.requests import Request as GoogleAuthRequest
+    from google.oauth2 import service_account as google_service_account
+
+    GOOGLE_AUTH_AVAILABLE = True
+except ImportError:
+    GOOGLE_AUTH_AVAILABLE = False
+
+_fcm_credentials = None
+_fcm_project_id = ""
+
+def push_path(user_id):
+    safe_id = "".join(
+        char if char.isalnum() or char in "-_" else "_" for char in str(user_id)
+    )
+    return MEMORY_DIR / ("%s.push.json" % safe_id)
+
+def _read_push_tokens(path):
+    try:
+        tokens = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+    if not isinstance(tokens, list):
+        return []
+
+    return [token for token in tokens if isinstance(token, str) and token]
+
+def _write_push_tokens(path, tokens):
+    temporary = path.with_suffix(".json.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(tokens, ensure_ascii=False), encoding="utf-8"
+        )
+        temporary.replace(path)
+    except OSError as error:
+        print("[NEXA] falha ao salvar token de notificação:", error)
+
+def get_push_tokens(user_id):
+    with PUSH_LOCK:
+        return _read_push_tokens(push_path(user_id))
+
+def save_push_token(user_id, token):
+    path = push_path(user_id)
+
+    with PUSH_LOCK:
+        # Um aparelho pertence a uma conta só: o token sai das outras.
+        for other in MEMORY_DIR.glob("*.push.json"):
+            if other == path:
+                continue
+            tokens = _read_push_tokens(other)
+            if token in tokens:
+                _write_push_tokens(other, [t for t in tokens if t != token])
+
+        tokens = _read_push_tokens(path)
+        if token not in tokens:
+            tokens.append(token)
+        _write_push_tokens(path, tokens[-PUSH_TOKENS_LIMIT:])
+
+def remove_push_token(user_id, token):
+    path = push_path(user_id)
+
+    with PUSH_LOCK:
+        tokens = _read_push_tokens(path)
+        if token in tokens:
+            _write_push_tokens(path, [t for t in tokens if t != token])
+
+def fcm_credentials():
+    """Credencial do FCM, ou None sem google-auth, sem chave ou chave inválida."""
+    global _fcm_credentials, _fcm_project_id
+
+    if not GOOGLE_AUTH_AVAILABLE or not FCM_KEY_FILE.exists():
+        return None
+
+    try:
+        if _fcm_credentials is None:
+            _fcm_credentials = google_service_account.Credentials.from_service_account_file(
+                str(FCM_KEY_FILE), scopes=[FCM_SCOPE]
+            )
+            _fcm_project_id = _fcm_credentials.project_id or ""
+        if not _fcm_credentials.valid:
+            _fcm_credentials.refresh(GoogleAuthRequest())
+        return _fcm_credentials
+    except Exception as error:
+        print("[NEXA] FCM indisponível:", error)
+        return None
+
+def send_push_notification(user_id, title, body):
+    tokens = get_push_tokens(user_id)
+    if not tokens:
+        return
+
+    credentials = fcm_credentials()
+    if credentials is None:
+        return
+
+    url = "https://fcm.googleapis.com/v1/projects/%s/messages:send" % _fcm_project_id
+    headers = {
+        "Authorization": "Bearer " + credentials.token,
+        "Content-Type": "application/json",
+    }
+
+    for token in tokens:
+        payload = {
+            "message": {
+                "token": token,
+                "notification": {"title": title, "body": body},
+                "data": {"url": SITE_URL},
+            }
+        }
+
+        try:
+            response = requests.post(
+                url, headers=headers, json=payload,
+                timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
+            )
+        except requests.RequestException as error:
+            print("[NEXA] push falhou:", error)
+            continue
+
+        if response.status_code == 200:
+            continue
+
+        print("[NEXA] push HTTP %d: %s" % (response.status_code, response.text[:300]))
+
+        if response.status_code == 404 or "INVALID_ARGUMENT" in response.text:
+            remove_push_token(user_id, token)
 
 
 # =========================
@@ -826,6 +1534,16 @@ def build_messages(messages, memories, custom_instructions="", user_id=""):
             "com as instruções do sistema):\n" + custom_instructions
         )
 
+    agora = datetime.now()
+    system_prompt += (
+        "\n\nData e hora atuais (horário local): %s, %s. Use como referência "
+        "para calcular datas e horários relativos ao criar lembretes."
+        % (
+            WEEK_DAYS[(agora.weekday() + 1) % 7],
+            agora.strftime("%d/%m/%Y %H:%M"),
+        )
+    )
+
     contents = [{"role": "system", "content": system_prompt}]
 
     for message in messages:
@@ -912,7 +1630,7 @@ def request_body(stream, messages, memories, reasoning, custom_instructions="",
     }
 
     if memory_enabled:
-        body["tools"] = [MEMORY_TOOL, SEARCH_TOOL, VISIT_TOOL]
+        body["tools"] = [MEMORY_TOOL, SEARCH_TOOL, VISIT_TOOL, REMINDER_TOOL]
         body["tool_choice"] = "auto"
 
     body.update(reasoning_payload(reasoning))
@@ -1028,6 +1746,15 @@ def run_tools(user_id, calls):
             if text:
                 memory_updated = True
                 results[call_id] = text
+            continue
+
+        if name == "criar_lembrete":
+            text, created = create_reminder(user_id, arguments)
+            print(
+                "[NEXA-LEMBRETE] ferramenta: %s"
+                % ("criado" if created else text)
+            )
+            results[call_id] = text
             continue
 
         if name == "pesquisar":
@@ -1945,10 +2672,78 @@ def clear_memories():
     return jsonify({"ok": True})
 
 
+@app.get("/api/reminders")
+def list_reminders():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para ver os lembretes."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    user_id = "acct_%d" % user["id"]
+    return jsonify({"reminders": user_reminders(user_id)})
+
+@app.delete("/api/reminders/<reminder_id>")
+def remove_reminder(reminder_id):
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para apagar lembretes."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    user_id = "acct_%d" % user["id"]
+    if not delete_reminder(user_id, reminder_id):
+        return jsonify({"error": "Lembrete não encontrado."}), 404
+
+    return jsonify({"ok": True})
+
+@app.get("/api/reminders/due")
+def due_reminders():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para receber lembretes."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    user_id = "acct_%d" % user["id"]
+    return jsonify({"due": take_pending_reminders(user_id)})
+
+@app.post("/api/push-token")
+def register_push_token():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para ativar as notificações."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    body = request.get_json(force=True, silent=True) or {}
+    token = body.get("token", "")
+    if not isinstance(token, str) or not token.strip() or len(token) > 4096:
+        return jsonify({"error": "Token de notificação inválido."}), 400
+
+    save_push_token("acct_%d" % user["id"], token.strip())
+    return jsonify({"ok": True})
+
 init_db()
 init_auth_db()
 
 
 if __name__ == "__main__":
     print("[NEXA] rodando em http://localhost:%d" % PORT)
+    if not FCM_KEY_FILE.exists():
+        print(
+            "[NEXA] sem %s — push FCM desativado (lembretes só pela página)."
+            % FCM_KEY_FILE.name
+        )
+    threading.Thread(
+        target=reminder_scheduler_loop, daemon=True, name="nexa-reminders"
+    ).start()
     app.run(host="0.0.0.0", port=PORT, threaded=True)
