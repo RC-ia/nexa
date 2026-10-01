@@ -2305,10 +2305,51 @@ function startReminderPolling() {
 }
 
 /*
-  Token do FCM: o app manda o token pelo evento nativeFcmToken (ou expõe em
-  window.NexaNative) e o servidor usa para enviar os lembretes por push.
+  Token do FCM: o app manda o token pelo evento nativeFcmToken, expõe em
+  window.NexaNative.getFcmToken() (ou em window.__NEXA_FCM_TOKEN__) e o
+  servidor usa para enviar os lembretes por push.
+
+  Ponte nova do app: registerPushToken recebe a chave da conta e o app
+  cuida do registro do token (e das renovações) por conta própria.
 */
+function readNativePushToken() {
+  if (pushToken) {
+    return;
+  }
+
+  if (typeof window.__NEXA_FCM_TOKEN__ === "string" && window.__NEXA_FCM_TOKEN__) {
+    pushToken = window.__NEXA_FCM_TOKEN__;
+    return;
+  }
+
+  if (window.NexaNative && typeof window.NexaNative.getFcmToken === "function") {
+    try {
+      pushToken = window.NexaNative.getFcmToken() || "";
+    } catch (error) {
+      pushToken = "";
+    }
+  }
+}
+
+function syncNativePushKey() {
+  if (
+    !messageKey ||
+    !window.NexaNative ||
+    typeof window.NexaNative.registerPushToken !== "function"
+  ) {
+    return;
+  }
+
+  try {
+    window.NexaNative.registerPushToken(messageKey);
+  } catch (error) {
+    // Ponte antiga ou quebrada: o caminho do token pelo evento segue valendo.
+  }
+}
+
 function syncPushToken() {
+  readNativePushToken();
+
   if (!pushToken || !currentUser || !messageKey) {
     return;
   }
@@ -2327,13 +2368,7 @@ window.addEventListener("nativeFcmToken", function (event) {
   }
 });
 
-if (window.NexaNative && typeof window.NexaNative.getFcmToken === "function") {
-  try {
-    pushToken = window.NexaNative.getFcmToken() || "";
-  } catch (error) {
-    pushToken = "";
-  }
-}
+readNativePushToken();
 
 function openSettings() {
   showSettingsView("home");
@@ -3001,6 +3036,7 @@ function enterApp(user, issuedMessageKey) {
   }
 
   startReminderPolling();
+  syncNativePushKey();
   syncPushToken();
   syncChatsFromServer().catch(function () {});
 }
