@@ -470,3 +470,37 @@ def admin_delete(admin, user_id):
         conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
 
     return jsonify({"ok": True})
+
+
+# =========================
+# GERENCIAMENTO DO SERVIDOR (apenas admin)
+# =========================
+
+@auth_bp.get("/api/admin/server/status")
+@admin_required
+def admin_server_status(_admin):
+    from server_manager import get_status
+    return jsonify(get_status())
+
+
+@auth_bp.post("/api/admin/server/start")
+@admin_required
+def admin_server_start(_admin):
+    from server_manager import start_server
+    return jsonify(start_server())
+
+
+@auth_bp.post("/api/admin/server/stop")
+@admin_required
+def admin_server_stop(_admin):
+    from server_manager import stop_server
+    force = body_json().get("force", False)
+    return jsonify(stop_server(force=force))
+
+
+@auth_bp.post("/api/admin/server/restart")
+@admin_required
+def admin_server_restart(_admin):
+    from server_manager import restart_server
+    force = body_json().get("force", False)
+    return jsonify(restart_server(force=force))

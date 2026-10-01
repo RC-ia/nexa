@@ -2535,6 +2535,83 @@ adminForm.addEventListener("submit", async function (event) {
   }
 });
 
+/* ---------- Gerenciamento do Servidor (admin) ---------- */
+
+const serverStatusValue = document.getElementById("serverStatusValue");
+const serverStatusPid = document.getElementById("serverStatusPid");
+const serverStatusUptime = document.getElementById("serverStatusUptime");
+const serverActionStatus = document.getElementById("serverActionStatus");
+const serverForceCheck = document.getElementById("serverForceCheck");
+
+async function loadServerStatus() {
+  try {
+    const data = await api("GET", "/api/admin/server/status");
+    updateServerStatusUI(data);
+  } catch (error) {
+    serverStatusValue.textContent = "Erro";
+    serverActionStatus.textContent = error.message;
+  }
+}
+
+function updateServerStatusUI(data) {
+  if (data.running) {
+    serverStatusValue.textContent = "Rodando";
+    serverStatusValue.className = "server-status-value running";
+    serverStatusPid.textContent = `PID: ${data.pid}`;
+    if (data.uptime_seconds) {
+      const h = Math.floor(data.uptime_seconds / 3600);
+      const m = Math.floor((data.uptime_seconds % 3600) / 60);
+      const s = Math.floor(data.uptime_seconds % 60);
+      serverStatusUptime.textContent = `Uptime: ${h}h ${m}m ${s}s`;
+    }
+  } else {
+    serverStatusValue.textContent = "Parado";
+    serverStatusValue.className = "server-status-value stopped";
+    serverStatusPid.textContent = "";
+    serverStatusUptime.textContent = "";
+  }
+}
+
+async function serverAction(action) {
+  const force = serverForceCheck?.checked || false;
+  const btnMap = {
+    start: document.getElementById("serverStartBtn"),
+    stop: document.getElementById("serverStopBtn"),
+    restart: document.getElementById("serverRestartBtn"),
+  };
+
+  Object.values(btnMap).forEach(b => b && (b.disabled = true));
+  serverActionStatus.textContent = "";
+
+  try {
+    const data = await api("POST", `/api/admin/server/${action}`, { force });
+    if (data.ok) {
+      serverActionStatus.textContent = `Servidor ${action === "start" ? "iniciado" : action === "stop" ? "parado" : "reiniciado"}${data.pid ? ` (PID: ${data.pid})` : ""}.`;
+      serverActionStatus.style.color = "var(--ok-color, #4ade80)";
+    } else {
+      serverActionStatus.textContent = data.error || "Erro desconhecido";
+      serverActionStatus.style.color = "var(--err-color, #f87171)";
+    }
+  } catch (error) {
+    serverActionStatus.textContent = error.message;
+    serverActionStatus.style.color = "var(--err-color, #f87171)";
+  }
+
+  Object.values(btnMap).forEach(b => b && (b.disabled = false));
+  await loadServerStatus();
+}
+
+document.getElementById("serverStartBtn")?.addEventListener("click", () => serverAction("start"));
+document.getElementById("serverStopBtn")?.addEventListener("click", () => serverAction("stop"));
+document.getElementById("serverRestartBtn")?.addEventListener("click", () => serverAction("restart"));
+
+// Carrega status do servidor ao abrir painel admin
+const originalLoadAdminUsers = loadAdminUsers;
+loadAdminUsers = async function () {
+  await originalLoadAdminUsers();
+  await loadServerStatus();
+};
+
 async function initAuth() {
   try {
     const response = await fetch("/api/auth/me");

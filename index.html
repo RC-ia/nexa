@@ -553,11 +553,31 @@
 
       <p class="auth-error" id="adminError" role="alert" hidden></p>
 
+      <div class="admin-section">
+        <h4>Gerenciamento do Servidor</h4>
+        <div class="server-status" id="serverStatus">
+          <span class="server-status-label">Status:</span>
+          <span class="server-status-value" id="serverStatusValue">Carregando...</span>
+          <span class="server-status-pid" id="serverStatusPid"></span>
+          <span class="server-status-uptime" id="serverStatusUptime"></span>
+        </div>
+        <div class="server-actions">
+          <button type="button" id="serverStartBtn" class="settings-action">Iniciar</button>
+          <button type="button" id="serverStopBtn" class="settings-danger">Parar</button>
+          <button type="button" id="serverRestartBtn" class="settings-action">Reiniciar</button>
+          <label class="server-force-check">
+            <input type="checkbox" id="serverForceCheck"> Forçar (kill)
+          </label>
+        </div>
+        <p class="settings-status" id="serverActionStatus" role="status"></p>
+      </div>
+
     </div>
 
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>`n  <script src="script.js?v=32"></script>
+  <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
+  <script src="script.js?v=33"></script>
 
 </body>
 
