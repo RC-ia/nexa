@@ -2885,6 +2885,26 @@ html.keyboard-open footer {
   background: rgba(139, 92, 246, 0.14);
 }
 
+/* Painel admin e Configurações lado a lado, no pé da gaveta. */
+.drawer-bottom {
+  display: flex;
+  gap: 8px;
+
+  margin-top: 10px;
+}
+
+.drawer-bottom .drawer-settings {
+  flex: 1;
+
+  width: auto;
+
+  justify-content: center;
+
+  padding: 10px 8px;
+
+  font-size: 12.5px;
+}
+
 .admin-card {
   width: min(460px, 100%);
 }

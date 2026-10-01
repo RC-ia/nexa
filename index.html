@@ -21,7 +21,7 @@
 
   <title>NEXA</title>
 
-  <link rel="stylesheet" href="style.css?v=16">
+  <link rel="stylesheet" href="style.css?v=17">
 </head>
 
 <body>
@@ -123,16 +123,6 @@
         aria-label="Chats anteriores"
       ></nav>
 
-      <button
-        type="button"
-        id="drawerAdmin"
-        class="drawer-settings"
-        hidden
-      >
-        <span class="drawer-icon" aria-hidden="true">★</span>
-        Painel admin
-      </button>
-
       <div class="drawer-account" id="drawerAccount">
         <span class="drawer-account-email" id="drawerEmail"></span>
 
@@ -145,14 +135,28 @@
         </button>
       </div>
 
-      <button
-        type="button"
-        id="drawerSettings"
-        class="drawer-settings"
-      >
-        <span class="drawer-icon" aria-hidden="true">⚙</span>
-        Configurações
-      </button>
+      <div class="drawer-bottom">
+
+        <button
+          type="button"
+          id="drawerAdmin"
+          class="drawer-settings"
+          hidden
+        >
+          <span class="drawer-icon" aria-hidden="true">★</span>
+          Painel admin
+        </button>
+
+        <button
+          type="button"
+          id="drawerSettings"
+          class="drawer-settings"
+        >
+          <span class="drawer-icon" aria-hidden="true">⚙</span>
+          Configurações
+        </button>
+
+      </div>
 
     </aside>
 
