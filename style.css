@@ -2614,21 +2614,25 @@ footer {
 
   /* Alvos de toque maiores no celular. */
   .composer > button {
-    width: 46px;
-    height: 46px;
+    width: 50px;
+    height: 50px;
 
-    font-size: 20px;
+    font-size: 22px;
   }
 
   .composer input {
-    font-size: 16px;
+    font-size: 17px;
   }
 
   .drawer-toggle {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
 
-    font-size: 16px;
+    font-size: 17px;
+  }
+
+  .message p {
+    font-size: 15px;
   }
 
   .status {
@@ -2641,11 +2645,11 @@ footer {
   }
 
   .hero h2 {
-    font-size: 22px;
+    font-size: 24px;
   }
 
   .hero p {
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .message {
@@ -2653,16 +2657,18 @@ footer {
   }
 
   .new-chat-button {
-    padding: 10px 13px;
+    padding: 11px 14px;
 
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .reasoning-button {
-    width: 46px;
-    height: 46px;
+    width: 50px;
+    height: 50px;
 
     padding: 0;
+
+    font-size: 15px;
 
     gap: 0;
   }
