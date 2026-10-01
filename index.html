@@ -397,6 +397,10 @@
               <strong>Instruções</strong>
               <span>Como a NEXA deve responder</span>
             </button>
+            <button type="button" class="settings-category" data-settings-open="systemprompt">
+              <strong>System Prompt</strong>
+              <span>Prompt completo do sistema (somente leitura)</span>
+            </button>
             <button type="button" class="settings-category" data-settings-open="reminders">
               <strong>Lembretes</strong>
               <span>Alertas programados neste navegador</span>
@@ -449,6 +453,18 @@
           <div class="settings-page-actions">
             <span id="instructionStatus" class="settings-status" role="status"></span>
             <button type="button" id="saveInstructions" class="settings-action">Salvar</button>
+          </div>
+        </section>
+
+        <section id="settingsSystemPrompt" class="settings-view" hidden>
+          <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
+          <p class="settings-description">O system prompt completo que a NEXA usa. Somente leitura — para alterar o comportamento, use <strong>Instruções</strong> acima.</p>
+          <div class="settings-field">
+            <label for="systemPromptView">System Prompt</label>
+            <textarea id="systemPromptView" readonly rows="20" spellcheck="false"></textarea>
+          </div>
+          <div class="settings-page-actions">
+            <button type="button" id="copySystemPrompt" class="settings-action">Copiar</button>
           </div>
         </section>
 

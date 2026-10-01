@@ -1821,6 +1821,17 @@ def clear_memories():
     return jsonify({"ok": True})
 
 
+@app.get("/api/system-prompt")
+def get_system_prompt():
+    """Retorna o system prompt completo usado pela NEXA."""
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para ver o system prompt."}), 401
+
+    # Retorna o SYSTEM_PROMPT base (sem memórias nem instruções customizadas)
+    return jsonify({"systemPrompt": SYSTEM_PROMPT})
+
+
 init_db()
 init_auth_db()
 

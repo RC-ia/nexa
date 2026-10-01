@@ -25,9 +25,12 @@ const settingsViews = {
   live: document.getElementById("settingsLive"),
   memory: document.getElementById("settingsMemory"),
   instructions: document.getElementById("settingsInstructions"),
+  systemprompt: document.getElementById("settingsSystemPrompt"),
   reminders: document.getElementById("settingsReminders"),
   more: document.getElementById("settingsMore")
 };
+const systemPromptView = document.getElementById("systemPromptView");
+const copySystemPromptBtn = document.getElementById("copySystemPrompt");
 const liveVoiceSelect = document.getElementById("liveVoiceSelect");
 const liveVoiceStatus = document.getElementById("liveVoiceStatus");
 const liveCallOpenButton = document.getElementById("liveCallOpen");
@@ -1560,6 +1563,7 @@ function showSettingsView(viewName) {
     live: "Chamada",
     memory: "Memória",
     instructions: "Instruções",
+    systemprompt: "System Prompt",
     reminders: "Lembretes",
     more: "Mais"
   };
@@ -1576,11 +1580,41 @@ function showSettingsView(viewName) {
     loadMemories();
   } else if (viewName === "instructions") {
     customInstructionsInput.value = customInstructions;
+  } else if (viewName === "systemprompt") {
+    loadSystemPrompt();
   } else if (viewName === "reminders") {
     const localNow = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
     reminderAtInput.min = localNow.toISOString().slice(0, 16);
     renderReminderList();
   }
+}
+
+async function loadSystemPrompt() {
+  try {
+    const data = await api("GET", "/api/system-prompt");
+    if (systemPromptView) {
+      systemPromptView.value = data.systemPrompt || "Não foi possível carregar o system prompt.";
+    }
+  } catch (error) {
+    console.error("Erro ao carregar system prompt:", error);
+    if (systemPromptView) {
+      systemPromptView.value = "Erro ao carregar system prompt.";
+    }
+  }
+}
+
+if (copySystemPromptBtn) {
+  copySystemPromptBtn.addEventListener("click", function () {
+    if (systemPromptView && systemPromptView.value) {
+      navigator.clipboard.writeText(systemPromptView.value).then(() => {
+        copySystemPromptBtn.textContent = "Copiado!";
+        setTimeout(() => { copySystemPromptBtn.textContent = "Copiar"; }, 2000);
+      }).catch(() => {
+        copySystemPromptBtn.textContent = "Falhou";
+        setTimeout(() => { copySystemPromptBtn.textContent = "Copiar"; }, 2000);
+      });
+    }
+  });
 }
 
 async function loadMemories() {
