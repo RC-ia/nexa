@@ -745,6 +745,30 @@ function loadChats() {
     }
   }
 
+  /*
+    Conversa em branco é só uma: se sobraram várias (o botão Nova
+    conversa criava uma por clique), mantém só a que estava aberta.
+  */
+  const blankActive = localStorage.getItem(ACTIVE_CHAT_KEY) || "";
+  let blankKept = false;
+
+  chats = chats.filter(function (chat) {
+    if (chat.messages.length > 0) {
+      return true;
+    }
+
+    if (blankKept) {
+      return false;
+    }
+
+    if (blankActive && chat.id !== blankActive) {
+      return false;
+    }
+
+    blankKept = true;
+    return true;
+  });
+
   if (chats.length === 0) {
     chats.push(makeChat());
   }
@@ -1488,6 +1512,29 @@ function renderChat() {
 }
 
 function startNewChat() {
+  const current = currentChat();
+
+  /* Já está numa conversa em branco: não cria outra. */
+  if (current && current.messages.length === 0) {
+    closeDrawer();
+    input.value = "";
+    input.focus();
+    return;
+  }
+
+  /*
+    Se sobrou uma conversa em branco (criada antes de recarregar),
+    usa ela em vez de empilhar outra.
+  */
+  const blank = chats.find(
+    chat => chat.id !== activeChatId && chat.messages.length === 0
+  );
+
+  if (blank) {
+    openChat(blank.id);
+    return;
+  }
+
   stashCurrent();
 
   const fresh = makeChat();
