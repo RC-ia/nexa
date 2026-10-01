@@ -522,77 +522,84 @@ function loadChats() {
   ==========================================
 */
 
+/* Instância do markdown-it para renderizar markdown nas respostas da NEXA */
+const md = window.markdownit
+  ? window.markdownit({
+      html: true,
+      linkify: true,
+      typographer: true,
+      highlight: function (str, lang) {
+        if (lang && window.hljs && window.hljs.getLanguage(lang)) {
+          try {
+            return (
+              '<pre class="hljs"><code>' +
+              window.hljs.highlight(str, { language: lang, ignoreIllicits: true }).value +
+              "</code></pre>"
+            );
+          } catch (__) {}
+        }
+        return (
+          '<pre class="hljs"><code>' + md.utils.escapeHtml(str) + "</code></pre>"
+        );
+      },
+    })
+  : null;
+
+/* Carrega highlight.js para syntax highlighting nos blocos de código */
+(function loadHighlightJS() {
+  if (window.hljs) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href =
+    "https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.min.css";
+  document.head.appendChild(link);
+  const script = document.createElement("script");
+  script.src = "https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/highlight.min.js";
+  script.onload = () => window.hljs.highlightAll();
+  document.head.appendChild(script);
+})();
+
 function addMessage(text, type, thinkingText, memoryUpdated, searched) {
-  const message =
-    document.createElement("div");
+  const message = document.createElement("div");
+  message.className = "message " + type;
 
-  message.className =
-    "message " + type;
-
-  const label =
-    document.createElement("span");
-
+  const label = document.createElement("span");
   label.className = "label";
+  label.textContent = type === "user" ? "VOCÊ" : "NEXA";
 
-  label.textContent =
-    type === "user"
-      ? "VOCÊ"
-      : "NEXA";
+  const contentDiv = document.createElement("div");
+  contentDiv.className = "message-content";
 
-  const paragraph =
-    document.createElement("p");
-
-  paragraph.textContent = text;
+  if (type !== "user" && md) {
+    // Renderiza markdown para mensagens da NEXA
+    contentDiv.innerHTML = md.render(text);
+  } else {
+    // Mensagens do usuário: texto puro (escapa HTML)
+    const p = document.createElement("p");
+    p.textContent = text;
+    contentDiv.appendChild(p);
+  }
 
   message.appendChild(label);
 
-  /*
-    Mensagens da NEXA ganham um
-    botão de pensamento próprio.
-  */
-
   if (type !== "user") {
-    const thinking =
-      createThinkingBlock();
-
-    thinking.setContent(
-      thinkingText || ""
-    );
-
+    const thinking = createThinkingBlock();
+    thinking.setContent(thinkingText || "");
     message.appendChild(thinking.button);
     message.appendChild(thinking.panel);
 
-    const searchNotice =
-      createSearchNotice();
+    const searchNotice = createSearchNotice();
+    searchNotice.restore(searched === true);
+    message.appendChild(searchNotice.element);
 
-    searchNotice.restore(
-      searched === true
-    );
-
-    message.appendChild(
-      searchNotice.element
-    );
-
-    const memoryNotice =
-      createMemoryNotice();
-
-    memoryNotice.restore(
-      memoryUpdated === true
-    );
-
-    message.appendChild(
-      memoryNotice.element
-    );
+    const memoryNotice = createMemoryNotice();
+    memoryNotice.restore(memoryUpdated === true);
+    message.appendChild(memoryNotice.element);
   }
 
-  message.appendChild(paragraph);
-
+  message.appendChild(contentDiv);
   chat.appendChild(message);
-
-  message.scrollIntoView({
-    behavior: "smooth",
-    block: "end"
-  });
+  message.scrollIntoView({ behavior: "smooth", block: "end" });
 }
 
 /*
@@ -857,74 +864,43 @@ function createThinkingBlock() {
 */
 
 function createStreamingMessage() {
-  const message =
-    document.createElement("div");
+  const message = document.createElement("div");
+  message.className = "message nexa";
 
-  message.className =
-    "message nexa";
-
-  const label =
-    document.createElement("span");
-
+  const label = document.createElement("span");
   label.className = "label";
   label.textContent = "NEXA";
 
-  const paragraph =
-    document.createElement("p");
+  const contentDiv = document.createElement("div");
+  contentDiv.className = "message-content";
 
-  paragraph.textContent = "";
-
-  const thinking =
-    createThinkingBlock();
-
-  const memoryNotice =
-    createMemoryNotice();
-
-  const searchNotice =
-    createSearchNotice();
+  const thinking = createThinkingBlock();
+  const memoryNotice = createMemoryNotice();
+  const searchNotice = createSearchNotice();
 
   message.appendChild(label);
   message.appendChild(thinking.button);
   message.appendChild(thinking.panel);
-  message.appendChild(paragraph);
+  message.appendChild(contentDiv);
   message.appendChild(searchNotice.element);
   message.appendChild(memoryNotice.element);
 
   chat.appendChild(message);
+  message.scrollIntoView({ behavior: "smooth", block: "end" });
 
-  message.scrollIntoView({
-    behavior: "smooth",
-    block: "end"
-  });
-
-  let pendingText = "";
-  let renderFrame = null;
-
-  function flushText() {
-    if (renderFrame !== null) {
-      cancelAnimationFrame(renderFrame);
-      renderFrame = null;
-    }
-
-    if (!pendingText) {
-      return;
-    }
-
-    paragraph.appendChild(
-      document.createTextNode(pendingText)
-    );
-    pendingText = "";
-
-    if (feed) {
-      feed.scrollTop = feed.scrollHeight;
-    }
-  }
+  let fullText = "";
 
   function appendText(chunk) {
-    pendingText += chunk;
+    fullText += chunk;
+    // Durante o streaming, mostra texto puro para performance
+    contentDiv.textContent = fullText;
+    if (feed) feed.scrollTop = feed.scrollHeight;
+  }
 
-    if (renderFrame === null) {
-      renderFrame = requestAnimationFrame(flushText);
+  function flushText() {
+    // No final, renderiza markdown completo
+    if (md && fullText.trim()) {
+      contentDiv.innerHTML = md.render(fullText);
     }
   }
 
