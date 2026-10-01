@@ -72,19 +72,63 @@ e `DELETE /api/admin/users/<id>`.
 
 ## 3. Rodar
 
+### Opção A — Supervisor com auto-update (recomendado para produção)
+
 ```bash
 python run.py
 ```
 
-O `run.py` inicia o servidor e fica verificando o git em busca de novas
-versões (veja a seção seguinte). Se preferir rodar só o servidor, sem
-auto-update:
+O `run.py` inicia o servidor e fica verificando o repositório git a cada
+`UPDATE_INTERVAL` segundos (padrão 180). Se houver commits novos, faz
+`git pull --ff-only` e reinicia o servidor automaticamente.
+
+### Opção B — Servidor direto (sem auto-update)
 
 ```bash
 python server.py
 ```
 
 A aplicação sobe em `http://localhost:8000`.
+
+### Opção C — Processo desanexado/daemon (sobrevive ao fechar o terminal)
+
+Para rodar o servidor em background e poder fechá-lo depois pelo **Painel
+admin** (ou linha de comando), use o `launcher.py`:
+
+```bash
+# Inicia desanexado (Windows) ou daemon (Linux)
+python launcher.py start
+
+# Verifica status
+python launcher.py status
+# → {"running": true, "pid": 12345, "uptime_seconds": 12.3}
+
+# Para graciosamente
+python launcher.py stop
+
+# Para à força (kill -9 / taskkill /F)
+python launcher.py stop --force
+
+# Reinicia
+python launcher.py restart
+```
+
+**Como funciona:**
+
+- **Windows:** usa `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | CREATE_NO_WINDOW`
+  + `start_new_session=True`. O processo não tem console e não morre quando o
+  terminal fecha.
+- **Linux:** double-fork POSIX (`os.fork()` × 2) + `os.setsid()`; stdio
+  redirecionado para `.nexa_server.log`. O PID do **neto** (daemon real) é
+  salvo em `.nexa_server.pid`.
+- Em ambos os SOs, o `server_manager.py` expõe a mesma API (`is_running`,
+  `get_status`, `start_server`, `stop_server`, `restart_server`) que o
+  **Painel admin** consome (rotas `GET/POST /api/admin/server/*`).
+
+> **Dica:** o `run.py` continua sendo o supervisor recomendado para produção
+> (auto-update + restart automático). O `launcher.py` é útil quando você quer
+> subir o servidor manualmente, fechar o terminal e controlar depois pela UI
+> de admin.
 
 ## Atualização automática (git)
 
