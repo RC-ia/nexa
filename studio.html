@@ -22,7 +22,7 @@
   <title>Estúdio | NEXA</title>
 
   <link rel="stylesheet" href="style.css?v=19">
-  <link rel="stylesheet" href="studio.css?v=4">
+  <link rel="stylesheet" href="studio.css?v=5">
 </head>
 
 <body class="studio-body">
@@ -47,6 +47,33 @@
 
     </header>
 
+    <section class="studio-viewer">
+      <div class="studio-viewer-head" id="viewerHead">Nenhum arquivo aberto</div>
+      <pre id="fileView" hidden></pre>
+    </section>
+
+  </main>
+
+  <aside class="studio-files" id="filesPane" hidden>
+
+    <div class="studio-files-resize" id="filesResize" title="Arraste para redimensionar"></div>
+
+    <header>
+      <strong>Arquivos</strong>
+      <div class="studio-files-actions">
+        <button type="button" id="filesRefresh" title="Atualizar">⟳</button>
+        <button type="button" id="filesClose" title="Fechar">✕</button>
+      </div>
+    </header>
+
+    <ul id="fileList"></ul>
+
+  </aside>
+
+  <aside class="studio-chat-pane" id="chatPane">
+
+    <div class="studio-chat-resize" id="chatResize" title="Arraste para redimensionar"></div>
+
     <section
       class="studio-chat"
       id="chat"
@@ -67,27 +94,9 @@
 
     </form>
 
-  </main>
-
-  <aside class="studio-files" id="filesPane" hidden>
-
-    <div class="studio-files-resize" id="filesResize" title="Arraste para redimensionar"></div>
-
-    <header>
-      <strong>Arquivos</strong>
-      <div class="studio-files-actions">
-        <button type="button" id="filesRefresh" title="Atualizar">⟳</button>
-        <button type="button" id="filesClose" title="Fechar">✕</button>
-      </div>
-    </header>
-
-    <ul id="fileList"></ul>
-
-    <pre id="fileView" hidden></pre>
-
   </aside>
 
-  <script src="studio.js?v=2"></script>
+  <script src="studio.js?v=3"></script>
 </body>
 
 </html>

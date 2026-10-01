@@ -9,11 +9,14 @@ const filesToggle = document.getElementById("filesToggle");
 const filesRefresh = document.getElementById("filesRefresh");
 const filesClose = document.getElementById("filesClose");
 const filesResize = document.getElementById("filesResize");
+const chatResize = document.getElementById("chatResize");
+const viewerHead = document.getElementById("viewerHead");
 
 const HISTORY_KEY = "nexa_studio_history";
 const HISTORY_LIMIT = 40;
 const KEY_PREFIX = "nexa_message_key:";
-const WIDTH_KEY = "nexa_studio_files_width";
+const FILES_WIDTH_KEY = "nexa_studio_files_width";
+const CHAT_WIDTH_KEY = "nexa_studio_chat_width";
 
 let accountUsername = "";
 let messageKey = "";
@@ -268,6 +271,7 @@ async function refreshFiles() {
 async function openFile(caminho) {
   fileView.hidden = false;
   fileView.textContent = "Abrindo…";
+  viewerHead.textContent = caminho;
 
   try {
     const response = await fetch(
@@ -314,50 +318,57 @@ filesToggle.addEventListener("click", () => {
 
 filesClose.addEventListener("click", () => {
   setPaneOpen(false);
-  fileView.hidden = true;
 });
 
 filesRefresh.addEventListener("click", refreshFiles);
 
-let resizing = false;
+function makeResizable(handle, cssVar, storageKey, fromLeftEdge) {
+  let dragging = false;
 
-filesResize.addEventListener("pointerdown", (event) => {
-  resizing = true;
-  filesResize.setPointerCapture(event.pointerId);
-  event.preventDefault();
-});
+  handle.addEventListener("pointerdown", (event) => {
+    dragging = true;
+    handle.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
 
-filesResize.addEventListener("pointermove", (event) => {
-  if (!resizing) {
-    return;
-  }
+  handle.addEventListener("pointermove", (event) => {
+    if (!dragging) {
+      return;
+    }
 
-  const width = Math.min(Math.max(event.clientX, 200), window.innerWidth * 0.7);
-  document.documentElement.style.setProperty("--files-width", width + "px");
-});
+    const target = fromLeftEdge
+      ? event.clientX
+      : window.innerWidth - event.clientX;
+    const width = Math.min(Math.max(target, 240), window.innerWidth * 0.7);
+    document.documentElement.style.setProperty(cssVar, width + "px");
+  });
 
-filesResize.addEventListener("pointerup", () => {
-  resizing = false;
+  handle.addEventListener("pointerup", () => {
+    dragging = false;
+
+    try {
+      localStorage.setItem(
+        storageKey,
+        document.documentElement.style.getPropertyValue(cssVar)
+      );
+    } catch (error) {
+      /* sem espaço no navegador */
+    }
+  });
 
   try {
-    localStorage.setItem(
-      WIDTH_KEY,
-      document.documentElement.style.getPropertyValue("--files-width")
-    );
+    const savedWidth = localStorage.getItem(storageKey);
+
+    if (savedWidth) {
+      document.documentElement.style.setProperty(cssVar, savedWidth);
+    }
   } catch (error) {
-    /* sem espaço no navegador */
+    /* sem localStorage */
   }
-});
-
-try {
-  const savedWidth = localStorage.getItem(WIDTH_KEY);
-
-  if (savedWidth) {
-    document.documentElement.style.setProperty("--files-width", savedWidth);
-  }
-} catch (error) {
-  /* sem localStorage */
 }
+
+makeResizable(filesResize, "--files-width", FILES_WIDTH_KEY, true);
+makeResizable(chatResize, "--chat-width", CHAT_WIDTH_KEY, false);
 
 async function initializeStudio() {
   try {
