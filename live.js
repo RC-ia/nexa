@@ -219,6 +219,11 @@ function handleServerMessage(activeSocket, message) {
     throw new Error(message.error.message || "Erro na sessão Gemini Live.");
   }
 
+  if (message.toolCall) {
+    runLiveTools(activeSocket, message.toolCall.functionCalls || []);
+    return;
+  }
+
   const content = message.serverContent;
   if (!content) {
     return;
@@ -238,6 +243,78 @@ function handleServerMessage(activeSocket, message) {
   if (content.turnComplete) {
     setStatus("Conectado · pode falar", "listening");
   }
+}
+
+/*
+  O modelo pediu ferramentas no meio da conversa: executa no servidor
+  (/api/live/tool, com a sessão de login) e responde na mesma chamada.
+*/
+async function runLiveTools(activeSocket, calls) {
+  const requests = [];
+
+  calls.forEach((call, index) => {
+    if (!call || !call.name) {
+      return;
+    }
+    requests.push({
+      id: call.id || "live_" + index,
+      name: call.name,
+      arguments: call.args && typeof call.args === "object" ? call.args : {}
+    });
+  });
+
+  if (!requests.length) {
+    return;
+  }
+
+  setStatus("Consultando as ferramentas…", "connecting");
+
+  let results = [];
+
+  try {
+    const response = await fetch("/api/live/tool", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Nexa-Message-Key": accountMessageKey
+      },
+      body: JSON.stringify({ calls: requests })
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (response.status === 401) {
+      localStorage.removeItem("nexa_message_key:" + accountUsername);
+      await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+      location.replace("/");
+    }
+    if (!response.ok) {
+      throw new Error(data.error || ("HTTP " + response.status));
+    }
+
+    results = data.results || [];
+  } catch (error) {
+    results = requests.map(request => ({
+      id: request.id,
+      name: request.name,
+      text: "A ferramenta falhou: " + (error.message || "erro desconhecido")
+    }));
+  }
+
+  if (activeSocket !== socket || activeSocket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  activeSocket.send(JSON.stringify({
+    toolResponse: {
+      functionResponses: results.map(result => ({
+        id: result.id,
+        name: result.name,
+        response: { result: result.text }
+      }))
+    }
+  }));
+
+  setStatus("Conectado · pode falar", "listening");
 }
 
 async function startCall() {
