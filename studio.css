@@ -177,12 +177,12 @@
 .studio-files {
   position: fixed;
   top: 0;
-  right: 0;
+  left: 0;
   bottom: 0;
   display: flex;
   flex-direction: column;
   width: min(400px, 94vw);
-  border-left: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-right: 1px solid var(--line, rgba(255, 255, 255, 0.12));
   background: var(--studio-panel);
   backdrop-filter: blur(14px);
 }
