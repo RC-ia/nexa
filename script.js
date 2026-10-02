@@ -2901,14 +2901,11 @@ composer.addEventListener(
     }
 
     /*
-      A pesquisa profunda vale só para esta mensagem: guarda o
-      modo e desliga o botão antes de enviar.
+      O modo de pesquisa profunda permanece ativo neste chat até o usuário
+      desligá-lo manualmente. Assim, cada nova mensagem continua passando
+      pelo agente pesquisador antes da resposta final.
     */
     const deep = deepMode;
-
-    if (deep) {
-      setDeepMode(false);
-    }
 
     setGenerating(true);
 

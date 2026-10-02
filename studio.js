@@ -344,6 +344,20 @@ filesSearch.addEventListener("input", (e) => {
 function makeResizable(handle, cssVar, storageKey, fromLeftEdge) {
   let dragging = false;
 
+  function finishResize(event) {
+    if (!dragging) return;
+    dragging = false;
+    if (event && handle.hasPointerCapture(event.pointerId)) {
+      handle.releasePointerCapture(event.pointerId);
+    }
+    try {
+      localStorage.setItem(
+        storageKey,
+        document.documentElement.style.getPropertyValue(cssVar),
+      );
+    } catch (error) { }
+  }
+
   handle.addEventListener("pointerdown", (event) => {
     dragging = true;
     handle.setPointerCapture(event.pointerId);
@@ -352,22 +366,44 @@ function makeResizable(handle, cssVar, storageKey, fromLeftEdge) {
 
   handle.addEventListener("pointermove", (event) => {
     if (!dragging) return;
-    const target = fromLeftEdge ? event.clientX : window.innerWidth - event.clientX;
-    const width = Math.min(Math.max(target, 240), window.innerWidth * 0.7);
+
+    const filesOpen = !filesPane.hidden;
+    const filesWidth = filesOpen
+      ? parseFloat(getComputedStyle(document.documentElement)
+        .getPropertyValue("--files-width")) || 320
+      : 0;
+    const otherPanel = fromLeftEdge
+      ? parseFloat(getComputedStyle(document.documentElement)
+        .getPropertyValue("--chat-width")) || 380
+      : filesWidth;
+    const pagePadding = window.innerWidth <= 760 ? 0 : 48;
+    const minimumCenter = 240;
+    const maximum = Math.max(
+      240,
+      window.innerWidth - otherPanel - minimumCenter - pagePadding,
+    );
+    const target = fromLeftEdge
+      ? event.clientX
+      : window.innerWidth - event.clientX;
+    const width = Math.min(Math.max(target, 240), maximum);
+
     document.documentElement.style.setProperty(cssVar, width + "px");
   });
 
-  handle.addEventListener("pointerup", () => {
-    dragging = false;
-    try {
-      localStorage.setItem(storageKey, document.documentElement.style.getPropertyValue(cssVar));
-    } catch (error) { }
-  });
+  handle.addEventListener("pointerup", finishResize);
+  handle.addEventListener("pointercancel", finishResize);
+  handle.addEventListener("lostpointercapture", finishResize);
 
   try {
     const savedWidth = localStorage.getItem(storageKey);
     if (savedWidth) {
-      document.documentElement.style.setProperty(cssVar, savedWidth);
+      const width = Number.parseFloat(savedWidth);
+      if (Number.isFinite(width)) {
+        document.documentElement.style.setProperty(
+          cssVar,
+          Math.min(Math.max(width, 240), window.innerWidth * 0.7) + "px",
+        );
+      }
     }
   } catch (error) { }
 }

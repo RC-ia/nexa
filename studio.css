@@ -13,7 +13,7 @@
 
 .studio-body {
   display: grid;
-  grid-template-columns: 0 minmax(0, 1fr) var(--chat-width);
+  grid-template-columns: 0 minmax(240px, 1fr) minmax(280px, min(var(--chat-width), 30vw));
   min-width: 320px;
   height: 100vh;
   height: 100dvh;
@@ -25,7 +25,7 @@
 }
 
 body:has(.studio-files:not([hidden])) {
-  grid-template-columns: var(--files-width) minmax(0, 1fr) var(--chat-width);
+  grid-template-columns: minmax(240px, var(--files-width)) minmax(240px, 1fr) minmax(280px, var(--chat-width));
 }
 
 .studio-page {
