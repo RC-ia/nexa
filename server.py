@@ -26,8 +26,10 @@ API_KEY = os.environ.get("API_KEY", "").strip()
 API_GEMA = os.environ.get("API_GEMA", "").strip()
 API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip("/")
 MODEL = os.environ.get("MODEL", "nada")
-# Modelo próprio para o modo Rápido (sem raciocínio). Vazio usa o MODEL.
+# Modelo próprio para o modo Rápido. Vazio usa o MODEL.
 MODEL_FLASK = os.environ.get("MODEL_FLASK", "").strip()
+# Habilita pensamento no modo Rápido para diffusiongemma (padrão: true).
+FLASK_THINK = os.environ.get("FLASK_THINK", "true").strip().lower() != "false"
 LIVE_MODEL = "models/gemini-3.8-live"
 DEFAULT_LIVE_VOICE = "Kore"
 LIVE_VOICES = {
@@ -2427,11 +2429,15 @@ def is_diffusiongemma(model_name):
 def reasoning_token_for_model(model_name, level):
     """
     Retorna o token de raciocínio para o modelo.
-    diffusiongemma usa <|think|> no system prompt quando level != 'none'.
+    diffusiongemma usa <|think|> no system prompt.
+    - Modo Rápido (level="none"): habilitado via FLASK_THINK (padrão: true)
+    - Outros níveis: sempre habilitado para diffusiongemma
     """
-    if is_diffusiongemma(model_name) and level != "none":
-        return "<|think|>"
-    return ""
+    if not is_diffusiongemma(model_name):
+        return ""
+    if level == "none":
+        return "<|think|>" if FLASK_THINK else ""
+    return "<|think|>"
 
 
 def request_body(stream, messages, memories, reasoning, custom_instructions="",
