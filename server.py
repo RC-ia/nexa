@@ -1723,21 +1723,31 @@ def extract_text(data):
     content = delta.get("content")
 
     if isinstance(content, str):
-        return content
+        return strip_diffusiongemma_thought(content)
 
     message = choice.get("message") or {}
     content = message.get("content")
 
     if isinstance(content, str):
-        return content
+        return strip_diffusiongemma_thought(content)
 
     return ""
+
+
+def strip_diffusiongemma_thought(text):
+    """Remove blocos <|channel>thought ... <channel|> do texto final."""
+    if not text or "<|channel>thought" not in text:
+        return text
+    # Remove tudo entre <|channel>thought e <channel|> inclusive
+    import re
+    return re.sub(r"<\|channel\|>thought.*?<channel\|>", "", text, flags=re.DOTALL).strip()
 
 
 def extract_reasoning(data):
     """
     O raciocínio chega em campos diferentes dependendo do modelo/router
     (reasoning_content é o mais comum em APIs compatíveis com OpenAI).
+    diffusiongemma emite no conteúdo com tokens <|channel>thought.
     """
 
     choices = data.get("choices") or []
@@ -1754,7 +1764,26 @@ def extract_reasoning(data):
             if isinstance(value, str):
                 return value
 
+        # diffusiongemma: raciocínio vem no content com <|channel>thought
+        content = holder.get("content")
+        if isinstance(content, str):
+            thought = extract_diffusiongemma_thought(content)
+            if thought:
+                return thought
+
     return ""
+
+
+def extract_diffusiongemma_thought(text):
+    """Extrai bloco de pensamento do formato <|channel>thought ... <channel|>."""
+    if not text or "<|channel>thought" not in text:
+        return ""
+    try:
+        start = text.index("<|channel>thought") + len("<|channel>thought")
+        end = text.index("<channel|>", start)
+        return text[start:end].strip()
+    except ValueError:
+        return ""
 
 
 def finish_reason(data):
@@ -2269,8 +2298,14 @@ def log_upstream_error(response):
 
 
 def build_messages(messages, memories, custom_instructions="", user_id="",
-                   deep_report="", system_prompt_override="", memory_header=""):
+                   deep_report="", system_prompt_override="", memory_header="",
+                   model_name="", reasoning_level=""):
     system_prompt = system_prompt_override or current_system_prompt(user_id)
+
+    # Adiciona token de raciocínio para diffusiongemma
+    think_token = reasoning_token_for_model(model_name, reasoning_level)
+    if think_token:
+        system_prompt = think_token + "\n" + system_prompt
 
     if memories:
         system_prompt += (
@@ -2379,12 +2414,29 @@ def model_for_reasoning(level):
     return MODEL
 
 
+def is_diffusiongemma(model_name):
+    """Verifica se o modelo é diffusiongemma que usa token <|think|>."""
+    return model_name and "diffusiongemma" in model_name.lower()
+
+
+def reasoning_token_for_model(model_name, level):
+    """
+    Retorna o token de raciocínio para o modelo.
+    diffusiongemma usa <|think|> no system prompt quando level != 'none'.
+    """
+    if is_diffusiongemma(model_name) and level != "none":
+        return "<|think|>"
+    return ""
+
+
 def request_body(stream, messages, memories, reasoning, custom_instructions="",
                  memory_enabled=True, user_id="", deep_report=""):
+    model = model_for_reasoning(reasoning)
     body = {
-        "model": model_for_reasoning(reasoning),
+        "model": model,
         "messages": build_messages(
-            messages, memories, custom_instructions, user_id, deep_report
+            messages, memories, custom_instructions, user_id, deep_report,
+            model_name=model, reasoning_level=reasoning
         ),
         "stream": stream,
         "max_tokens": MAX_OUTPUT_TOKENS,
@@ -3180,8 +3232,9 @@ def run_studio_tools(user_id, calls):
     return results, notes
 
 def studio_request_body(stream, messages, user_id, reasoning):
+    model = model_for_reasoning(reasoning)
     body = {
-        "model": model_for_reasoning(reasoning),
+        "model": model,
         "messages": build_messages(
             messages,
             studio_memories(user_id),
@@ -3190,6 +3243,8 @@ def studio_request_body(stream, messages, user_id, reasoning):
             "",
             system_prompt_override=STUDIO_SYSTEM_PROMPT,
             memory_header=STUDIO_MEMORY_HEADER,
+            model_name=model,
+            reasoning_level=reasoning,
         ),
         "stream": stream,
         "max_tokens": STUDIO_MAX_OUTPUT_TOKENS,
@@ -4220,6 +4275,50 @@ def studio_file():
         content = content[:STUDIO_READ_LIMIT] + "\n... [truncado]"
 
     return jsonify({"caminho": caminho, "conteudo": content})
+
+
+@app.get("/api/studio/raw")
+def studio_raw():
+    user = current_user()
+
+    if user is None:
+        return jsonify({"error": "Faça login para ver o Estúdio."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    caminho = request.args.get("caminho", "")
+    path = studio_path("acct_%d" % user["id"], caminho)
+
+    if path is None or not path.is_file():
+        return jsonify({"error": "Arquivo não encontrado."}), 404
+
+    try:
+        data = path.read_bytes()
+    except OSError as error:
+        return jsonify({"error": "Não foi possível ler: %s" % error}), 500
+
+    mime = "text/plain"
+    ext = path.suffix.lower()
+    if ext in (".html", ".htm"):
+        mime = "text/html"
+    elif ext in (".css",):
+        mime = "text/css"
+    elif ext in (".js", ".mjs"):
+        mime = "application/javascript"
+    elif ext in (".json",):
+        mime = "application/json"
+    elif ext in (".py",):
+        mime = "text/x-python"
+    elif ext in (".md", ".markdown"):
+        mime = "text/markdown"
+    elif ext in (".svg",):
+        mime = "image/svg+xml"
+
+    response = app.response_class(data, mimetype=mime)
+    response.headers["Content-Disposition"] = "inline; filename=\"%s\"" % path.name
+    return response
 
 
 @app.post("/api/chat/title")

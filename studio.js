@@ -3,36 +3,61 @@ const composer = document.getElementById("composer");
 const input = document.getElementById("input");
 const statusLabel = document.getElementById("studioStatus");
 const filesPane = document.getElementById("filesPane");
-const fileList = document.getElementById("fileList");
-const fileView = document.getElementById("fileView");
+const fileTree = document.getElementById("fileTree");
+const fileTreeEmpty = document.getElementById("fileTreeEmpty");
 const filesToggle = document.getElementById("filesToggle");
 const filesRefresh = document.getElementById("filesRefresh");
 const filesClose = document.getElementById("filesClose");
 const filesResize = document.getElementById("filesResize");
 const chatResize = document.getElementById("chatResize");
-const viewerHead = document.getElementById("viewerHead");
+const filesSearch = document.getElementById("filesSearch");
+const filesCount = document.getElementById("filesCount");
+const viewerTabs = document.getElementById("viewerTabs");
+const viewerPanels = document.getElementById("viewerPanels");
+const viewerEmpty = document.getElementById("viewerEmpty");
+const btnStop = document.getElementById("btnStop");
+const suggestions = document.getElementById("suggestions");
+const suggestionButtons = suggestions?.querySelectorAll(".studio-suggestion") || [];
 
 const HISTORY_KEY = "nexa_studio_history";
 const HISTORY_LIMIT = 40;
 const KEY_PREFIX = "nexa_message_key:";
 const FILES_WIDTH_KEY = "nexa_studio_files_width";
 const CHAT_WIDTH_KEY = "nexa_studio_chat_width";
+const TABS_KEY = "nexa_studio_tabs";
+const ACTIVE_TAB_KEY = "nexa_studio_active_tab";
+const TREE_OPEN_KEY = "nexa_studio_tree_open";
 
 let accountUsername = "";
 let messageKey = "";
 let history = [];
 let busy = false;
+let abortController = null;
+let openTabs = new Map();
+let activeTabPath = "";
+let treeOpenPaths = new Set();
+let currentFilter = "";
 
-function setStatus(text) {
+function setStatus(text, busyState) {
   statusLabel.textContent = text;
+  if (busyState !== undefined) {
+    busy = busyState;
+    btnStop.hidden = !busy;
+    composer.querySelector('button[type="submit"]').hidden = busy;
+    if (busy) {
+      statusLabel.classList.add("studio-loading");
+    } else {
+      statusLabel.classList.remove("studio-loading");
+    }
+  }
 }
 
 function escapeHtml(text) {
   return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/&/g, "&")
+    .replace(/</g, "<")
+    .replace(/>/g, ">")
+    .replace(/"/g, "\"");
 }
 
 function renderMarkdown(text) {
@@ -42,12 +67,26 @@ function renderMarkdown(text) {
   for (let index = 0; index < blocks.length; index += 1) {
     if (index % 2 === 1) {
       const body = blocks[index].replace(/^[^\n]*\n/, "").replace(/\n$/, "");
-      out += "<pre><code>" + body + "</code></pre>";
+      const langMatch = body.match(/^(\w+)\n/);
+      const lang = langMatch ? langMatch[1] : "";
+      const code = langMatch ? body.slice(langMatch[0].length) : body;
+      out += `<pre><code class="language-${lang} hljs">${escapeHtml(code)}</code></pre>`;
     } else {
       out += blocks[index]
         .replace(/`([^`\n]+)`/g, "<code>$1</code>")
         .replace(/\n/g, "<br>");
     }
+  }
+
+  if (window.hljs) {
+    setTimeout(() => {
+      document.querySelectorAll(".bubble pre code.hljs").forEach(el => {
+        if (!el.dataset.hljsHighlighted) {
+          window.hljs.highlightElement(el);
+          el.dataset.hljsHighlighted = "true";
+        }
+      });
+    }, 0);
   }
 
   return out;
@@ -98,9 +137,7 @@ function trimHistory() {
 function saveHistory() {
   try {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-  } catch (error) {
-    /* sem espaço no navegador */
-  }
+  } catch (error) { }
 }
 
 function loadHistory() {
@@ -117,6 +154,13 @@ function loadHistory() {
       String(message.content || "")
     );
   }
+  updateSuggestionsVisibility();
+}
+
+function updateSuggestionsVisibility() {
+  if (suggestions) {
+    suggestions.hidden = history.length > 0;
+  }
 }
 
 async function sendMessage(text) {
@@ -127,8 +171,10 @@ async function sendMessage(text) {
   }
 
   busy = true;
+  abortController = new AbortController();
   input.value = "";
-  setStatus("Pensando…");
+  setStatus("Pensando…", true);
+  updateSuggestionsVisibility();
 
   addMessage("user", clean);
   history.push({ role: "user", content: clean });
@@ -144,7 +190,12 @@ async function sendMessage(text) {
       bubble.innerHTML = renderMarkdown(fullText);
       scrollDown();
     } else if (payload.type === "tool") {
-      addMessage("assistant", "⚙ " + describeTool(payload), true);
+      const toolText = "⚙ " + describeTool(payload);
+      addMessage("assistant", toolText, true);
+
+      if (payload.name === "escrever_arquivo" && payload.detail) {
+        openTab(payload.detail);
+      }
     } else if (payload.type === "error") {
       fullText += (fullText ? "\n\n" : "") + (payload.error || "Deu erro.");
       bubble.innerHTML = renderMarkdown(fullText);
@@ -159,6 +210,7 @@ async function sendMessage(text) {
         "X-Nexa-Message-Key": messageKey,
       },
       body: JSON.stringify({ message: clean, messages: historyBefore }),
+      signal: abortController.signal,
     });
 
     if (response.status === 401) {
@@ -169,14 +221,10 @@ async function sendMessage(text) {
 
     if (!response.ok || !response.body) {
       let reason = "O Estúdio não respondeu (HTTP " + response.status + ").";
-
       try {
         const data = await response.json();
         reason = data.error || reason;
-      } catch (error) {
-        /* resposta sem JSON */
-      }
-
+      } catch (error) { }
       throw new Error(reason);
     }
 
@@ -203,19 +251,24 @@ async function sendMessage(text) {
           if (!line.startsWith("data:")) {
             continue;
           }
-
           try {
             handleEvent(JSON.parse(line.slice(5).trim()));
-          } catch (error) {
-            /* linha parcial ou inválida */
-          }
+          } catch (error) { }
         }
 
         separator = buffer.indexOf("\n\n");
       }
     }
+
+    if (activeTabPath) {
+      refreshTabContent(activeTabPath);
+    }
   } catch (error) {
-    fullText += (fullText ? "\n\n" : "") + "⚠ " + error.message;
+    if (error.name === "AbortError" || error.message.includes("Aborted")) {
+      fullText += (fullText ? "\n\n" : "") + "*(interrompido)*";
+    } else {
+      fullText += (fullText ? "\n\n" : "") + "⚠ " + error.message;
+    }
     bubble.innerHTML = renderMarkdown(fullText);
   }
 
@@ -227,69 +280,17 @@ async function sendMessage(text) {
     saveHistory();
   }
 
-  busy = false;
-  setStatus("Pronto");
+  setStatus("Pronto", false);
   refreshFiles();
 }
 
-async function refreshFiles() {
-  try {
-    const response = await fetch("/api/studio/files", {
-      headers: { "X-Nexa-Message-Key": messageKey },
-    });
-
-    if (!response.ok) {
-      return;
-    }
-
-    const data = await response.json();
-    fileList.textContent = "";
-
-    if (!data.files || !data.files.length) {
-      const item = document.createElement("li");
-      item.className = "studio-empty";
-      item.textContent = "Nada por aqui ainda. Peça alguma coisa!";
-      fileList.appendChild(item);
-      return;
-    }
-
-    for (const file of data.files) {
-      const item = document.createElement("li");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = file.caminho;
-      button.title = file.tamanho + " bytes";
-      button.addEventListener("click", () => openFile(file.caminho));
-      item.appendChild(button);
-      fileList.appendChild(item);
-    }
-  } catch (error) {
-    /* sem conexão */
+function stopGeneration() {
+  if (abortController) {
+    abortController.abort();
   }
 }
 
-async function openFile(caminho) {
-  fileView.hidden = false;
-  fileView.textContent = "Abrindo…";
-  viewerHead.textContent = caminho;
-
-  try {
-    const response = await fetch(
-      "/api/studio/file?caminho=" + encodeURIComponent(caminho),
-      { headers: { "X-Nexa-Message-Key": messageKey } }
-    );
-    const data = await response.json();
-
-    if (!response.ok) {
-      fileView.textContent = data.error || "Não deu para abrir.";
-      return;
-    }
-
-    fileView.textContent = data.conteudo;
-  } catch (error) {
-    fileView.textContent = "Não deu para abrir: " + error.message;
-  }
-}
+btnStop.addEventListener("click", stopGeneration);
 
 composer.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -303,10 +304,15 @@ input.addEventListener("keydown", (event) => {
   }
 });
 
+suggestionButtons.forEach(btn => {
+  btn.addEventListener("click", () => {
+    sendMessage(btn.dataset.text);
+  });
+});
+
 function setPaneOpen(open) {
   filesPane.hidden = !open;
-  document.body.classList.toggle("files-open", open);
-
+  filesToggle.setAttribute("aria-expanded", open);
   if (open) {
     refreshFiles();
   }
@@ -322,6 +328,11 @@ filesClose.addEventListener("click", () => {
 
 filesRefresh.addEventListener("click", refreshFiles);
 
+filesSearch.addEventListener("input", (e) => {
+  currentFilter = e.target.value.toLowerCase();
+  renderFileTree();
+});
+
 function makeResizable(handle, cssVar, storageKey, fromLeftEdge) {
   let dragging = false;
 
@@ -332,45 +343,419 @@ function makeResizable(handle, cssVar, storageKey, fromLeftEdge) {
   });
 
   handle.addEventListener("pointermove", (event) => {
-    if (!dragging) {
-      return;
-    }
-
-    const target = fromLeftEdge
-      ? event.clientX
-      : window.innerWidth - event.clientX;
+    if (!dragging) return;
+    const target = fromLeftEdge ? event.clientX : window.innerWidth - event.clientX;
     const width = Math.min(Math.max(target, 240), window.innerWidth * 0.7);
     document.documentElement.style.setProperty(cssVar, width + "px");
   });
 
   handle.addEventListener("pointerup", () => {
     dragging = false;
-
     try {
-      localStorage.setItem(
-        storageKey,
-        document.documentElement.style.getPropertyValue(cssVar)
-      );
-    } catch (error) {
-      /* sem espaço no navegador */
-    }
+      localStorage.setItem(storageKey, document.documentElement.style.getPropertyValue(cssVar));
+    } catch (error) { }
   });
 
   try {
     const savedWidth = localStorage.getItem(storageKey);
-
     if (savedWidth) {
       document.documentElement.style.setProperty(cssVar, savedWidth);
     }
-  } catch (error) {
-    /* sem localStorage */
-  }
+  } catch (error) { }
 }
 
 makeResizable(filesResize, "--files-width", FILES_WIDTH_KEY, true);
 makeResizable(chatResize, "--chat-width", CHAT_WIDTH_KEY, false);
 
+async function refreshFiles() {
+  try {
+    const response = await fetch("/api/studio/files", {
+      headers: { "X-Nexa-Message-Key": messageKey },
+    });
+
+    if (!response.ok) return;
+
+    const data = await response.json();
+    const files = data.files || [];
+    filesCount.textContent = files.length;
+
+    buildTreeStructure(files);
+    renderFileTree();
+
+    if (files.length === 0) {
+      fileTree.hidden = true;
+      fileTreeEmpty.hidden = false;
+    } else {
+      fileTree.hidden = false;
+      fileTreeEmpty.hidden = true;
+    }
+  } catch (error) { }
+}
+
+function buildTreeStructure(files) {
+  const root = { name: "", path: "", type: "folder", children: {}, meta: null };
+
+  for (const file of files) {
+    const parts = file.caminho.split("/").filter(Boolean);
+    let node = root;
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const isFile = i === parts.length - 1;
+
+      if (!node.children[part]) {
+        node.children[part] = {
+          name: part,
+          path: node.path ? node.path + "/" + part : part,
+          type: isFile ? "file" : "folder",
+          children: isFile ? null : {},
+          meta: isFile ? { size: file.tamanho, modified: file.modificado } : null,
+        };
+      }
+      node = node.children[part];
+    }
+  }
+  window.__studioFileTree = root;
+}
+
+function renderFileTree() {
+  const root = window.__studioFileTree;
+  if (!root) return;
+
+  fileTree.innerHTML = "";
+
+  function renderNode(node, depth = 0) {
+    if (node.type === "folder") {
+      const details = document.createElement("details");
+      if (treeOpenPaths.has(node.path)) {
+        details.open = true;
+      }
+      details.addEventListener("toggle", () => {
+        if (details.open) {
+          treeOpenPaths.add(node.path);
+        } else {
+          treeOpenPaths.delete(node.path);
+        }
+        saveTreeState();
+      });
+
+      const summary = document.createElement("summary");
+      summary.innerHTML = `
+        <svg class="studio-file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        </svg>
+        <span class="studio-file-name">${escapeHtml(node.name)}</span>
+      `;
+      details.appendChild(summary);
+
+      const ul = document.createElement("ul");
+      for (const child of Object.values(node.children).sort((a, b) => {
+        if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      })) {
+        const li = document.createElement("li");
+        li.appendChild(renderNode(child, depth + 1));
+        ul.appendChild(li);
+      }
+      details.appendChild(ul);
+      return details;
+    } else {
+      const li = document.createElement("li");
+      const div = document.createElement("div");
+      div.className = "studio-file-item";
+      div.tabIndex = 0;
+      div.dataset.path = node.path;
+      div.dataset.size = node.meta?.size || 0;
+      div.dataset.modified = node.meta?.modified || 0;
+
+      if (node.path === activeTabPath) {
+        div.classList.add("studio-active");
+      }
+
+      const sizeStr = formatSize(node.meta?.size || 0);
+      const modStr = node.meta?.modified ? formatDate(node.meta.modified) : "";
+
+      div.innerHTML = `
+        <svg class="studio-file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+          <polyline points="10 9 9 9 8 9"></polyline>
+        </svg>
+        <span class="studio-file-name">${escapeHtml(node.name)}</span>
+        <span class="studio-file-meta">${sizeStr}${modStr ? " · " + modStr : ""}</span>
+      `;
+
+      div.addEventListener("click", () => openTab(node.path));
+      div.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openTab(node.path);
+        }
+      });
+
+      if (currentFilter && !node.name.toLowerCase().includes(currentFilter) &&
+          !node.path.toLowerCase().includes(currentFilter)) {
+        div.style.display = "none";
+      }
+
+      li.appendChild(div);
+      return li;
+    }
+  }
+
+  for (const child of Object.values(root.children).sort((a, b) => {
+    if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  })) {
+    const li = document.createElement("li");
+    li.appendChild(renderNode(child));
+    fileTree.appendChild(li);
+  }
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function formatDate(ts) {
+  const d = new Date(ts * 1000);
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function saveTreeState() {
+  try {
+    localStorage.setItem(TREE_OPEN_KEY, JSON.stringify([...treeOpenPaths]));
+  } catch (error) { }
+}
+
+function loadTreeState() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(TREE_OPEN_KEY) || "[]");
+    treeOpenPaths = new Set(stored);
+  } catch (error) {
+    treeOpenPaths = new Set();
+  }
+}
+
+function saveTabsState() {
+  try {
+    const tabsData = {
+      tabs: [...openTabs.entries()].map(([path, content]) => ({ path, content })),
+      active: activeTabPath,
+    };
+    localStorage.setItem(TABS_KEY, JSON.stringify(tabsData));
+  } catch (error) { }
+}
+
+function loadTabsState() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(TABS_KEY) || "{}");
+    if (stored.tabs) {
+      for (const { path, content } of stored.tabs) {
+        openTabs.set(path, content);
+      }
+    }
+    activeTabPath = stored.active || "";
+  } catch (error) {
+    openTabs = new Map();
+    activeTabPath = "";
+  }
+}
+
+async function openTab(path) {
+  if (!path) return;
+
+  if (activeTabPath && openTabs.has(activeTabPath)) {
+    const oldPanel = viewerPanels.querySelector(`[data-path="${escapeHtml(activeTabPath)}"]`);
+    if (oldPanel) oldPanel.setAttribute("aria-hidden", "true");
+    const oldTab = viewerTabs.querySelector(`[data-path="${escapeHtml(activeTabPath)}"]`);
+    if (oldTab) oldTab.setAttribute("aria-selected", "false");
+  }
+
+  let content = openTabs.get(path);
+
+  if (!content) {
+    try {
+      const response = await fetch("/api/studio/file?caminho=" + encodeURIComponent(path), {
+        headers: { "X-Nexa-Message-Key": messageKey },
+      });
+      const data = await response.json();
+      if (response.ok) {
+        content = data.conteudo || "";
+      } else {
+        content = "Erro ao carregar: " + (data.error || "desconhecido");
+      }
+    } catch (error) {
+      content = "Erro ao carregar: " + error.message;
+    }
+    openTabs.set(path, content);
+  }
+
+  activeTabPath = path;
+  saveTabsState();
+  renderTabs();
+  updateViewerContent(path);
+  viewerEmpty.hidden = true;
+
+  document.querySelectorAll(".studio-file-item.studio-active").forEach(el => el.classList.remove("studio-active"));
+  const activeFileItem = fileTree.querySelector(`[data-path="${escapeHtml(path)}"]`);
+  if (activeFileItem) activeFileItem.classList.add("studio-active");
+}
+
+function renderTabs() {
+  viewerTabs.innerHTML = "";
+
+  if (openTabs.size === 0) {
+    viewerTabs.hidden = true;
+    return;
+  }
+
+  viewerTabs.hidden = false;
+
+  for (const path of openTabs.keys()) {
+    const tab = document.createElement("button");
+    tab.className = "studio-viewer-tab";
+    tab.role = "tab";
+    tab.dataset.path = path;
+    tab.setAttribute("aria-selected", path === activeTabPath ? "true" : "false");
+
+    const shortName = path.split("/").pop() || path;
+
+    tab.innerHTML = `
+      <span class="studio-viewer-tab-name" title="${escapeHtml(path)}">${escapeHtml(shortName)}</span>
+      <button class="studio-viewer-tab-close" aria-label="Fechar ${escapeHtml(shortName)}" data-path="${escapeHtml(path)}">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    `;
+
+    tab.addEventListener("click", (e) => {
+      if (!e.target.closest(".studio-viewer-tab-close")) {
+        openTab(path);
+      }
+    });
+
+    tab.querySelector(".studio-viewer-tab-close").addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeTab(path);
+    });
+
+    viewerTabs.appendChild(tab);
+  }
+}
+
+function closeTab(path) {
+  if (!openTabs.has(path)) return;
+
+  openTabs.delete(path);
+
+  if (activeTabPath === path) {
+    const remaining = [...openTabs.keys()];
+    if (remaining.length > 0) {
+      activeTabPath = remaining[remaining.length - 1];
+    } else {
+      activeTabPath = "";
+      viewerEmpty.hidden = false;
+      viewerTabs.hidden = true;
+    }
+  }
+
+  saveTabsState();
+  renderTabs();
+  if (activeTabPath) {
+    updateViewerContent(activeTabPath);
+  }
+}
+
+function updateViewerContent(path) {
+  viewerPanels.querySelectorAll(".studio-viewer-panel").forEach(panel => {
+    panel.setAttribute("aria-hidden", "true");
+  });
+
+  let panel = viewerPanels.querySelector(`[data-path="${escapeHtml(path)}"]`);
+
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.className = "studio-viewer-panel";
+    panel.dataset.path = path;
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-hidden", "false");
+    panel.innerHTML = `
+      <div class="studio-viewer-panel-header">
+        <span class="studio-viewer-panel-path">${escapeHtml(path)}</span>
+        <div class="studio-viewer-panel-actions">
+          <button class="studio-viewer-panel-btn" data-action="copy" title="Copiar conteúdo" aria-label="Copiar conteúdo">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          </button>
+          <button class="studio-viewer-panel-btn" data-action="download" title="Baixar arquivo" aria-label="Baixar arquivo">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          </button>
+        </div>
+      </div>
+      <div class="studio-viewer-panel-content"><pre><code class="hljs"></code></pre></div>
+    `;
+    viewerPanels.appendChild(panel);
+
+    panel.querySelector("[data-action=copy]").addEventListener("click", () => copyTabContent(path));
+    panel.querySelector("[data-action=download]").addEventListener("click", () => downloadTabContent(path));
+  } else {
+    panel.setAttribute("aria-hidden", "false");
+  }
+
+  const content = openTabs.get(path) || "";
+  const codeEl = panel.querySelector("code");
+  codeEl.textContent = content;
+  if (window.hljs) {
+    window.hljs.highlightElement(codeEl);
+  }
+}
+
+async function refreshTabContent(path) {
+  try {
+    const response = await fetch("/api/studio/file?caminho=" + encodeURIComponent(path), {
+      headers: { "X-Nexa-Message-Key": messageKey },
+    });
+    const data = await response.json();
+    if (response.ok) {
+      const content = data.conteudo || "";
+      openTabs.set(path, content);
+      saveTabsState();
+      if (path === activeTabPath) {
+        updateViewerContent(path);
+      }
+    }
+  } catch (error) { }
+}
+
+function copyTabContent(path) {
+  const content = openTabs.get(path);
+  if (!content) return;
+  navigator.clipboard.writeText(content).then(() => {
+    setStatus("Copiado!", false);
+    setTimeout(() => setStatus("Pronto", false), 1500);
+  });
+}
+
+function downloadTabContent(path) {
+  const content = openTabs.get(path);
+  if (!content) return;
+  const blob = new Blob([content], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = path.split("/").pop() || "arquivo";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 async function initializeStudio() {
+  loadHistory();
+  loadTabsState();
+  loadTreeState();
+
   try {
     const response = await fetch("/api/auth/me");
 
@@ -388,11 +773,19 @@ async function initializeStudio() {
       return;
     }
 
-    setStatus("Pronto");
-    loadHistory();
+    if (activeTabPath && openTabs.has(activeTabPath)) {
+      renderTabs();
+      updateViewerContent(activeTabPath);
+      viewerEmpty.hidden = true;
+    } else {
+      viewerEmpty.hidden = false;
+      viewerTabs.hidden = true;
+    }
+
+    setStatus("Pronto", false);
     refreshFiles();
   } catch (error) {
-    setStatus("Sem conexão");
+    setStatus("Sem conexão", false);
   }
 }
 
