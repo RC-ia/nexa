@@ -1005,7 +1005,10 @@ function addMessage(text, type, thinkingText, memoryUpdated, messageId) {
     memoryNotice.restore(memoryUpdated === true);
     message.appendChild(memoryNotice.element);
 
-    // Action buttons (retry, copy)
+    message.appendChild(contentDiv);
+
+  if (type !== "user") {
+    // Action buttons (retry, copy) - below message content
     const actions = document.createElement("div");
     actions.className = "message-actions";
 
@@ -1029,8 +1032,6 @@ function addMessage(text, type, thinkingText, memoryUpdated, messageId) {
     actions.appendChild(copyBtn);
     message.appendChild(actions);
   }
-
-  message.appendChild(contentDiv);
   chat.appendChild(message);
   message.scrollIntoView({ behavior: "smooth", block: "end" });
 }
