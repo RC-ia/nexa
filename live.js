@@ -5,6 +5,8 @@ const visual = document.getElementById("liveVisual");
 
 const LIVE_VOICE_KEY = "nexa_live_voice";
 const FALLBACK_VOICE = "Kore";
+const AUDIO_JITTER_BUFFER = 0.08;
+const MAX_AUDIO_QUEUE = 1.8;
 
 /*
   A voz é escolhida em Configurações > Chamada; aqui só lemos a
@@ -95,6 +97,26 @@ function stopPlayback() {
   playbackTime = 0;
 }
 
+function trimPlaybackQueue(now) {
+  if (!audioContext) return;
+
+  const queued = playbackTime - now;
+  if (queued <= MAX_AUDIO_QUEUE) return;
+
+  const cutoff = now + MAX_AUDIO_QUEUE;
+  playbackSources.forEach(source => {
+    if (source.__nexaStartAt >= cutoff) {
+      try {
+        source.stop();
+      } catch {
+        // O bloco pode já ter terminado.
+      }
+      playbackSources.delete(source);
+    }
+  });
+  playbackTime = Math.min(playbackTime, cutoff);
+}
+
 function queueAudio(base64Data, mimeType) {
   if (!audioContext || !base64Data) {
     return;
@@ -126,7 +148,10 @@ function queueAudio(base64Data, mimeType) {
   source.connect(audioContext.destination);
   source.onended = () => playbackSources.delete(source);
 
-  const startAt = Math.max(audioContext.currentTime + 0.02, playbackTime);
+  const now = audioContext.currentTime;
+  trimPlaybackQueue(now);
+  const startAt = Math.max(now + AUDIO_JITTER_BUFFER, playbackTime);
+  source.__nexaStartAt = startAt;
   source.start(startAt);
   playbackTime = startAt + buffer.duration;
   playbackSources.add(source);
@@ -144,6 +169,12 @@ function startMicrophone(activeSocket) {
 
   micProcessor.onaudioprocess = event => {
     if (!sessionReady || activeSocket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    // Se a rede atrasar, não acumulamos áudio antigo: ele só aumenta a
+    // latência e pode fazer a conversa parecer travada.
+    if (activeSocket.bufferedAmount > 256 * 1024) {
       return;
     }
 

@@ -2579,10 +2579,23 @@ DEEP_RESEARCH_AGENT = (
 )
 DEEP_ROUNDS_LIMIT = 30
 
+DEEP_INTENT_PROMPT = (
+    "Você é o agente de intenção da NEXA. Antes de uma pesquisa profunda, "
+    "transforme a pergunta atual do usuário em uma instrução de pesquisa "
+    "autocontida e clara para outro agente. Você receberá parte recente da "
+    "conversa apenas para resolver referências como 'isso', 'ele', 'aquela "
+    "opção' ou 'compare com o que vimos'. Preserve exatamente a intenção, "
+    "o escopo, o país, período, público, critérios e restrições relevantes. "
+    "Não pesquise, não use ferramentas e não responda à pergunta. Retorne "
+    "somente o texto da instrução que o pesquisador deverá investigar. Se o "
+    "contexto não bastar, mantenha a ambiguidade explícita em vez de inventar."
+)
+
 DEEP_RESEARCH_PROMPT = (
     "Você é o pesquisador da NEXA numa pesquisa profunda. Você não tem "
-    "contexto de nenhuma conversa: recebeu só um tópico e a missão de "
-    "trazer todas as informações possíveis sobre ele.\n\n"
+    "contexto de nenhuma conversa: recebeu uma instrução de pesquisa já "
+    "interpretada e autocontida, e a missão de trazer todas as informações "
+    "possíveis sobre ela.\n\n"
     "Use a ferramenta pesquisar várias vezes, com termos diferentes (em "
     "português e em inglês quando ajudar), e a visitar_pagina para ler as "
     "páginas mais promissoras por completo. Busque definições, números, "
@@ -2594,6 +2607,57 @@ DEEP_RESEARCH_PROMPT = (
     "lista do que não deu para confirmar. O relatório é a resposta final — "
     "nada de perguntas de volta."
 )
+
+
+def interpret_deep_intent(user_id, user_message, messages, reasoning=None,
+                          progress=None):
+    """Converte pergunta contextual em uma instrução autocontida de pesquisa."""
+    if not isinstance(user_message, str) or not user_message.strip():
+        return ""
+
+    recent = []
+    for message in messages[-MAX_HISTORY_MESSAGES:]:
+        role = "Usuário" if message.get("role") == "user" else "NEXA"
+        content = str(message.get("content") or "").strip()
+        if content:
+            recent.append("%s: %s" % (role, content[:4000]))
+
+    context = "\n".join(recent)
+    prompt = (
+        "Conversa recente (use apenas para resolver referências):\n%s\n\n"
+        "Pergunta que deve ser pesquisada:\n%s"
+        % (context or "(sem contexto anterior)", user_message.strip()[:4000])
+    )
+    body = {
+        "model": model_for_reasoning(reasoning),
+        "messages": [
+            {"role": "system", "content": DEEP_INTENT_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+        "max_tokens": min(MAX_OUTPUT_TOKENS, 1200),
+    }
+
+    if progress:
+        progress("Interpretando a pergunta com o contexto recente.")
+
+    try:
+        response = requests.post(
+            API_BASE + "/chat/completions",
+            headers=auth_headers(),
+            json=body,
+            timeout=(CONNECT_TIMEOUT, min(DEEP_RESEARCH_TIMEOUT, 60)),
+        )
+        if response.status_code != 200:
+            raise RuntimeError("HTTP %d" % response.status_code)
+        interpreted = (extract_text(response.json()) or "").strip()
+        return interpreted[:4000] if interpreted else user_message.strip()[:400]
+    except (requests.RequestException, RuntimeError, ValueError) as error:
+        print("[NEXA-INTENCAO] falha; usando pergunta original: %s" % error)
+        if progress:
+            progress("A interpretação contextual falhou; usando a pergunta original.")
+        return user_message.strip()[:400]
+
 
 def run_deep_research(user_id, topic, progress=None, reasoning=None):
     """
@@ -3736,8 +3800,11 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
 
         def worker():
             try:
+                research_topic = interpret_deep_intent(
+                    user_id, user_message, messages, reasoning, progress.put
+                )
                 box["report"] = run_deep_research(
-                    user_id, user_message, progress.put, reasoning
+                    user_id, research_topic or user_message, progress.put, reasoning
                 )
             except Exception as error:  # noqa: BLE001
                 print("[NEXA-PROFUNDA] falha inesperada:", error)
