@@ -971,9 +971,10 @@ const md = window.markdownit
   document.head.appendChild(script);
 })();
 
-function addMessage(text, type, thinkingText, memoryUpdated) {
+function addMessage(text, type, thinkingText, memoryUpdated, messageId) {
   const message = document.createElement("div");
   message.className = "message " + type;
+  if (messageId) message.dataset.messageId = messageId;
 
   const label = document.createElement("span");
   label.className = "label";
@@ -1003,6 +1004,30 @@ function addMessage(text, type, thinkingText, memoryUpdated) {
     const memoryNotice = createMemoryNotice();
     memoryNotice.restore(memoryUpdated === true);
     message.appendChild(memoryNotice.element);
+
+    // Action buttons (retry, copy)
+    const actions = document.createElement("div");
+    actions.className = "message-actions";
+
+    const retryBtn = document.createElement("button");
+    retryBtn.type = "button";
+    retryBtn.className = "message-action retry";
+    retryBtn.title = "Tentar novamente";
+    retryBtn.setAttribute("aria-label", "Tentar novamente esta resposta");
+    retryBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>`;
+    retryBtn.addEventListener("click", () => retryFromMessage(messageId));
+
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "message-action copy";
+    copyBtn.title = "Copiar mensagem";
+    copyBtn.setAttribute("aria-label", "Copiar conteúdo da mensagem");
+    copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+    copyBtn.addEventListener("click", () => copyMessageContent(contentDiv));
+
+    actions.appendChild(retryBtn);
+    actions.appendChild(copyBtn);
+    message.appendChild(actions);
   }
 
   message.appendChild(contentDiv);
@@ -1015,6 +1040,68 @@ function addMessage(text, type, thinkingText, memoryUpdated) {
   INDICADOR DE DIGITAÇÃO
   ==========================================
 */
+
+function retryFromMessage(messageId) {
+  if (!messageId) return;
+
+  const index = history.findIndex(item => item.id === messageId);
+  if (index === -1) return;
+
+  const userIndex = index - 1;
+  if (userIndex < 0 || history[userIndex].role !== "user") return;
+
+  const userMessage = history[userIndex].content;
+
+  history.splice(userIndex);
+  saveMemory();
+
+  renderChat();
+
+  const userMsgId = makeMessageId();
+  addMessage(userMessage, "user", "", false, userMsgId);
+
+  history.push({
+    role: "user",
+    content: userMessage,
+    id: userMsgId
+  });
+
+  showTyping();
+  setGenerating(true);
+
+  askNexa(userMessage, false).catch(error => {
+    if (error.name === "AbortError") {
+      hideTyping();
+      return;
+    }
+    console.error("NEXA error:", error);
+    hideTyping();
+    addMessage(
+      "Erro ao conectar com a NEXA: " +
+      (error?.message || "erro desconhecido"),
+      "nexa",
+      "",
+      false
+    );
+    notifyNativeVoice(error?.message || "erro desconhecido", true);
+  }).finally(() => {
+    setGenerating(false);
+    input.focus();
+  });
+}
+
+function copyMessageContent(contentDiv) {
+  const text = contentDiv.textContent || contentDiv.innerText;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => {
+      const toast = document.createElement("div");
+      toast.className = "copy-toast";
+      toast.textContent = "Copiado";
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 1500);
+    });
+  }
+}
 
 function showTyping() {
   if (
@@ -2845,10 +2932,8 @@ composer.addEventListener(
       Mostra a mensagem do usuário.
     */
 
-    addMessage(
-      text,
-      "user"
-    );
+    const userMsgId = makeMessageId();
+    addMessage(text, "user", "", false, userMsgId);
 
     input.value = "";
 
@@ -2881,25 +2966,29 @@ composer.addEventListener(
       }
 
     } catch (error) {
-      console.error(
-        "NEXA error:",
-        error
-      );
+      if (error.name === "AbortError") {
+        hideTyping();
+      } else {
+        console.error(
+          "NEXA error:",
+          error
+        );
 
-      hideTyping();
+        hideTyping();
 
-      addMessage(
-        "Erro ao conectar com a NEXA: " +
-        (
-          error?.message ||
-          "erro desconhecido"
-        ),
-        "nexa",
-        "",
-        false
-      );
+        addMessage(
+          "Erro ao conectar com a NEXA: " +
+          (
+            error?.message ||
+            "erro desconhecido"
+          ),
+          "nexa",
+          "",
+          false
+        );
 
-      notifyNativeVoice(error?.message || "erro desconhecido", true);
+        notifyNativeVoice(error?.message || "erro desconhecido", true);
+      }
 
     } finally {
       setGenerating(false);
@@ -3332,7 +3421,8 @@ function restoreConversation() {
         ? "user"
         : "nexa",
       item.thinking,
-      item.memoryUpdated
+      item.memoryUpdated,
+      item.id
     );
   });
 }
