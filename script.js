@@ -937,7 +937,7 @@ function loadChats() {
 /* Instância do markdown-it para renderizar markdown nas respostas da NEXA */
 const md = window.markdownit
   ? window.markdownit({
-      html: true,
+      html: false,
       linkify: true,
       typographer: true,
       highlight: function (str, lang) {
@@ -1006,6 +1006,7 @@ function addMessage(text, type, thinkingText, memoryUpdated, messageId) {
     message.appendChild(memoryNotice.element);
 
     message.appendChild(contentDiv);
+  }
 
   if (type !== "user") {
     // Action buttons (retry, copy) - below message content
@@ -2187,16 +2188,16 @@ function closeDrawer() {
 }
 
 function accountSettingKey(prefix) {
-  return prefix + (currentUser ? currentUser.username : "anonymous");
+  return prefix + (currentUser ? currentUser.id : "anonymous");
 }
 
 function loadAccountSettings(user) {
   try {
     memoryEnabled = localStorage.getItem(
-      MEMORY_ENABLED_KEY + user.username
+      MEMORY_ENABLED_KEY + user.id
     ) !== "false";
     customInstructions = localStorage.getItem(
-      INSTRUCTIONS_KEY + user.username
+      INSTRUCTIONS_KEY + user.id
     ) || "";
   } catch (error) {
     memoryEnabled = true;
@@ -2703,7 +2704,7 @@ async function pollDueReminders() {
     return;
   }
 
-  const cursorKey = REMINDER_CURSOR_PREFIX + ":" + currentUser.username;
+  const cursorKey = REMINDER_CURSOR_PREFIX + ":" + currentUser.id;
   const cursor = parseInt(localStorage.getItem(cursorKey), 10) || 0;
 
   try {
@@ -3084,7 +3085,7 @@ memoryToggle.addEventListener("change", function () {
   memoryEnabled = memoryToggle.checked;
   try {
     localStorage.setItem(
-      MEMORY_ENABLED_KEY + currentUser.username,
+      MEMORY_ENABLED_KEY + currentUser.id,
       String(memoryEnabled)
     );
     memoryStatus.textContent = memoryEnabled
@@ -3103,7 +3104,7 @@ document.getElementById("saveInstructions").addEventListener("click", function (
 
   try {
     localStorage.setItem(
-      INSTRUCTIONS_KEY + currentUser.username,
+      INSTRUCTIONS_KEY + currentUser.id,
       customInstructions
     );
     instructionStatus.textContent = "Instruções salvas.";
@@ -3483,7 +3484,7 @@ loadVersion();
   ==========================================
   LOGIN E PAINEL ADMIN
   As conversas ficam no navegador, separadas por conta
-  (nexa_chats:<usuário>). O app só inicia depois do login.
+  (nexa_chats:<id da conta>). O app só inicia depois do login.
   ==========================================
 */
 
@@ -3531,12 +3532,30 @@ async function api(method, path, payload) {
   let data = {};
 
   try {
-    data = await response.json();
+    const parsed = await response.json();
+    if (parsed && typeof parsed === "object") {
+      data = parsed;
+    }
   } catch {
     // Resposta sem JSON.
   }
 
   if (!response.ok) {
+    if (response.status === 401 && data.code === "message_key_expired") {
+      const expiredUser = currentUser;
+      if (expiredUser) {
+        localStorage.removeItem(
+          MESSAGE_KEY_STORAGE_PREFIX + expiredUser.username
+        );
+      }
+      messageKey = "";
+      currentUser = null;
+      await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+      if (expiredUser) {
+        showAuth();
+      }
+    }
+
     const error = new Error(
       data.error || `Erro (HTTP ${response.status}).`
     );
@@ -3568,7 +3587,7 @@ function enterApp(user, issuedMessageKey) {
     return;
   }
 
-  const suffix = ":" + user.username;
+  const suffix = ":" + user.id;
   const legacyChats = localStorage.getItem("nexa_chats");
 
   CHATS_KEY = "nexa_chats" + suffix;

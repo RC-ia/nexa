@@ -15,6 +15,7 @@ import secrets
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
 
@@ -45,10 +46,15 @@ auth_bp = Blueprint("auth", __name__)
 # BANCO
 # =========================
 
+@contextmanager
 def db():
     conn = sqlite3.connect(AUTH_DB, timeout=10)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def migrate_old_schema(conn):
@@ -197,7 +203,11 @@ def hash_token(token):
 
 
 def user_json(user):
-    return {"username": user["username"], "isAdmin": bool(user["is_admin"])}
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "isAdmin": bool(user["is_admin"]),
+    }
 
 
 # =========================
@@ -529,6 +539,8 @@ def admin_server_start(_admin):
 def admin_server_stop(_admin):
     from server_manager import stop_server
     force = body_json().get("force", False)
+    if not isinstance(force, bool):
+        return error("O campo force precisa ser booleano.", 400)
     return jsonify(stop_server(force=force))
 
 
@@ -537,4 +549,6 @@ def admin_server_stop(_admin):
 def admin_server_restart(_admin):
     from server_manager import restart_server
     force = body_json().get("force", False)
+    if not isinstance(force, bool):
+        return error("O campo force precisa ser booleano.", 400)
     return jsonify(restart_server(force=force))

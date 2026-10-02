@@ -715,11 +715,11 @@ def get_memories(user_id):
 def save_memory(user_id, document):
     """Reescreve o arquivo inteiro da conta com o novo resumo consolidado."""
     if not user_id or not document:
-        return
+        return False
 
     body = document.strip()
     if not body:
-        return
+        return False
 
     if not body.startswith("#"):
         body = MEMORY_HEADER + body
@@ -736,16 +736,24 @@ def save_memory(user_id, document):
             temporary.replace(path)
         except OSError as error:
             print("[NEXA] falha ao salvar memória:", error)
+            return False
+
+    return True
 
 
 def clear_memory(user_id):
     if not user_id:
-        return
+        return False
 
     try:
         memory_path(user_id).unlink()
+    except FileNotFoundError:
+        return True
     except OSError as error:
         print("[NEXA] falha ao apagar memória:", error)
+        return False
+
+    return True
 
 
 def sanitize_memory(text):
@@ -873,12 +881,12 @@ def parse_when(value):
         return None
 
     try:
-        parsed = datetime.fromisoformat(value.strip().replace("Z", ""))
+        parsed = datetime.fromisoformat(value.strip())
     except ValueError:
         return None
 
     if parsed.tzinfo is not None:
-        parsed = parsed.astimezone().replace(tzinfo=None)
+        return None
 
     return parsed
 
@@ -991,13 +999,10 @@ def load_reminder_data(path):
 
 def save_reminder_data(path, data):
     temporary = path.with_suffix(".json.tmp")
-    try:
-        temporary.write_text(
-            json.dumps(data, ensure_ascii=False), encoding="utf-8"
-        )
-        temporary.replace(path)
-    except OSError as error:
-        print("[NEXA] falha ao salvar lembretes:", error)
+    temporary.write_text(
+        json.dumps(data, ensure_ascii=False), encoding="utf-8"
+    )
+    temporary.replace(path)
 
 def create_reminder(user_id, arguments):
     """
@@ -1123,7 +1128,11 @@ def create_reminder(user_id, arguments):
                 reminder["next_at"] = user_epoch(user_id, target)
 
         data["reminders"].append(reminder)
-        save_reminder_data(path, data)
+        try:
+            save_reminder_data(path, data)
+        except OSError as error:
+            print("[NEXA-LEMBRETE] falha ao salvar lembrete:", error)
+            return "Não foi possível salvar o lembrete. Tente novamente.", False
 
     print(
         "[NEXA-LEMBRETE] criado para %s: %s (%s)"
@@ -1514,6 +1523,9 @@ def _write_push_tokens(path, tokens):
         temporary.replace(path)
     except OSError as error:
         print("[NEXA] falha ao salvar token de notificação:", error)
+        return False
+
+    return True
 
 def get_push_tokens(user_id):
     with PUSH_LOCK:
@@ -1529,12 +1541,13 @@ def save_push_token(user_id, token):
                 continue
             tokens = _read_push_tokens(other)
             if token in tokens:
-                _write_push_tokens(other, [t for t in tokens if t != token])
+                if not _write_push_tokens(other, [t for t in tokens if t != token]):
+                    return False
 
         tokens = _read_push_tokens(path)
         if token not in tokens:
             tokens.append(token)
-        _write_push_tokens(path, tokens[-PUSH_TOKENS_LIMIT:])
+        return _write_push_tokens(path, tokens[-PUSH_TOKENS_LIMIT:])
 
 def remove_push_token(user_id, token):
     path = push_path(user_id)
@@ -2537,8 +2550,7 @@ def run_memory_tool(user_id, calls):
         if not isinstance(document, str) or not document.strip():
             continue
 
-        save_memory(user_id, sanitize_memory(document))
-        saved = True
+        saved = save_memory(user_id, sanitize_memory(document)) or saved
 
     if not saved:
         return ""
@@ -3941,6 +3953,11 @@ def message_key_error(user):
     }), 401
 
 
+def request_json_object():
+    body = request.get_json(force=True, silent=True)
+    return body if isinstance(body, dict) else {}
+
+
 @app.get("/api/live/voices")
 def list_live_voices():
     user = current_user()
@@ -3973,9 +3990,9 @@ def create_live_token():
     if not API_GEMA:
         return jsonify({"error": "API_GEMA não configurada no arquivo .env."}), 503
 
-    body = request.get_json(force=True, silent=True) or {}
+    body = request_json_object()
     voice = body.get("voice", DEFAULT_LIVE_VOICE)
-    if voice not in LIVE_VOICES:
+    if not isinstance(voice, str) or voice not in LIVE_VOICES:
         return jsonify({"error": "Voz Gemini inválida."}), 400
 
     # O modelo da voz não passa pelo prompt do chat: injetamos a hora do
@@ -4066,8 +4083,10 @@ def live_tool():
     if key_error:
         return key_error
 
-    body = request.get_json(force=True, silent=True) or {}
-    calls = body.get("calls") or []
+    body = request_json_object()
+    calls = body.get("calls", [])
+    if not isinstance(calls, list):
+        return jsonify({"error": "Lista de ferramentas inválida."}), 400
     results = []
 
     for index, call in enumerate(calls):
@@ -4138,7 +4157,7 @@ def studio_chat():
     if not API_KEY:
         return jsonify({"error": "API_KEY não configurada no arquivo .env."}), 500
 
-    body = request.get_json(force=True, silent=True) or {}
+    body = request_json_object()
 
     user_id = "acct_%d" % user["id"]
 
@@ -4329,6 +4348,8 @@ def studio_raw():
 
     response = app.response_class(data, mimetype=mime)
     response.headers["Content-Disposition"] = "inline; filename=\"%s\"" % path.name
+    response.headers["Content-Security-Policy"] = "sandbox"
+    response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
 
@@ -4346,12 +4367,10 @@ def chat_title():
     if not API_KEY:
         return jsonify({"error": "API_KEY não configurada no arquivo .env."}), 500
 
-    try:
-        body = request.get_json(force=True, silent=True) or {}
-    except Exception:
-        body = {}
+    body = request_json_object()
 
-    message = body.get("message", "").strip()
+    message = body.get("message", "")
+    message = message.strip() if isinstance(message, str) else ""
     if not message:
         return jsonify({"error": "Mensagem não fornecida."}), 400
 
@@ -4377,10 +4396,7 @@ def chat():
     if not API_KEY:
         return jsonify({"error": "API_KEY não configurada no arquivo .env."}), 500
 
-    try:
-        body = request.get_json(force=True, silent=True) or {}
-    except Exception:
-        body = {}
+    body = request_json_object()
 
     # A memória fica presa à conta logada; o userId vindo do navegador é ignorado.
     user_id = "acct_%d" % user["id"]
@@ -4524,7 +4540,7 @@ def update_system_prompt():
     if key_error:
         return key_error
 
-    body = request.get_json(force=True, silent=True) or {}
+    body = request_json_object()
     prompt = body.get("prompt", "")
     if not isinstance(prompt, str):
         return jsonify({"error": "System prompt inválido."}), 400
@@ -4606,7 +4622,7 @@ def update_deep_settings():
     if key_error:
         return key_error
 
-    body = request.get_json(force=True, silent=True) or {}
+    body = request_json_object()
 
     agent = body.get("agent", "")
     if not isinstance(agent, str):
@@ -4653,7 +4669,7 @@ def update_time_settings():
     if key_error:
         return key_error
 
-    body = request.get_json(force=True, silent=True) or {}
+    body = request_json_object()
 
     try:
         offset = float(body.get("offset"))
@@ -4725,7 +4741,7 @@ def replace_memories():
     if key_error:
         return key_error
 
-    body = request.get_json(force=True, silent=True) or {}
+    body = request_json_object()
     document = body.get("document", "")
     if not isinstance(document, str):
         return jsonify({"error": "Documento de memória inválido."}), 400
@@ -4734,7 +4750,8 @@ def replace_memories():
     if not document:
         return jsonify({"error": "O documento de memória não pode ficar vazio."}), 400
 
-    save_memory("acct_%d" % user["id"], document)
+    if not save_memory("acct_%d" % user["id"], document):
+        return jsonify({"error": "Não foi possível salvar a memória."}), 500
     return jsonify({"ok": True, "limit": MEMORY_FILE_LIMIT})
 
 
@@ -4748,7 +4765,8 @@ def clear_memories():
     if key_error:
         return key_error
 
-    clear_memory("acct_%d" % user["id"])
+    if not clear_memory("acct_%d" % user["id"]):
+        return jsonify({"error": "Não foi possível apagar a memória."}), 500
     return jsonify({"ok": True})
 
 
@@ -4776,8 +4794,12 @@ def remove_reminder(reminder_id):
         return key_error
 
     user_id = "acct_%d" % user["id"]
-    if not delete_reminder(user_id, reminder_id):
-        return jsonify({"error": "Lembrete não encontrado."}), 404
+    try:
+        if not delete_reminder(user_id, reminder_id):
+            return jsonify({"error": "Lembrete não encontrado."}), 404
+    except OSError as error:
+        print("[NEXA-LEMBRETE] falha ao apagar lembrete:", error)
+        return jsonify({"error": "Não foi possível apagar o lembrete."}), 500
 
     return jsonify({"ok": True})
 
@@ -4796,14 +4818,22 @@ def due_reminders():
     since = request.args.get("since")
     if since is None:
         # Cliente antigo, sem cursor: mantém o comportamento de esvaziar.
-        return jsonify({"due": take_pending_reminders(user_id)})
+        try:
+            return jsonify({"due": take_pending_reminders(user_id)})
+        except OSError as error:
+            print("[NEXA-LEMBRETE] falha ao atualizar fila de pendentes:", error)
+            return jsonify({"error": "Não foi possível carregar os lembretes."}), 500
 
     try:
         after_seq = max(0, int(since))
     except (TypeError, ValueError):
         after_seq = 0
 
-    items = pending_reminders_since(user_id, after_seq)
+    try:
+        items = pending_reminders_since(user_id, after_seq)
+    except OSError as error:
+        print("[NEXA-LEMBRETE] falha ao atualizar fila de pendentes:", error)
+        return jsonify({"error": "Não foi possível carregar os lembretes."}), 500
     cursor = max([after_seq] + [item["seq"] for item in items])
     return jsonify({"due": items, "cursor": cursor})
 
@@ -4836,7 +4866,7 @@ def save_chat(chat_id):
     if request.content_length and request.content_length > CHATS_MAX_BYTES:
         return jsonify({"error": "Conversa grande demais para sincronizar."}), 413
 
-    body = request.get_json(silent=True)
+    body = request_json_object()
     if not isinstance(body, dict):
         return jsonify({"error": "Corpo inválido."}), 400
 
@@ -4961,12 +4991,13 @@ def register_push_token():
             print("[NEXA] push-token recusado: sessão e chave de mensagem ausentes ou inválidas.")
             return jsonify({"error": "Faça login para ativar as notificações."}), 401
 
-    body = request.get_json(force=True, silent=True) or {}
+    body = request_json_object()
     token = body.get("token", "")
     if not isinstance(token, str) or not token.strip() or len(token) > 4096:
         return jsonify({"error": "Token de notificação inválido."}), 400
 
-    save_push_token("acct_%d" % user["id"], token.strip())
+    if not save_push_token("acct_%d" % user["id"], token.strip()):
+        return jsonify({"error": "Não foi possível salvar o token de notificação."}), 500
     print("[NEXA] push-token registrado para", user["username"])
     return jsonify({"ok": True})
 

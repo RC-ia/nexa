@@ -19,14 +19,14 @@ const btnStop = document.getElementById("btnStop");
 const suggestions = document.getElementById("suggestions");
 const suggestionButtons = suggestions?.querySelectorAll(".studio-suggestion") || [];
 
-const HISTORY_KEY = "nexa_studio_history";
+const STORAGE_PREFIX = "nexa_studio:";
+let HISTORY_KEY = "";
 const HISTORY_LIMIT = 40;
 const KEY_PREFIX = "nexa_message_key:";
 const FILES_WIDTH_KEY = "nexa_studio_files_width";
 const CHAT_WIDTH_KEY = "nexa_studio_chat_width";
-const TABS_KEY = "nexa_studio_tabs";
-const ACTIVE_TAB_KEY = "nexa_studio_active_tab";
-const TREE_OPEN_KEY = "nexa_studio_tree_open";
+let TABS_KEY = "";
+let TREE_OPEN_KEY = "";
 
 let accountUsername = "";
 let messageKey = "";
@@ -54,10 +54,18 @@ function setStatus(text, busyState) {
 
 function escapeHtml(text) {
   return text
-    .replace(/&/g, "&")
-    .replace(/</g, "<")
-    .replace(/>/g, ">")
-    .replace(/"/g, "\"");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function configureAccountStorage(accountId) {
+  const prefix = STORAGE_PREFIX + encodeURIComponent(accountId) + ":";
+  HISTORY_KEY = prefix + "history";
+  TABS_KEY = prefix + "tabs";
+  TREE_OPEN_KEY = prefix + "tree_open";
 }
 
 function renderMarkdown(text) {
@@ -70,7 +78,7 @@ function renderMarkdown(text) {
       const langMatch = body.match(/^(\w+)\n/);
       const lang = langMatch ? langMatch[1] : "";
       const code = langMatch ? body.slice(langMatch[0].length) : body;
-      out += `<pre><code class="language-${lang} hljs">${escapeHtml(code)}</code></pre>`;
+      out += `<pre><code class="language-${lang} hljs">${code}</code></pre>`;
     } else {
       out += blocks[index]
         .replace(/`([^`\n]+)`/g, "<code>$1</code>")
@@ -752,10 +760,6 @@ function downloadTabContent(path) {
 }
 
 async function initializeStudio() {
-  loadHistory();
-  loadTabsState();
-  loadTreeState();
-
   try {
     const response = await fetch("/api/auth/me");
 
@@ -772,6 +776,11 @@ async function initializeStudio() {
       location.replace("/");
       return;
     }
+
+    configureAccountStorage(data.user.id);
+    loadHistory();
+    loadTabsState();
+    loadTreeState();
 
     if (activeTabPath && openTabs.has(activeTabPath)) {
       renderTabs();
