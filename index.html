@@ -431,10 +431,22 @@
 
       <button
         type="submit"
+        id="sendButton"
         aria-label="Enviar"
         title="Enviar mensagem"
       >
-        ➤
+        <span class="send-icon" aria-hidden="true">➤</span>
+      </button>
+
+      <button
+        type="button"
+        id="stopButton"
+        class="stop-button"
+        aria-label="Parar geração"
+        title="Parar geração"
+        hidden
+      >
+        <span class="stop-icon" aria-hidden="true">■</span>
       </button>
 
     </form>

@@ -7,8 +7,11 @@ const feed = document.querySelector(".feed");
 
 const micButton = document.getElementById("micButton");
 const liveCallButton = document.getElementById("liveCallButton");
-const sendButton = composer.querySelector('button[type="submit"]');
+const sendButton = document.getElementById("sendButton");
+const stopButton = document.getElementById("stopButton");
 const newChatButton = document.getElementById("newChatButton");
+
+let abortController = null;
 
 const app = document.querySelector(".app");
 const drawerToggle = document.getElementById("drawerToggle");
@@ -1353,7 +1356,9 @@ async function askNexa(text, deep) {
         memoryEnabled,
         customInstructions,
         deep: deep === true
-      })
+      }),
+
+      signal: abortController?.signal
     });
 
   /*
@@ -2763,6 +2768,34 @@ async function generateChatTitle(message) {
   ==========================================
 */
 
+function setGenerating(generating) {
+  if (generating) {
+    sendButton.hidden = true;
+    stopButton.hidden = false;
+    stopButton.disabled = false;
+    input.disabled = true;
+    micButton.disabled = true;
+    newChatButton.disabled = true;
+    drawerNewChat.disabled = true;
+    abortController = new AbortController();
+  } else {
+    sendButton.hidden = false;
+    stopButton.hidden = true;
+    stopButton.disabled = true;
+    input.disabled = false;
+    micButton.disabled = false;
+    newChatButton.disabled = false;
+    drawerNewChat.disabled = false;
+    abortController = null;
+  }
+}
+
+stopButton.addEventListener("click", () => {
+  if (abortController) {
+    abortController.abort();
+  }
+});
+
 composer.addEventListener(
   "submit",
   async function (event) {
@@ -2788,10 +2821,7 @@ composer.addEventListener(
       setDeepMode(false);
     }
 
-    sendButton.disabled = true;
-    micButton.disabled = true;
-    newChatButton.disabled = true;
-    drawerNewChat.disabled = true;
+    setGenerating(true);
 
     /*
       Antes de enviar, puxa o que houver de novo: se outro aparelho
@@ -2872,11 +2902,7 @@ composer.addEventListener(
       notifyNativeVoice(error?.message || "erro desconhecido", true);
 
     } finally {
-      sendButton.disabled = false;
-      micButton.disabled = false;
-      newChatButton.disabled = false;
-      drawerNewChat.disabled = false;
-
+      setGenerating(false);
       input.focus();
     }
   }

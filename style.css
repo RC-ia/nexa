@@ -2138,7 +2138,7 @@ body {
   transform: scale(0.95);
 }
 
-.composer > button:last-child {
+.composer > #sendButton {
   background:
     linear-gradient(
       135deg,
@@ -2154,7 +2154,7 @@ body {
     inset 0 -2px 8px rgba(0,0,0,0.15);
 }
 
-.composer > button:last-child:hover {
+.composer > #sendButton:hover {
   background:
     linear-gradient(
       135deg,
@@ -2165,6 +2165,36 @@ body {
 
   box-shadow:
     0 0 30px rgba(139, 92, 246, 0.45),
+    inset 0 -2px 8px rgba(0,0,0,0.15);
+}
+
+.composer > #stopButton {
+  background:
+    linear-gradient(
+      135deg,
+      #ef4444 0%,
+      #dc2626 50%,
+      #b91c1c 100%
+    );
+
+  color: #fff;
+
+  box-shadow:
+    0 0 22px rgba(239, 68, 68, 0.35),
+    inset 0 -2px 8px rgba(0,0,0,0.15);
+}
+
+.composer > #stopButton:hover {
+  background:
+    linear-gradient(
+      135deg,
+      #f87171 0%,
+      #ef4444 50%,
+      #dc2626 100%
+    );
+
+  box-shadow:
+    0 0 30px rgba(239, 68, 68, 0.5),
     inset 0 -2px 8px rgba(0,0,0,0.15);
 }
 
