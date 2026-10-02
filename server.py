@@ -26,6 +26,8 @@ API_KEY = os.environ.get("API_KEY", "").strip()
 API_GEMA = os.environ.get("API_GEMA", "").strip()
 API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip("/")
 MODEL = os.environ.get("MODEL", "nada")
+# Modelo de visão para mensagens que contêm imagens; vazio reutiliza MODEL.
+VISION_MODEL = os.environ.get("VISION_MODEL", "").strip() or MODEL
 # Modelo próprio para o modo Rápido. Vazio usa o MODEL.
 MODEL_FLASK = os.environ.get("MODEL_FLASK", "").strip()
 # Habilita pensamento no modo Rápido para diffusiongemma (padrão: true).
@@ -196,6 +198,13 @@ DEFAULT_VERSION = "0.01"
 SYSTEM_PROMPT_MAX = 20000
 
 MAX_HISTORY_MESSAGES = 12
+MAX_FILE_BYTES = 2 * 1024 * 1024
+ALLOWED_FILE_EXTENSIONS = {
+    ".txt", ".md", ".markdown", ".csv", ".json", ".xml", ".html", ".htm",
+    ".css", ".js", ".ts", ".jsx", ".tsx", ".py", ".java", ".c", ".h",
+    ".cpp", ".hpp", ".cs", ".go", ".rs", ".php", ".rb", ".sql", ".yaml",
+    ".yml", ".toml", ".ini", ".log",
+}
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "1024"))
 # Quantas rodadas de ferramenta o modelo pode pedir antes de desistir.
 MAX_TOOL_ROUNDS = int(os.environ.get("MAX_TOOL_ROUNDS", "4"))
@@ -2394,12 +2403,19 @@ def build_messages(messages, memories, custom_instructions="", user_id="",
             })
             continue
 
-        if not message.get("content"):
+        content = message.get("content")
+        if not content:
+            continue
+        if isinstance(content, list):
+            contents.append({
+                "role": "user" if role == "user" else "assistant",
+                "content": content,
+            })
             continue
 
         contents.append({
             "role": "user" if role == "user" else "assistant",
-            "content": str(message["content"]),
+            "content": str(content),
         })
 
     if len(contents) == 1:
@@ -2426,6 +2442,25 @@ def reasoning_payload(level):
         return {}
 
     return {REASONING_PARAM: value}
+
+
+def message_has_image(messages):
+    return any(
+        isinstance(message, dict)
+        and isinstance(message.get("content"), list)
+        and any(
+            isinstance(part, dict)
+            and part.get("type") == "image_url"
+            for part in message["content"]
+        )
+        for message in messages
+    )
+
+
+def model_for_request(level, messages):
+    if message_has_image(messages):
+        return VISION_MODEL
+    return model_for_reasoning(level)
 
 
 def model_for_reasoning(level):
@@ -2460,7 +2495,7 @@ def reasoning_token_for_model(model_name, level):
 
 def request_body(stream, messages, memories, reasoning, custom_instructions="",
                  memory_enabled=True, user_id="", deep_report=""):
-    model = model_for_reasoning(reasoning)
+    model = model_for_request(reasoning, messages)
     body = {
         "model": model,
         "messages": build_messages(
@@ -4492,10 +4527,21 @@ def chat():
     direct_message = body.get("message")
     direct_message = direct_message.strip() if isinstance(direct_message, str) else ""
 
+    def text_content(content):
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            return " ".join(
+                part.get("text", "")
+                for part in content
+                if isinstance(part, dict) and isinstance(part.get("text"), str)
+            ).strip()
+        return ""
+
     already_present = any(
         isinstance(message, dict)
         and message.get("role") == "user"
-        and str(message.get("content") or "") == direct_message
+        and text_content(message.get("content")) == direct_message
         for message in incoming
     )
 
@@ -4506,7 +4552,7 @@ def chat():
     if not user_message:
         for message in reversed(incoming):
             if isinstance(message, dict) and message.get("role") == "user":
-                user_message = str(message.get("content") or "")
+                user_message = text_content(message.get("content"))
                 break
 
     messages = []
@@ -4514,12 +4560,57 @@ def chat():
         if not isinstance(message, dict):
             continue
 
-        content = str(message.get("content") or "").strip()
-        if not content:
+        content = message.get("content")
+        if isinstance(content, list):
+            safe_content = content
+        else:
+            safe_content = str(content or "").strip()
+        if not safe_content:
             continue
 
         role = "assistant" if message.get("role") in ("assistant", "model") else "user"
-        messages.append({"role": role, "content": content})
+        messages.append({"role": role, "content": safe_content})
+
+    attached_file = body.get("file")
+    if attached_file is not None:
+        if not isinstance(attached_file, dict):
+            return jsonify({"error": "Arquivo inválido."}), 400
+        file_name = os.path.basename(str(attached_file.get("name") or ""))
+        extension = Path(file_name).suffix.lower()
+        file_text = attached_file.get("text")
+        if (
+            not file_name
+            or extension not in ALLOWED_FILE_EXTENSIONS
+            or not isinstance(file_text, str)
+            or len(file_text.encode("utf-8")) > MAX_FILE_BYTES
+        ):
+            return jsonify({"error": "Arquivo inválido, executável ou grande demais."}), 400
+        if not messages or messages[-1]["role"] != "user":
+            return jsonify({"error": "O arquivo precisa acompanhar uma mensagem."}), 400
+        text_content = messages[-1]["content"]
+        messages[-1]["content"] = (
+            "Arquivo anexado: %s\n\nConteúdo do arquivo:\n%s\n\nMensagem do usuário: %s"
+            % (file_name, file_text, text_content)
+        )
+
+    image = body.get("image")
+    if image is not None:
+        if not isinstance(image, dict):
+            return jsonify({"error": "Imagem inválida."}), 400
+        data_url = image.get("dataUrl")
+        if (
+            not isinstance(data_url, str)
+            or not data_url.startswith("data:image/")
+            or len(data_url) > 11 * 1024 * 1024
+        ):
+            return jsonify({"error": "Imagem inválida ou grande demais."}), 400
+        if not messages or messages[-1]["role"] != "user":
+            return jsonify({"error": "A imagem precisa acompanhar uma mensagem."}), 400
+        text_content = messages[-1]["content"]
+        messages[-1]["content"] = [
+            {"type": "text", "text": text_content},
+            {"type": "image_url", "image_url": {"url": data_url}},
+        ]
 
     if not messages:
         return jsonify({"error": "Nenhuma mensagem foi enviada para a NEXA."}), 400

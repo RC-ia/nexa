@@ -59,6 +59,17 @@ const LIVE_VOICE_KEY = "nexa_live_voice";
 const MEMORY_ENABLED_KEY = "nexa_memory_enabled:";
 const INSTRUCTIONS_KEY = "nexa_custom_instructions:";
 const DEEP_MODE_KEY = "nexa_deep_mode:";
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const ALLOWED_FILE_EXTENSIONS = new Set([
+  "txt", "md", "markdown", "csv", "json", "xml", "html", "htm",
+  "css", "js", "ts", "jsx", "tsx", "py", "java", "c", "h", "cpp",
+  "hpp", "cs", "go", "rs", "php", "rb", "sql", "yaml", "yml", "toml",
+  "ini", "log"
+]);
+let pendingImage = null;
+let pendingFile = null;
+const imageCache = new Map();
 
 const REASONING_LABELS = {
   none: "Rápido",
@@ -312,11 +323,93 @@ function setDeepMode(isOn) {
   renderDeepMode();
 }
 
+function renderImagePreview() {
+  const preview = document.getElementById("imagePreview");
+  const image = document.getElementById("imagePreviewImage");
+  const name = document.getElementById("imagePreviewName");
+  if (!preview || !image || !name) return;
+
+  if (!pendingImage) {
+    preview.hidden = true;
+    image.removeAttribute("src");
+    name.textContent = "";
+    input.placeholder = deepMode
+      ? "Descreva o tema da pesquisa profunda..."
+      : "Digite uma mensagem...";
+    return;
+  }
+
+  image.src = pendingImage.dataUrl;
+  name.textContent = pendingImage.name;
+  preview.hidden = false;
+  input.placeholder = `Imagem anexada: ${pendingImage.name}`;
+}
+
+function clearAttachment() {
+  pendingImage = null;
+  pendingFile = null;
+  renderImagePreview();
+  renderFilePreview();
+}
+
+function renderFilePreview() {
+  const preview = document.getElementById("filePreview");
+  const name = document.getElementById("filePreviewName");
+  if (!preview || !name) return;
+  preview.hidden = !pendingFile;
+  name.textContent = pendingFile ? pendingFile.name : "";
+}
+
+function readTextFile(file) {
+  return new Promise((resolve, reject) => {
+    const extension = file?.name?.split(".").pop()?.toLowerCase() || "";
+    if (!file || !ALLOWED_FILE_EXTENSIONS.has(extension)) {
+      reject(new Error("Tipo de arquivo não permitido. Executáveis não são aceitos."));
+      return;
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      reject(new Error("O arquivo deve ter no máximo 2 MB."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve({
+      name: file.name,
+      mimeType: file.type || "text/plain",
+      text: String(reader.result || "")
+    });
+    reader.onerror = () => reject(new Error("Não foi possível ler o arquivo."));
+    reader.readAsText(file);
+  });
+}
+
+function readImage(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type.startsWith("image/")) {
+      reject(new Error("Selecione uma imagem válida."));
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      reject(new Error("A imagem deve ter no máximo 8 MB."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve({
+      name: file.name,
+      mimeType: file.type,
+      dataUrl: String(reader.result || "")
+    });
+    reader.onerror = () => reject(new Error("Não foi possível ler a imagem."));
+    reader.readAsDataURL(file);
+  });
+}
+
 function setupAttachUI() {
   const button =
     document.getElementById("attachButton");
   const menu =
     document.getElementById("attachMenu");
+  const imageInput = document.getElementById("imageInput");
+  const fileInput = document.getElementById("fileInput");
 
   if (!button || !menu) {
     return;
@@ -340,6 +433,57 @@ function setupAttachUI() {
     }
   );
 
+  if (imageInput) {
+    imageInput.addEventListener("change", async () => {
+      try {
+        pendingImage = await readImage(imageInput.files?.[0]);
+        pendingFile = null;
+        renderImagePreview();
+        renderFilePreview();
+      } catch (error) {
+        pendingImage = null;
+        renderImagePreview();
+        alert(error.message);
+      } finally {
+        imageInput.value = "";
+      }
+    });
+  }
+
+  if (fileInput) {
+    fileInput.addEventListener("change", async () => {
+      try {
+        pendingFile = await readTextFile(fileInput.files?.[0]);
+        pendingImage = null;
+        renderFilePreview();
+        renderImagePreview();
+        input.placeholder = `Arquivo anexado: ${pendingFile.name}`;
+      } catch (error) {
+        pendingFile = null;
+        renderFilePreview();
+        alert(error.message);
+      } finally {
+        fileInput.value = "";
+      }
+    });
+  }
+
+  const removeFileButton = document.getElementById("filePreviewRemove");
+  if (removeFileButton) {
+    removeFileButton.addEventListener("click", () => {
+      clearAttachment();
+      input.focus();
+    });
+  }
+
+  const removeImageButton = document.getElementById("imagePreviewRemove");
+  if (removeImageButton) {
+    removeImageButton.addEventListener("click", () => {
+      clearAttachment();
+      input.focus();
+    });
+  }
+
   menu.addEventListener(
     "click",
     function (event) {
@@ -352,6 +496,10 @@ function setupAttachUI() {
 
       if (item.id === "attachDeep") {
         setDeepMode(!deepMode);
+      } else if (item.id === "attachImage" && imageInput) {
+        imageInput.click();
+      } else if (item.id === "attachFile" && fileInput) {
+        fileInput.click();
       }
 
       setOpen(false);
@@ -451,7 +599,21 @@ function cleanMessages(list) {
       id: typeof item.id === "string" ? item.id : undefined,
       thinking: item.thinking,
       memoryUpdated: item.memoryUpdated === true,
-      searched: item.searched === true
+      searched: item.searched === true,
+      image: item.image && typeof item.image.dataUrl === "string"
+        ? {
+            name: typeof item.image.name === "string" ? item.image.name : "Imagem",
+            mimeType: typeof item.image.mimeType === "string" ? item.image.mimeType : "image/*",
+            dataUrl: item.image.dataUrl
+          }
+        : null,
+      file: item.file && typeof item.file.text === "string"
+        ? {
+            name: typeof item.file.name === "string" ? item.file.name : "Arquivo",
+            mimeType: typeof item.file.mimeType === "string" ? item.file.mimeType : "text/plain",
+            text: item.file.text
+          }
+        : null
     }));
 }
 
@@ -1017,7 +1179,7 @@ function attachMessageActions(message, contentDiv, messageId) {
   message.appendChild(actions);
 }
 
-function addMessage(text, type, thinkingText, memoryUpdated, messageId) {
+function addMessage(text, type, thinkingText, memoryUpdated, messageId, image, file) {
   const message = document.createElement("div");
   message.className = "message " + type;
   if (messageId) message.dataset.messageId = messageId;
@@ -1050,8 +1212,23 @@ function addMessage(text, type, thinkingText, memoryUpdated, messageId) {
     const memoryNotice = createMemoryNotice();
     memoryNotice.restore(memoryUpdated === true);
     message.appendChild(memoryNotice.element);
+  }
 
-    message.appendChild(contentDiv);
+  message.appendChild(contentDiv);
+
+  if (type === "user" && file?.name) {
+    const fileElement = document.createElement("div");
+    fileElement.className = "message-file";
+    fileElement.textContent = `📄 ${file.name}`;
+    message.appendChild(fileElement);
+  }
+
+  if (type === "user" && image?.dataUrl) {
+    const imageElement = document.createElement("img");
+    imageElement.className = "message-image";
+    imageElement.src = image.dataUrl;
+    imageElement.alt = image.name || "Imagem enviada";
+    message.appendChild(imageElement);
   }
 
   if (type !== "user") {
@@ -1077,6 +1254,8 @@ function retryFromMessage(messageId) {
   if (userIndex < 0 || history[userIndex].role !== "user") return;
 
   const userMessage = history[userIndex].content;
+  const userImage = history[userIndex].image || null;
+  const userFile = history[userIndex].file || null;
 
   history.splice(userIndex);
   saveMemory();
@@ -1084,18 +1263,20 @@ function retryFromMessage(messageId) {
   renderChat();
 
   const userMsgId = makeMessageId();
-  addMessage(userMessage, "user", "", false, userMsgId);
+  addMessage(userMessage, "user", "", false, userMsgId, userImage, userFile);
 
   history.push({
     role: "user",
     content: userMessage,
-    id: userMsgId
+    id: userMsgId,
+    image: userImage,
+    file: userFile
   });
 
   showTyping();
   setGenerating(true);
 
-  askNexa(userMessage, deepMode).catch(error => {
+  askNexa(userMessage, deepMode, userImage, userFile).catch(error => {
     if (error.name === "AbortError") {
       hideTyping();
       return;
@@ -1449,7 +1630,7 @@ function createStreamingMessage() {
   ==========================================
 */
 
-async function askNexa(text, deep) {
+async function askNexa(text, deep, image, file) {
   const response =
     await fetch("/api/chat", {
       method: "POST",
@@ -1469,7 +1650,9 @@ async function askNexa(text, deep) {
         reasoning: reasoningLevel,
         memoryEnabled,
         customInstructions,
-        deep: deep === true
+        deep: deep === true,
+        image: image || null,
+        file: file || null
       }),
 
       signal: abortController?.signal
@@ -1742,7 +1925,9 @@ async function askNexa(text, deep) {
   history.push({
     role: "user",
     content: text,
-    id: makeMessageId()
+    id: makeMessageId(),
+    image: image || null,
+    file: file || null
   });
 
   const assistantMessageId = makeMessageId();
@@ -2923,11 +3108,17 @@ composer.addEventListener(
       input.value.trim();
 
     if (
-      !text ||
+      (!text && !pendingImage && !pendingFile) ||
       sendButton.disabled
     ) {
       return;
     }
+
+    const submittedImage = pendingImage;
+    const submittedFile = pendingFile;
+    const messageText = text || (submittedImage
+      ? "Descreva esta imagem."
+      : "Analise o arquivo anexado.");
 
     /*
       O modo de pesquisa profunda permanece ativo neste chat até o usuário
@@ -2961,9 +3152,10 @@ composer.addEventListener(
     */
 
     const userMsgId = makeMessageId();
-    addMessage(text, "user", "", false, userMsgId);
+    addMessage(messageText, "user", "", false, userMsgId, submittedImage);
 
     input.value = "";
+    clearAttachment();
 
     /*
       Indicador enquanto o primeiro
@@ -2973,13 +3165,17 @@ composer.addEventListener(
     showTyping();
 
     try {
-      await askNexa(text, deep);
+      await askNexa(messageText, deep, submittedImage, submittedFile);
+      pendingImage = null;
+      input.placeholder = deepMode
+        ? "Descreva o tema da pesquisa profunda..."
+        : "Digite uma mensagem...";
 
       /* 
         Se foi a primeira mensagem, gera título pela IA
       */
       if (isFirstMessage) {
-        const aiTitle = await generateChatTitle(text);
+        const aiTitle = await generateChatTitle(messageText);
         if (aiTitle) {
           const chat = findChat(titleChatId);
           if (chat) {
@@ -3450,7 +3646,9 @@ function restoreConversation() {
         : "nexa",
       item.thinking,
       item.memoryUpdated,
-      item.id
+      item.id,
+      item.image,
+      item.file
     );
   });
 }

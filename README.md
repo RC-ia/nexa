@@ -35,8 +35,9 @@ API_KEY=sua-chave-aqui
 API_GEMA=sua-chave-gemini-aqui
 ```
 
-Opcionais (já têm padrão): `API_BASE`, `MODEL`, `PORT`, `MAX_OUTPUT_TOKENS`,
-`MEMORY_DIR`.
+Opcionais (já têm padrão): `API_BASE`, `MODEL`, `VISION_MODEL`, `PORT`,
+`MAX_OUTPUT_TOKENS`, `MEMORY_DIR`. `VISION_MODEL` define o modelo usado para
+analisar imagens; se omitido, reutiliza `MODEL`.
 Nunca versione o `.env` (ele já está no `.gitignore`).
 
 ## Login e painel admin

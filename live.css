@@ -5,8 +5,10 @@
 }
 
 .live-body {
+  width: 100%;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100svh;
   background:
     radial-gradient(ellipse at 50% 42%, rgba(19, 92, 82, 0.2), transparent 36rem),
     radial-gradient(ellipse at 14% 90%, rgba(76, 29, 149, 0.18), transparent 32rem),
@@ -16,11 +18,11 @@
 .live-page {
   display: grid;
   grid-template-rows: auto 1fr;
-  width: min(100%, 960px);
+  width: 100%;
   min-height: 100vh;
   min-height: 100svh;
-  margin: 0 auto;
-  padding: 24px 32px 28px;
+  margin: 0;
+  padding: 24px clamp(24px, 5vw, 72px) 28px;
 }
 
 .live-topbar {
@@ -61,8 +63,8 @@
   align-content: center;
   justify-items: center;
   gap: 20px;
-  width: min(100%, 620px);
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
   padding: 24px 0;
 }
 

@@ -21,7 +21,7 @@
 
   <title>NEXA</title>
 
-  <link rel="stylesheet" href="style.css?v=19">
+  <link rel="stylesheet" href="style.css?v=20">
 </head>
 
 <body>
@@ -227,6 +227,16 @@
       autocomplete="off"
     >
 
+      <div id="imagePreview" class="image-preview" hidden>
+        <img id="imagePreviewImage" alt="Imagem anexada">
+        <span id="imagePreviewName"></span>
+        <button type="button" id="imagePreviewRemove" aria-label="Remover imagem">×</button>
+      </div>
+      <div id="filePreview" class="image-preview file-preview" hidden>
+        <span id="filePreviewName"></span>
+        <button type="button" id="filePreviewRemove" aria-label="Remover arquivo">×</button>
+      </div>
+
       <input
         id="messageInput"
         type="text"
@@ -363,12 +373,26 @@
           <button
             type="button"
             class="reasoning-item"
+            id="attachImage"
             role="menuitem"
-            disabled
           >
             <span class="reasoning-item-main">
               <span class="reasoning-item-name">Imagem</span>
-              <span class="reasoning-item-hint">Em breve</span>
+              <span class="reasoning-item-hint">Analisar uma imagem</span>
+            </span>
+          </button>
+          <input id="imageInput" type="file" accept="image/*" hidden>
+          <input id="fileInput" type="file" hidden>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            role="menuitem"
+            id="attachFile"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Arquivo</span>
+              <span class="reasoning-item-hint">Ler documentos e textos</span>
             </span>
           </button>
 
@@ -380,18 +404,6 @@
           >
             <span class="reasoning-item-main">
               <span class="reasoning-item-name">Vídeo</span>
-              <span class="reasoning-item-hint">Em breve</span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            class="reasoning-item"
-            role="menuitem"
-            disabled
-          >
-            <span class="reasoning-item-main">
-              <span class="reasoning-item-name">Arquivos</span>
               <span class="reasoning-item-hint">Em breve</span>
             </span>
           </button>
@@ -735,7 +747,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
-  <script src="script.js?v=54"></script>
+  <script src="script.js?v=56"></script>
 
 </body>
 
