@@ -1775,11 +1775,16 @@ def extract_reasoning(data):
 
 
 def extract_diffusiongemma_thought(text):
-    """Extrai bloco de pensamento do formato <|channel>thought ... <channel|>."""
-    if not text or "<|channel>thought" not in text:
+    """Extrai bloco de pensamento do formato <|channel>thought ... <channel|> ou <|channel> ... <channel|>."""
+    if not text or "<|channel>" not in text:
         return ""
     try:
-        start = text.index("<|channel>thought") + len("<|channel>thought")
+        # Tenta primeiro o formato documentado: <|channel>thought ... <channel|>
+        if "<|channel>thought" in text:
+            start = text.index("<|channel>thought") + len("<|channel>thought")
+        else:
+            # Formato observado: <|channel> ... <channel|>
+            start = text.index("<|channel>") + len("<|channel>")
         end = text.index("<channel|>", start)
         return text[start:end].strip()
     except ValueError:
