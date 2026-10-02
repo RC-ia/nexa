@@ -26,8 +26,11 @@ API_KEY = os.environ.get("API_KEY", "").strip()
 API_GEMA = os.environ.get("API_GEMA", "").strip()
 API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip("/")
 MODEL = os.environ.get("MODEL", "nada")
-# Modelo de visão para mensagens que contêm imagens; vazio reutiliza MODEL.
-VISION_MODEL = os.environ.get("VISION_MODEL", "").strip() or MODEL
+# Modelo usado pelo agente que analisa imagens antes da resposta textual.
+VISION_MODEL = (
+    os.environ.get("VISION_MODEL", "").strip()
+    or "nvidia/google/diffusiongemma-26b-a4b-it"
+)
 VISION_AGENT_PROMPT = (
     "Você é o agente de análise visual da NEXA. Analise a imagem com atenção "
     "e produza uma descrição detalhada, objetiva e completa para outro modelo "

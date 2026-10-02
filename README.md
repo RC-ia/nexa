@@ -36,8 +36,9 @@ API_GEMA=sua-chave-gemini-aqui
 ```
 
 Opcionais (já têm padrão): `API_BASE`, `MODEL`, `VISION_MODEL`, `PORT`,
-`MAX_OUTPUT_TOKENS`, `MEMORY_DIR`. `VISION_MODEL` define o modelo usado para
-analisar imagens; se omitido, reutiliza `MODEL`.
+`MAX_OUTPUT_TOKENS`, `MEMORY_DIR`. `VISION_MODEL` define o modelo usado pelo
+agente que analisa imagens antes da resposta textual. O padrão é
+`nvidia/google/diffusiongemma-26b-a4b-it`.
 Nunca versione o `.env` (ele já está no `.gitignore`).
 
 ## Login e painel admin
