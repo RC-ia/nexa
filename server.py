@@ -2687,7 +2687,10 @@ DEEP_ROUNDS_LIMIT = 30
 DEEP_INTENT_PROMPT = (
     "Você é o agente de intenção da NEXA. Antes de uma pesquisa profunda, "
     "transforme a pergunta atual do usuário em uma instrução de pesquisa "
-    "autocontida e clara para outro agente. Você receberá parte recente da "
+    "autocontida e clara para outro agente. Se houver um relatório visual "
+    "na conversa, use-o para entender todos os detalhes da imagem, mesmo que "
+    "você não consiga processar imagens diretamente. Não descarte esse "
+    "contexto visual. Você receberá parte recente da "
     "conversa apenas para resolver referências como 'isso', 'ele', 'aquela "
     "opção' ou 'compare com o que vimos'. Preserve exatamente a intenção, "
     "o escopo, o país, período, público, critérios e restrições relevantes. "
@@ -2715,7 +2718,7 @@ DEEP_RESEARCH_PROMPT = (
 
 
 def interpret_deep_intent(user_id, user_message, messages, reasoning=None,
-                          progress=None):
+                          progress=None, visual_report=""):
     """Converte pergunta contextual em uma instrução autocontida de pesquisa."""
     if not isinstance(user_message, str) or not user_message.strip():
         return ""
@@ -2728,10 +2731,19 @@ def interpret_deep_intent(user_id, user_message, messages, reasoning=None,
             recent.append("%s: %s" % (role, content[:4000]))
 
     context = "\n".join(recent)
+    visual_context = (
+        "\n\nRelatório visual da imagem anexada (use como contexto factual "
+        "da imagem):\n" + visual_report[:8000]
+        if visual_report else ""
+    )
     prompt = (
-        "Conversa recente (use apenas para resolver referências):\n%s\n\n"
+        "Conversa recente (use apenas para resolver referências):\n%s%s\n\n"
         "Pergunta que deve ser pesquisada:\n%s"
-        % (context or "(sem contexto anterior)", user_message.strip()[:4000])
+        % (
+            context or "(sem contexto anterior)",
+            visual_context,
+            user_message.strip()[:4000],
+        )
     )
     body = {
         "model": model_for_reasoning(reasoning),
@@ -3905,8 +3917,19 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
 
         def worker():
             try:
+                visual_report = ""
+                if message_has_image(messages):
+                    progress.put("O agente visual está analisando a imagem antes da pesquisa.")
+                    visual_messages = analyze_image_for_text_model(messages, reasoning)
+                    visual_content = visual_messages[-1].get("content", "")
+                    if isinstance(visual_content, str):
+                        marker = "Relatório do agente visual (use como contexto da imagem):"
+                        if marker in visual_content:
+                            visual_report = visual_content.split(marker, 1)[1].strip()
+
                 research_topic = interpret_deep_intent(
-                    user_id, user_message, messages, reasoning, progress.put
+                    user_id, user_message, messages, reasoning, progress.put,
+                    visual_report,
                 )
                 box["report"] = run_deep_research(
                     user_id, research_topic or user_message, progress.put, reasoning
