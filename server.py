@@ -2343,9 +2343,14 @@ def build_messages(messages, memories, custom_instructions="", user_id="",
         system_prompt += (
             "\n\nRelatório de pesquisa profunda sobre a última pergunta do "
             "usuário (feito por um pesquisador separado, sem o contexto da "
-            "conversa). Responda à última pergunta usando este relatório "
-            "como fonte principal, sem refazer buscas e sem inventar além "
-            "do que ele traz:\n\n" + deep_report
+            "conversa). Use este relatório como fonte principal e não faça "
+            "nova pesquisa nem tente usar ferramentas de pesquisa. Produza "
+            "uma resposta de tamanho considerável, desenvolvida e completa: "
+            "não comprima, encurte ou reduza o relatório a poucas frases. "
+            "Organize os pontos relevantes em seções e explique os fatos, "
+            "comparações, ressalvas e fontes presentes no relatório. Não "
+            "invente além do que ele traz; se algo estiver incompleto ou sem "
+            "confirmação, deixe isso claro:\n\n" + deep_report
         )
 
     agora = user_now(user_id)
@@ -2467,14 +2472,13 @@ def request_body(stream, messages, memories, reasoning, custom_instructions="",
     }
 
     if memory_enabled:
-        body["tools"] = [
-            MEMORY_TOOL,
-            SEARCH_TOOL,
-            VISIT_TOOL,
-            REMINDER_TOOL,
-            DEEP_RESEARCH_TOOL,
-            TIME_TOOL,
-        ]
+        body["tools"] = [MEMORY_TOOL, REMINDER_TOOL, TIME_TOOL]
+        if not deep_report:
+            body["tools"] += [
+                SEARCH_TOOL,
+                VISIT_TOOL,
+                DEEP_RESEARCH_TOOL,
+            ]
         body["tool_choice"] = "auto"
 
     body.update(reasoning_payload(reasoning))

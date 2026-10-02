@@ -89,7 +89,10 @@ def has_update():
 
 
 def pull_update():
-    result = git("pull", "--ff-only", "--quiet")
+    if GIT_BRANCH:
+        result = git("pull", "--ff-only", "--quiet", GIT_REMOTE, GIT_BRANCH)
+    else:
+        result = git("pull", "--ff-only", "--quiet")
 
     if result.returncode != 0:
         log("git pull falhou: " + (result.stderr or result.stdout or "").strip())
