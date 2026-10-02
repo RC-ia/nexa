@@ -2100,6 +2100,10 @@ body {
    COMPOSER
 ========================= */
 
+.image-preview[hidden] {
+  display: none;
+}
+
 .image-preview {
   display: flex;
   align-items: center;
