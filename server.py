@@ -28,6 +28,15 @@ API_BASE = os.environ.get("API_BASE", "https://9router.rcscan.online/v1").rstrip
 MODEL = os.environ.get("MODEL", "nada")
 # Modelo de visão para mensagens que contêm imagens; vazio reutiliza MODEL.
 VISION_MODEL = os.environ.get("VISION_MODEL", "").strip() or MODEL
+VISION_AGENT_PROMPT = (
+    "Você é o agente de análise visual da NEXA. Analise a imagem com atenção "
+    "e produza uma descrição detalhada, objetiva e completa para outro modelo "
+    "que não consegue enxergar a imagem. Inclua objetos, pessoas sem tentar "
+    "identificá-las, texto legível, layout, cores, posições, relações entre "
+    "elementos, estado aparente, gráficos, tabelas, sinais de erro e qualquer "
+    "detalhe relevante. Não invente informações: diferencie o que é visível "
+    "do que é apenas provável. Responda somente com o relatório visual."
+)
 # Modelo próprio para o modo Rápido. Vazio usa o MODEL.
 MODEL_FLASK = os.environ.get("MODEL_FLASK", "").strip()
 # Habilita pensamento no modo Rápido para diffusiongemma (padrão: true).
@@ -2493,6 +2502,64 @@ def reasoning_token_for_model(model_name, level):
     return "<|think|>"
 
 
+def analyze_image_for_text_model(messages, reasoning):
+    """Converte uma mensagem com imagem em contexto textual para o modelo final."""
+    enriched = [dict(message) for message in messages]
+    for index in range(len(enriched) - 1, -1, -1):
+        message = enriched[index]
+        content = message.get("content")
+        if message.get("role") != "user" or not isinstance(content, list):
+            continue
+
+        image_parts = [
+            part for part in content
+            if isinstance(part, dict) and part.get("type") == "image_url"
+        ]
+        if not image_parts:
+            continue
+
+        visual_content = [{"type": "text", "text": VISION_AGENT_PROMPT}]
+        visual_content.extend(image_parts)
+        response = requests.post(
+            API_BASE + "/chat/completions",
+            headers=auth_headers(),
+            json={
+                "model": VISION_MODEL,
+                "messages": [{"role": "user", "content": visual_content}],
+                "stream": False,
+                "max_tokens": min(MAX_OUTPUT_TOKENS, 4000),
+            },
+            timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
+        )
+        if response.status_code != 200:
+            log_upstream_error(response)
+            raise RuntimeError("O agente visual não conseguiu analisar a imagem.")
+
+        try:
+            report = extract_text(response.json()).strip()
+        except (ValueError, TypeError):
+            report = ""
+        if not report:
+            raise RuntimeError("O agente visual retornou uma análise vazia.")
+
+        text_parts = [
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        ]
+        user_text = " ".join(text_parts).strip()
+        enriched[index] = {
+            "role": "user",
+            "content": (
+                "%s\n\nRelatório do agente visual (use como contexto da imagem):\n%s"
+                % (user_text, report)
+            ).strip(),
+        }
+        break
+
+    return enriched
+
+
 def request_body(stream, messages, memories, reasoning, custom_instructions="",
                  memory_enabled=True, user_id="", deep_report=""):
     model = model_for_request(reasoning, messages)
@@ -4614,6 +4681,13 @@ def chat():
 
     if not messages:
         return jsonify({"error": "Nenhuma mensagem foi enviada para a NEXA."}), 400
+
+    if message_has_image(messages):
+        try:
+            messages = analyze_image_for_text_model(messages, reasoning)
+        except (requests.RequestException, RuntimeError) as error:
+            print("[NEXA-VISÃO] falha ao analisar imagem:", error)
+            return jsonify({"error": "Não foi possível analisar a imagem."}), 502
 
     memories = get_memories(user_id) if memory_enabled else []
 
