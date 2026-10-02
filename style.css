@@ -44,6 +44,22 @@
   --bubble-max: 1000px;
 }
 
+body.file-drag-over::after {
+  content: "Solte o arquivo para anexá-lo";
+  position: fixed;
+  inset: 12px;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 18px;
+  background: rgba(20, 14, 30, .88);
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
 
 /* =========================
    BASE

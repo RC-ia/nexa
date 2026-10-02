@@ -476,6 +476,50 @@ function setupAttachUI() {
     });
   }
 
+  async function acceptDroppedFile(file) {
+    if (!file) return;
+    try {
+      if (file.type.startsWith("image/")) {
+        pendingImage = await readImage(file);
+        pendingFile = null;
+        renderImagePreview();
+        renderFilePreview();
+      } else {
+        pendingFile = await readTextFile(file);
+        pendingImage = null;
+        renderFilePreview();
+        renderImagePreview();
+        input.placeholder = `Arquivo anexado: ${pendingFile.name}`;
+      }
+    } catch (error) {
+      clearAttachment();
+      alert(error.message);
+    }
+  }
+
+  [document].forEach(target => {
+    if (!target) return;
+    target.addEventListener("dragover", event => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      document.body.classList.add("file-drag-over");
+    });
+    target.addEventListener("dragleave", event => {
+      if (!event.relatedTarget || !target.contains(event.relatedTarget)) {
+        document.body.classList.remove("file-drag-over");
+      }
+    });
+    target.addEventListener("drop", event => {
+      event.preventDefault();
+      document.body.classList.remove("file-drag-over");
+      acceptDroppedFile(event.dataTransfer.files?.[0]);
+    });
+  });
+
+  document.addEventListener("dragend", () => {
+    document.body.classList.remove("file-drag-over");
+  });
+
   const removeImageButton = document.getElementById("imagePreviewRemove");
   if (removeImageButton) {
     removeImageButton.addEventListener("click", () => {
