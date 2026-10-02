@@ -187,14 +187,14 @@ body {
 }
 
 .topbar,
-.composer {
-  margin-inline: var(--gutter);
+.composer,
+.feed {
+  width: 100%;
 }
 
 .feed {
   flex: 1;
   min-height: 0;
-  margin-inline: var(--gutter);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
