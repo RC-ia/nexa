@@ -58,6 +58,7 @@ const REASONING_KEY = "nexa_reasoning";
 const LIVE_VOICE_KEY = "nexa_live_voice";
 const MEMORY_ENABLED_KEY = "nexa_memory_enabled:";
 const INSTRUCTIONS_KEY = "nexa_custom_instructions:";
+const DEEP_MODE_KEY = "nexa_deep_mode:";
 
 const REASONING_LABELS = {
   none: "Rápido",
@@ -285,8 +286,29 @@ function renderDeepMode() {
   }
 }
 
+function deepModeStorageKey() {
+  return DEEP_MODE_KEY + (currentUser ? currentUser.id : "anonymous");
+}
+
+function loadDeepMode() {
+  try {
+    deepMode = localStorage.getItem(deepModeStorageKey()) === "true";
+  } catch (error) {
+    deepMode = false;
+  }
+}
+
+function saveDeepMode() {
+  try {
+    localStorage.setItem(deepModeStorageKey(), deepMode ? "true" : "false");
+  } catch (error) {
+    console.error("Erro ao salvar o modo de pesquisa profunda:", error);
+  }
+}
+
 function setDeepMode(isOn) {
   deepMode = isOn === true;
+  saveDeepMode();
   renderDeepMode();
 }
 
@@ -971,6 +993,30 @@ const md = window.markdownit
   document.head.appendChild(script);
 })();
 
+function attachMessageActions(message, contentDiv, messageId) {
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+
+  const retryBtn = document.createElement("button");
+  retryBtn.type = "button";
+  retryBtn.className = "message-action retry";
+  retryBtn.title = "Tentar novamente";
+  retryBtn.setAttribute("aria-label", "Tentar novamente esta resposta");
+  retryBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 1 20.49 15"></path></svg>`;
+  retryBtn.addEventListener("click", () => retryFromMessage(messageId));
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "message-action copy";
+  copyBtn.title = "Copiar mensagem";
+  copyBtn.setAttribute("aria-label", "Copiar conteúdo da mensagem");
+  copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a9 9 0 0 1 2 2v1"></path></svg>`;
+  copyBtn.addEventListener("click", () => copyMessageContent(contentDiv));
+
+  actions.append(retryBtn, copyBtn);
+  message.appendChild(actions);
+}
+
 function addMessage(text, type, thinkingText, memoryUpdated, messageId) {
   const message = document.createElement("div");
   message.className = "message " + type;
@@ -1009,29 +1055,7 @@ function addMessage(text, type, thinkingText, memoryUpdated, messageId) {
   }
 
   if (type !== "user") {
-    // Action buttons (retry, copy) - below message content
-    const actions = document.createElement("div");
-    actions.className = "message-actions";
-
-    const retryBtn = document.createElement("button");
-    retryBtn.type = "button";
-    retryBtn.className = "message-action retry";
-    retryBtn.title = "Tentar novamente";
-    retryBtn.setAttribute("aria-label", "Tentar novamente esta resposta");
-    retryBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>`;
-    retryBtn.addEventListener("click", () => retryFromMessage(messageId));
-
-    const copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.className = "message-action copy";
-    copyBtn.title = "Copiar mensagem";
-    copyBtn.setAttribute("aria-label", "Copiar conteúdo da mensagem");
-    copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
-    copyBtn.addEventListener("click", () => copyMessageContent(contentDiv));
-
-    actions.appendChild(retryBtn);
-    actions.appendChild(copyBtn);
-    message.appendChild(actions);
+    attachMessageActions(message, contentDiv, messageId);
   }
   chat.appendChild(message);
   message.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -1071,7 +1095,7 @@ function retryFromMessage(messageId) {
   showTyping();
   setGenerating(true);
 
-  askNexa(userMessage, false).catch(error => {
+  askNexa(userMessage, deepMode).catch(error => {
     if (error.name === "AbortError") {
       hideTyping();
       return;
@@ -1413,6 +1437,7 @@ function createStreamingMessage() {
     message,
     appendText,
     flushText,
+    addActions: messageId => attachMessageActions(message, contentDiv, messageId),
     thinking,
     memoryNotice
   };
@@ -1495,7 +1520,8 @@ async function askNexa(text, deep) {
     flushText,
     thinking,
     memoryNotice,
-    searchNotice
+    searchNotice,
+    addActions
   } = createStreamingMessage();
 
   /*
@@ -1719,10 +1745,13 @@ async function askNexa(text, deep) {
     id: makeMessageId()
   });
 
+  const assistantMessageId = makeMessageId();
+  addActions(assistantMessageId);
+
   history.push({
     role: "model",
     content: fullReply,
-    id: makeMessageId(),
+    id: assistantMessageId,
     thinking: fullThinking,
     memoryUpdated,
     searched
@@ -3590,6 +3619,7 @@ function enterApp(user, issuedMessageKey) {
   CHATS_KEY = "nexa_chats" + suffix;
   ACTIVE_CHAT_KEY = "nexa_active_chat" + suffix;
   loadAccountSettings(user);
+  loadDeepMode();
 
   /*
     Conversas de antes do login: a primeira conta que entra
