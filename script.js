@@ -4,6 +4,30 @@ const chat = document.getElementById("chat");
 
 /* A conversa rola dentro de .feed; o composer fica fixo no rodapé. */
 const feed = document.querySelector(".feed");
+let scheduledFeedScroll = false;
+
+function scrollConversationToBottom() {
+  if (!feed) {
+    return;
+  }
+
+  feed.scrollTop = feed.scrollHeight;
+
+  // O conteúdo pode ganhar altura depois da atualização do DOM (markdown,
+  // fontes ou quebra de linha). Reaplica a posição no próximo frame.
+  if (scheduledFeedScroll) {
+    return;
+  }
+
+  scheduledFeedScroll = true;
+  requestAnimationFrame(() => {
+    scheduledFeedScroll = false;
+    feed.scrollTop = feed.scrollHeight;
+    requestAnimationFrame(() => {
+      feed.scrollTop = feed.scrollHeight;
+    });
+  });
+}
 
 const micButton = document.getElementById("micButton");
 const liveCallButton = document.getElementById("liveCallButton");
@@ -1297,7 +1321,7 @@ function addMessage(text, type, thinkingText, memoryUpdated, messageId, image, f
     attachMessageActions(message, contentDiv, messageId);
   }
   chat.appendChild(message);
-  message.scrollIntoView({ behavior: "smooth", block: "end" });
+  scrollConversationToBottom();
 }
 
 /*
@@ -1411,11 +1435,7 @@ function showTyping() {
   message.appendChild(typing);
 
   chat.appendChild(message);
-
-  message.scrollIntoView({
-    behavior: "smooth",
-    block: "end"
-  });
+  scrollConversationToBottom();
 }
 
 function hideTyping() {
@@ -1583,6 +1603,7 @@ function createThinkingBlock() {
     );
 
     panel.hidden = !open;
+    scrollConversationToBottom();
   }
 
   button.addEventListener(
@@ -1658,7 +1679,7 @@ function createStreamingMessage() {
   message.appendChild(memoryNotice.element);
 
   chat.appendChild(message);
-  message.scrollIntoView({ behavior: "smooth", block: "end" });
+  scrollConversationToBottom();
 
   let fullText = "";
 
@@ -1666,7 +1687,7 @@ function createStreamingMessage() {
     fullText += chunk;
     // Durante o streaming, mostra texto puro para performance
     contentDiv.textContent = fullText;
-    if (feed) feed.scrollTop = feed.scrollHeight;
+    scrollConversationToBottom();
   }
 
   function flushText() {
@@ -2043,9 +2064,7 @@ function renderChat() {
     restoreConversation();
   }
 
-  if (feed) {
-    feed.scrollTop = feed.scrollHeight;
-  }
+  scrollConversationToBottom();
 }
 
 function startNewChat() {
@@ -3666,7 +3685,7 @@ window.addEventListener(
     const detail = event.detail || {};
 
     if (detail.visible) {
-      feed.scrollTop = feed.scrollHeight;
+      scrollConversationToBottom();
     }
   }
 );
