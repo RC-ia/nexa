@@ -76,21 +76,33 @@ let pendingImage = null;
 let pendingFile = null;
 const imageCache = new Map();
 
+const REASONING_ALIASES = {
+  xhigh: "ultra",
+  min: "minimum",
+  max: "maximum",
+};
+
 const REASONING_LABELS = {
   none: "Rápido",
+  minimum: "Mínimo",
   low: "Baixo",
   medium: "Médio",
   high: "Alto",
-  xhigh: "Máximo",
+  veryhigh: "Muito alto",
+  maximum: "Máximo",
+  ultra: "Ultra",
 };
 
 /* Quantidade de barras acesas no medidor, por nível. */
 const REASONING_LEVELS = {
   none: 0,
-  low: 1,
-  medium: 2,
-  high: 3,
-  xhigh: 4,
+  minimum: 1,
+  low: 2,
+  medium: 3,
+  high: 4,
+  veryhigh: 5,
+  maximum: 6,
+  ultra: 7,
 };
 
 const history = [];
@@ -110,11 +122,12 @@ function loadReasoning() {
     const saved =
       localStorage.getItem(REASONING_KEY);
 
+    const normalized = REASONING_ALIASES[saved] || saved;
     if (
-      saved &&
-      REASONING_LABELS.hasOwnProperty(saved)
+      normalized &&
+      REASONING_LABELS.hasOwnProperty(normalized)
     ) {
-      reasoningLevel = saved;
+      reasoningLevel = normalized;
     }
   } catch (error) {
     console.error(

@@ -21,7 +21,7 @@
 
   <title>NEXA</title>
 
-  <link rel="stylesheet" href="style.css?v=23">
+  <link rel="stylesheet" href="style.css?v=24">
 </head>
 
 <body>
@@ -259,7 +259,7 @@
           <span class="reasoning-icon" aria-hidden="true">⚡</span>
           <span class="reasoning-label" id="reasoningLabel">Rápido</span>
           <span class="reasoning-meter" id="reasoningMeter" aria-hidden="true">
-            <i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
           </span>
           <span class="reasoning-caret" aria-hidden="true">▾</span>
         </button>
@@ -281,7 +281,23 @@
               <span class="reasoning-item-hint">Modelo próprio, sem raciocínio</span>
             </span>
             <span class="reasoning-meter" aria-hidden="true">
-              <i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            data-reasoning="minimum"
+            data-level="1"
+            role="menuitemradio"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Mínimo</span>
+              <span class="reasoning-item-hint">Uma revisão essencial</span>
+            </span>
+            <span class="reasoning-meter" aria-hidden="true">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
             </span>
           </button>
 
@@ -289,15 +305,15 @@
             type="button"
             class="reasoning-item"
             data-reasoning="low"
-            data-level="1"
+            data-level="2"
             role="menuitemradio"
           >
             <span class="reasoning-item-main">
               <span class="reasoning-item-name">Baixo</span>
-              <span class="reasoning-item-hint">Resposta rápida</span>
+              <span class="reasoning-item-hint">Poucas revisões, resposta ágil</span>
             </span>
             <span class="reasoning-meter" aria-hidden="true">
-              <i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
             </span>
           </button>
 
@@ -305,7 +321,7 @@
             type="button"
             class="reasoning-item"
             data-reasoning="medium"
-            data-level="2"
+            data-level="3"
             role="menuitemradio"
           >
             <span class="reasoning-item-main">
@@ -313,7 +329,7 @@
               <span class="reasoning-item-hint">Equilíbrio entre velocidade e cuidado</span>
             </span>
             <span class="reasoning-meter" aria-hidden="true">
-              <i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
             </span>
           </button>
 
@@ -321,7 +337,7 @@
             type="button"
             class="reasoning-item"
             data-reasoning="high"
-            data-level="3"
+            data-level="4"
             role="menuitemradio"
           >
             <span class="reasoning-item-main">
@@ -329,15 +345,31 @@
               <span class="reasoning-item-hint">Pensa bem antes de responder</span>
             </span>
             <span class="reasoning-meter" aria-hidden="true">
-              <i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
             </span>
           </button>
 
           <button
             type="button"
             class="reasoning-item"
-            data-reasoning="xhigh"
-            data-level="4"
+            data-reasoning="veryhigh"
+            data-level="5"
+            role="menuitemradio"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Muito alto</span>
+              <span class="reasoning-item-hint">Revisão mais cuidadosa</span>
+            </span>
+            <span class="reasoning-meter" aria-hidden="true">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            data-reasoning="maximum"
+            data-level="6"
             role="menuitemradio"
           >
             <span class="reasoning-item-main">
@@ -345,7 +377,23 @@
               <span class="reasoning-item-hint">Bem mais lento e detalhado</span>
             </span>
             <span class="reasoning-meter" aria-hidden="true">
-              <i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            data-reasoning="ultra"
+            data-level="7"
+            role="menuitemradio"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Ultra</span>
+              <span class="reasoning-item-hint">Até 24 ciclos de revisão</span>
+            </span>
+            <span class="reasoning-meter" aria-hidden="true">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
             </span>
           </button>
         </div>
@@ -780,7 +828,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
-  <script src="script.js?v=58"></script>
+  <script src="script.js?v=59"></script>
 
 </body>
 

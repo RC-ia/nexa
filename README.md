@@ -37,8 +37,12 @@ API_GEMA=sua-chave-gemini-aqui
 
 Opcionais (já têm padrão): `API_BASE`, `MODEL`, `VISION_MODEL`, `PORT`,
 `MAX_OUTPUT_TOKENS`, `MEMORY_DIR`, `STUDIO_DIR`, `STREAM_TIMEOUT`,
-`REASONING_PARAM`, `REASONING_VALUES`, `AUTO_UPDATE`, `UPDATE_INTERVAL`,
-`GIT_REMOTE`, `GIT_BRANCH`, `ADMIN_USER`, `ADMIN_PASSWORD` e `SESSION_DAYS`.
+`REASONING_PARAM`, `REASONING_VALUES`, `THINKING_MINIMUM_ROUNDS`,
+`THINKING_LOW_ROUNDS`, `THINKING_MEDIUM_ROUNDS`, `THINKING_HIGH_ROUNDS`,
+`THINKING_VERY_HIGH_ROUNDS`, `THINKING_MAXIMUM_ROUNDS`,
+`THINKING_ULTRA_ROUNDS`, `THINKING_AGENT_MAX_TOKENS`, `AUTO_UPDATE`,
+`UPDATE_INTERVAL`, `GIT_REMOTE`, `GIT_BRANCH`, `ADMIN_USER`,
+`ADMIN_PASSWORD` e `SESSION_DAYS`.
 `VISION_MODEL` define o modelo usado pelo agente que analisa imagens antes da
 resposta textual. O padrão é `nvidia/google/diffusiongemma-26b-a4b-it`.
 Nunca versione o `.env` (ele já está no `.gitignore`).
@@ -443,20 +447,34 @@ A interface está em `/studio.html` e o servidor oferece `GET /api/studio/files`
 
 Alguns modelos pedem um nível de raciocínio (ou "força de pensamento") para
 responder. A NEXA tem um seletor ao lado do microfone com os níveis
-**Nenhum / Baixo / Médio / Alto / Máximo**. A escolha fica salva no
-`localStorage` do navegador, então não precisa selecionar de novo na próxima
-sessão.
+**Rápido / Mínimo / Baixo / Médio / Alto / Muito alto / Máximo / Ultra**.
+A escolha fica salva no `localStorage` do navegador, então não precisa
+selecionar de novo na próxima sessão.
 
-O parâmetro enviado à API é configurável no `.env`:
+Nos níveis diferentes de Rápido, o agente de pensamento resolve e revisa a
+solicitação em ciclos. A quantidade padrão de ciclos é: **Mínimo: 1, Baixo: 3,
+Médio: 6, Alto: 8, Muito alto: 12, Máximo: 16 e Ultra: 24**. Rápido continua
+sendo o caminho normal, sem esse agente adicional.
+
+O parâmetro enviado à API e as rodadas do agente são configuráveis no `.env`:
 
 - `REASONING_PARAM` — nome do campo no corpo da requisição (padrão
   `reasoning_effort`).
-- `THINKING_LOW_ROUNDS`, `THINKING_MEDIUM_ROUNDS`, `THINKING_HIGH_ROUNDS` e `THINKING_XHIGH_ROUNDS`: número limitado de revisões do agente de pensamento nos níveis correspondentes (o modo `none`/Rápido não usa esse agente).
-- `THINKING_AGENT_MAX_TOKENS`: limite de tokens por rodada do agente de pensamento. O agente pode usar a pesquisa comum e chamar `pesquisa_profunda` quando os resultados forem insuficientes; nessa chamada, o agente de intenção/tema recebe somente o contexto produzido pelo pensamento, sem o histórico bruto da conversa.
-- `REASONING_VALUES` — valores correspondentes a cada nível, na ordem
-  exibida no seletor. Use uma vírgula inicial para o nível "Nenhum" não
-  enviar nada. Por exemplo:
-  `REASONING_VALUES=,low,medium,high,xhigh`.
+- `THINKING_MINIMUM_ROUNDS`, `THINKING_LOW_ROUNDS`,
+  `THINKING_MEDIUM_ROUNDS`, `THINKING_HIGH_ROUNDS`,
+  `THINKING_VERY_HIGH_ROUNDS`, `THINKING_MAXIMUM_ROUNDS` e
+  `THINKING_ULTRA_ROUNDS` — quantidade de ciclos do agente de pensamento em
+  cada nível. Os valores padrão são `1`, `3`, `6`, `8`, `12`, `16` e `24`.
+- `THINKING_AGENT_MAX_TOKENS` — limite de tokens por ciclo do agente de
+  pensamento. O agente pode usar a pesquisa comum e chamar `pesquisa_profunda`
+  quando os resultados forem insuficientes; nessa chamada, o agente de
+  intenção/tema recebe somente o contexto produzido pelo pensamento, sem o
+  histórico bruto da conversa.
+- `REASONING_VALUES` — valores enviados ao parâmetro externo da API, na ordem
+  dos níveis (`none`, `minimum`, `low`, `medium`, `high`, `veryhigh`,
+  `maximum`, `ultra`). Use uma vírgula inicial para Rápido não enviar nada.
+  Por exemplo: `REASONING_VALUES=,minimum,low,medium,high,veryhigh,maximum,ultra`.
+  Essa lista é independente da quantidade de ciclos internos acima.
 
 Se o modelo não suportar esse parâmetro, basta deixar `REASONING_PARAM`
 vazio (desliga o recurso).

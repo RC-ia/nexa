@@ -2575,14 +2575,26 @@ body {
 }
 
 .reasoning-meter i:nth-child(2) {
-  height: 7px;
+  height: 5.5px;
 }
 
 .reasoning-meter i:nth-child(3) {
-  height: 10px;
+  height: 7px;
 }
 
 .reasoning-meter i:nth-child(4) {
+  height: 8.5px;
+}
+
+.reasoning-meter i:nth-child(5) {
+  height: 10px;
+}
+
+.reasoning-meter i:nth-child(6) {
+  height: 11px;
+}
+
+.reasoning-meter i:nth-child(7) {
   height: 12px;
 }
 
@@ -2604,6 +2616,21 @@ body {
 
 .reasoning-button[data-level="4"] .reasoning-meter i:nth-child(-n+4),
 .reasoning-item[data-level="4"] .reasoning-meter i:nth-child(-n+4) {
+  opacity: 1;
+}
+
+.reasoning-button[data-level="5"] .reasoning-meter i:nth-child(-n+5),
+.reasoning-item[data-level="5"] .reasoning-meter i:nth-child(-n+5) {
+  opacity: 1;
+}
+
+.reasoning-button[data-level="6"] .reasoning-meter i:nth-child(-n+6),
+.reasoning-item[data-level="6"] .reasoning-meter i:nth-child(-n+6) {
+  opacity: 1;
+}
+
+.reasoning-button[data-level="7"] .reasoning-meter i:nth-child(-n+7),
+.reasoning-item[data-level="7"] .reasoning-meter i:nth-child(-n+7) {
   opacity: 1;
 }
 

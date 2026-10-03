@@ -223,11 +223,15 @@ MAX_TOOL_ROUNDS = int(os.environ.get("MAX_TOOL_ROUNDS", "4"))
 # Rodadas limitadas do agente que resolve e revisa a solicitação antes da
 # resposta final. Valores podem ser ajustados no .env.
 THINKING_AGENT_ROUNDS = {
-    "low": int(os.environ.get("THINKING_LOW_ROUNDS", "1")),
-    "medium": int(os.environ.get("THINKING_MEDIUM_ROUNDS", "3")),
-    "high": int(os.environ.get("THINKING_HIGH_ROUNDS", "5")),
-    "xhigh": int(os.environ.get("THINKING_XHIGH_ROUNDS", "7")),
+    "minimum": int(os.environ.get("THINKING_MINIMUM_ROUNDS", "1")),
+    "low": int(os.environ.get("THINKING_LOW_ROUNDS", "3")),
+    "medium": int(os.environ.get("THINKING_MEDIUM_ROUNDS", "6")),
+    "high": int(os.environ.get("THINKING_HIGH_ROUNDS", "8")),
+    "veryhigh": int(os.environ.get("THINKING_VERY_HIGH_ROUNDS", "12")),
+    "maximum": int(os.environ.get("THINKING_MAXIMUM_ROUNDS", "16")),
+    "ultra": int(os.environ.get("THINKING_ULTRA_ROUNDS", "24")),
 }
+REASONING_ALIASES = {"xhigh": "ultra", "min": "minimum", "max": "maximum"}
 THINKING_AGENT_MAX_TOKENS = int(
     os.environ.get("THINKING_AGENT_MAX_TOKENS", "1200")
 )
@@ -239,10 +243,14 @@ CONNECT_TIMEOUT = 10
 STREAM_TIMEOUT = int(os.environ.get("STREAM_TIMEOUT", "45"))
 
 REASONING_PARAM = os.environ.get("REASONING_PARAM", "reasoning_effort").strip()
-REASONING_LEVELS = ["none", "low", "medium", "high", "xhigh"]
+REASONING_LEVELS = [
+    "none", "minimum", "low", "medium", "high", "veryhigh", "maximum", "ultra"
+]
 REASONING_VALUES = [
     value.strip()
-    for value in os.environ.get("REASONING_VALUES", ",low,medium,high,xhigh").split(",")
+    for value in os.environ.get(
+        "REASONING_VALUES", ",minimum,low,medium,high,veryhigh,maximum,ultra"
+    ).split(",")
 ]
 
 STATIC_FILES = {
@@ -1329,7 +1337,7 @@ def run_reminder_action(user_id, instrucao, when_text):
 
     for _ in range(REMINDER_ACTION_ROUNDS):
         body = {
-            "model": model_for_reasoning("xhigh"),
+            "model": model_for_reasoning("ultra"),
             "messages": messages,
             "tools": [SEARCH_TOOL, VISIT_TOOL, TIME_TOOL],
             "tool_choice": "auto",
@@ -1337,8 +1345,8 @@ def run_reminder_action(user_id, instrucao, when_text):
             "max_tokens": MAX_OUTPUT_TOKENS,
         }
         # Lembrete de ação não é conversa: vale o modelo normal no
-        # raciocínio máximo para o resultado sair com mais qualidade.
-        body.update(reasoning_payload("xhigh"))
+        # raciocínio ultra para o resultado sair com mais qualidade.
+        body.update(reasoning_payload("ultra"))
 
         try:
             response = requests.post(
@@ -2455,7 +2463,12 @@ def build_messages(messages, memories, custom_instructions="", user_id="",
     return contents
 
 
+def normalize_reasoning_level(level):
+    return REASONING_ALIASES.get(level, level)
+
+
 def reasoning_payload(level):
+    level = normalize_reasoning_level(level)
     if not REASONING_PARAM or not level:
         return {}
 
@@ -2632,13 +2645,13 @@ def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context
 
 def run_thinking_agent(user_id, messages, memories, reasoning, progress=None):
     """Resolve e revisa a solicitação em rodadas finitas antes da resposta."""
+    reasoning = normalize_reasoning_level(reasoning)
     rounds = max(0, THINKING_AGENT_ROUNDS.get(reasoning, 0))
     if not API_KEY or rounds == 0 or reasoning == "none":
         return ""
 
     history = list(messages)
     previous = ""
-    tool_context = []
     for index in range(rounds):
         if progress:
             progress(
@@ -4862,6 +4875,7 @@ def chat():
 
     reasoning = body.get("reasoning")
     reasoning = reasoning.strip() if isinstance(reasoning, str) else ""
+    reasoning = normalize_reasoning_level(reasoning)
 
     memory_enabled = body.get("memoryEnabled") is not False
     custom_instructions = body.get("customInstructions", "")
@@ -5188,8 +5202,10 @@ def read_agent_settings():
         return key_error
 
     rounds = {
-        level: THINKING_AGENT_ROUNDS.get(level, 0)
-        for level in ("low", "medium", "high", "xhigh")
+        level: THINKING_AGENT_ROUNDS[level]
+        for level in (
+            "minimum", "low", "medium", "high", "veryhigh", "maximum", "ultra"
+        )
     }
     return jsonify({
         "thinking": {
