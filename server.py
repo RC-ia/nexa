@@ -2586,22 +2586,48 @@ THINKING_AGENT_PROMPT = (
     "Você é o agente de pensamento da NEXA. Resolva a solicitação do usuário "
     "de forma independente e produza um plano/solução útil para outro modelo. "
     "A cada rodada, revise sua tentativa anterior, procure lacunas, erros, "
-    "suposições sem base e melhorias concretas. Use ferramentas quando forem "
-    "necessárias para fatos atuais, mas nunca use pesquisa_profunda: ela já é "
-    "um fluxo separado. Não converse com o usuário e não diga que está pensando; "
+    "suposições sem base e melhorias concretas. Comece pela pesquisa comum; "
+    "se ela não encontrar material suficiente, estiver vazia ou não permitir "
+    "confirmar a resposta, chame pesquisa_profunda e use o relatório recebido. "
+    "Não converse com o usuário e não diga que está pensando; "
     "entregue somente a melhor solução intermediária e as evidências relevantes."
 )
 
 
-def thinking_tool_calls(messages, memories, user_id, reasoning):
-    """Executa apenas ferramentas permitidas ao agente de pensamento."""
-    allowed = []
+def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context=""):
+    """Executa ferramentas; a pesquisa profunda recebe só o contexto pensado."""
+    regular = []
+    results = {}
+    memory_updated = False
+    searched = False
+
     for call in messages:
-        name = tool_call_name(call)
-        if name == "pesquisa_profunda":
+        if tool_call_name(call) != "pesquisa_profunda":
+            regular.append(call)
             continue
-        allowed.append(call)
-    return run_tools(user_id, allowed, reasoning)
+
+        call_id = tool_call_id(call)
+        arguments = parse_tool_arguments(call)
+        topic = arguments.get("topico")
+        topic = topic if isinstance(topic, str) else ""
+        context = thinking_context.strip() or topic
+        research_topic = interpret_deep_intent(
+            user_id, context, [], reasoning, None, ""
+        )
+        results[call_id] = run_deep_research(
+            user_id, research_topic or context, None, reasoning
+        )
+        searched = True
+
+    if regular:
+        regular_results, memory_now, search_now = run_tools(
+            user_id, regular, reasoning
+        )
+        results.update(regular_results)
+        memory_updated = memory_now
+        searched = searched or search_now
+
+    return results, memory_updated, searched
 
 
 def run_thinking_agent(user_id, messages, memories, reasoning):
@@ -2612,6 +2638,7 @@ def run_thinking_agent(user_id, messages, memories, reasoning):
 
     history = list(messages)
     previous = ""
+    tool_context = []
     for index in range(rounds):
         prompt = THINKING_AGENT_PROMPT
         if previous:
@@ -2628,7 +2655,10 @@ def run_thinking_agent(user_id, messages, memories, reasoning):
             ),
             "stream": False,
             "max_tokens": THINKING_AGENT_MAX_TOKENS,
-            "tools": [MEMORY_TOOL, REMINDER_TOOL, TIME_TOOL, SEARCH_TOOL, VISIT_TOOL],
+            "tools": [
+                MEMORY_TOOL, REMINDER_TOOL, TIME_TOOL, SEARCH_TOOL,
+                VISIT_TOOL, DEEP_RESEARCH_TOOL,
+            ],
             "tool_choice": "auto",
         }
 
@@ -2650,7 +2680,9 @@ def run_thinking_agent(user_id, messages, memories, reasoning):
         text = (extract_text(payload) or "").strip()
         calls = extract_tool_calls(payload)
         if calls:
-            results, _, _ = thinking_tool_calls(calls, memories, user_id, reasoning)
+            results, _, _ = thinking_tool_calls(
+                calls, memories, user_id, reasoning, previous or text
+            )
             if results:
                 history.extend([
                     {"role": "assistant", "content": text or None, "tool_calls": calls},
@@ -3893,6 +3925,13 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
         searched = False
 
         try:
+            if thinking_report:
+                yield sse({
+                    "type": "reasoning",
+                    "text": "Agente de pensamento:\n\n"
+                            + thinking_report + "\n\n",
+                })
+
             for thinking in reasoning_chunks:
                 yield sse({"type": "reasoning", "text": thinking})
 
@@ -4007,7 +4046,8 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
     )
 
 def make_deep_response(user_id, user_message, messages, memories, reasoning,
-                       custom_instructions="", memory_enabled=True):
+                       custom_instructions="", memory_enabled=True,
+                       thinking_report=""):
     """
     Pesquisa profunda pedida pelo botão "+" do composer: a pergunta vai
     direto para o pesquisador (agente separado, sem o contexto da
@@ -4029,6 +4069,16 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
         def worker():
             try:
                 visual_report = ""
+                if thinking_report:
+                    research_topic = interpret_deep_intent(
+                        user_id, thinking_report, [], reasoning, progress.put,
+                        "",
+                    )
+                    box["report"] = run_deep_research(
+                        user_id, research_topic or thinking_report,
+                        progress.put, reasoning
+                    )
+                    return
                 if message_has_image(messages):
                     progress.put("O agente visual está analisando a imagem antes da pesquisa.")
                     visual_messages = analyze_image_for_text_model(messages, reasoning)

@@ -449,7 +449,7 @@ O parâmetro enviado à API é configurável no `.env`:
 - `REASONING_PARAM` — nome do campo no corpo da requisição (padrão
   `reasoning_effort`).
 - `THINKING_LOW_ROUNDS`, `THINKING_MEDIUM_ROUNDS`, `THINKING_HIGH_ROUNDS` e `THINKING_XHIGH_ROUNDS`: número limitado de revisões do agente de pensamento nos níveis correspondentes (o modo `none`/Rápido não usa esse agente).
-- `THINKING_AGENT_MAX_TOKENS`: limite de tokens por rodada do agente de pensamento.
+- `THINKING_AGENT_MAX_TOKENS`: limite de tokens por rodada do agente de pensamento. O agente pode usar a pesquisa comum e chamar `pesquisa_profunda` quando os resultados forem insuficientes; nessa chamada, o agente de intenção/tema recebe somente o contexto produzido pelo pensamento, sem o histórico bruto da conversa.
 - `REASONING_VALUES` — valores correspondentes a cada nível, na ordem
   exibida no seletor. Use uma vírgula inicial para o nível "Nenhum" não
   enviar nada. Por exemplo:
