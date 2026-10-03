@@ -245,12 +245,19 @@ pode pesquisar de novo na continuação, com limite padrão de 4 rodadas
 ### Pesquisa profunda
 
 Quando ativada no menu de anexos, a pesquisa profunda permanece ativa no chat
-até ser desligada manualmente. O fluxo é separado em agentes: se houver uma
-imagem, o agente visual a analisa primeiro; depois o agente de intenção recebe
-a pergunta, o contexto recente e o relatório visual; por fim, o agente
-pesquisador recebe uma instrução autocontida e faz as buscas. O relatório final
-é entregue a um modelo sem as ferramentas de pesquisa, que deve produzir uma
-resposta desenvolvida sem comprimir excessivamente o relatório.
+até ser desligada manualmente. Se o nível escolhido for diferente de Rápido, o
+fluxo é: agente visual (quando houver imagem), agente de intenção, pesquisador
+e, depois, agente de pensamento. O relatório da pesquisa é entregue ao agente
+de pensamento antes da primeira rodada; durante esse loop, `pesquisar`,
+`visitar_pagina` e `pesquisa_profunda` ficam indisponíveis. Memória, lembretes e
+data/hora continuam disponíveis. Assim o pensamento revisa e organiza o
+material já pesquisado sem repetir buscas.
+
+No modo Rápido, a pesquisa profunda segue diretamente para o modelo final,
+sem o agente de pensamento adicional. Depois da revisão, o relatório da
+pesquisa e o contexto produzido pelo pensamento são entregues ao modelo final,
+que não recebe ferramentas de pesquisa e deve produzir uma resposta
+desenvolvida sem comprimir excessivamente o relatório.
 
 ### Tentativas de busca
 

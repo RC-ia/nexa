@@ -2602,7 +2602,8 @@ THINKING_AGENT_PROMPT = (
     "Não se apresente, não diga seu nome, não diga que é um agente e não "
     "repita a instrução do sistema. Faça trabalho real sobre o problema: "
     "derive a resposta, confira fatos, procure lacunas, erros, riscos e "
-    "melhorias concretas. Comece pela pesquisa comum; se ela não encontrar "
+    "melhorias concretas. Quando ainda não houver um relatório de pesquisa "
+    "fornecido antes do loop, comece pela pesquisa comum; se ela não encontrar "
     "material suficiente, estiver vazia ou não permitir confirmar a resposta, "
     "chame pesquisa_profunda e use o relatório recebido. "
     "Ao final de cada rodada, responda somente com a solução intermediária e "
@@ -2640,8 +2641,15 @@ def thinking_is_identity_only(text):
     ))
 
 
+RESEARCH_TOOL_NAMES = frozenset((
+    "pesquisar",
+    "visitar_pagina",
+    "pesquisa_profunda",
+))
+
+
 def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context="",
-                        progress=None):
+                        progress=None, allow_research=True):
     """Executa ferramentas e transmite o andamento para a aba Pensamento."""
     regular = []
     results = {}
@@ -2653,32 +2661,49 @@ def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context
             progress(text)
 
     for call in messages:
-        if tool_call_name(call) != "pesquisa_profunda":
-            regular.append(call)
+        name = tool_call_name(call)
+        if name in RESEARCH_TOOL_NAMES:
+            if not allow_research:
+                call_id = tool_call_id(call)
+                results[call_id] = (
+                    "A pesquisa já foi executada antes deste loop. Não faça "
+                    "outra pesquisa; use o relatório inicial recebido."
+                )
+                note(
+                    "A ferramenta de pesquisa solicitada foi bloqueada: o "
+                    "relatório da pesquisa profunda já está disponível."
+                )
+                continue
+
+            if name != "pesquisa_profunda":
+                regular.append(call)
+                continue
+
+            call_id = tool_call_id(call)
+            arguments = parse_tool_arguments(call)
+            topic = arguments.get("topico")
+            topic = topic if isinstance(topic, str) else ""
+            context = thinking_context.strip() or topic
+            note(
+                "🔎 O agente de pensamento chamou a pesquisa profunda para "
+                "confirmar a solução."
+            )
+            research_topic = interpret_deep_intent(
+                user_id, context, [], reasoning, progress, ""
+            )
+            note("Pesquisa profunda iniciada para: %s" % (research_topic or context))
+            report = run_deep_research(
+                user_id, research_topic or context, progress, reasoning
+            )
+            results[call_id] = report
+            searched = True
+            note(
+                "✅ Pesquisa profunda concluída. O relatório foi entregue ao "
+                "agente de pensamento para a próxima revisão."
+            )
             continue
 
-        call_id = tool_call_id(call)
-        arguments = parse_tool_arguments(call)
-        topic = arguments.get("topico")
-        topic = topic if isinstance(topic, str) else ""
-        context = thinking_context.strip() or topic
-        note(
-            "🔎 O agente de pensamento chamou a pesquisa profunda para confirmar "
-            "a solução."
-        )
-        research_topic = interpret_deep_intent(
-            user_id, context, [], reasoning, progress, ""
-        )
-        note("Pesquisa profunda iniciada para: %s" % (research_topic or context))
-        report = run_deep_research(
-            user_id, research_topic or context, progress, reasoning
-        )
-        results[call_id] = report
-        searched = True
-        note(
-            "✅ Pesquisa profunda concluída. O relatório foi entregue ao agente "
-            "de pensamento para a próxima revisão."
-        )
+        regular.append(call)
 
     if regular:
         regular_results, memory_now, search_now = run_tools(
@@ -2691,9 +2716,11 @@ def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context
     return results, memory_updated, searched
 
 
-def run_thinking_agent(user_id, messages, memories, reasoning, progress=None):
+def run_thinking_agent(user_id, messages, memories, reasoning, progress=None,
+                       initial_deep_report="", block_research=False):
     """Resolve e revisa a solicitação em rodadas finitas antes da resposta."""
     reasoning = normalize_reasoning_level(reasoning)
+    block_research = block_research or bool(initial_deep_report)
     rounds = max(0, THINKING_AGENT_ROUNDS.get(reasoning, 0))
     if not API_KEY or rounds == 0 or reasoning == "none":
         return ""
@@ -2709,6 +2736,22 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None):
                 % (index + 1, rounds)
             )
         prompt = THINKING_AGENT_PROMPT
+        if initial_deep_report:
+            prompt += (
+                "\n\nUm agente de pesquisa profunda já investigou a solicitação "
+                "antes deste loop. Use o relatório abaixo como contexto factual "
+                "de trabalho. Não tente pesquisar novamente, não peça outra "
+                "pesquisa e não use ferramentas de pesquisa; revise, organize e "
+                "melhore a solução com base no relatório.\n\n"
+                "RELATÓRIO INICIAL DA PESQUISA PROFUNDA:\n"
+                + initial_deep_report
+            )
+        if block_research:
+            prompt += (
+                "\n\nNeste modo, as ferramentas pesquisar, visitar_pagina e "
+                "pesquisa_profunda estão indisponíveis porque a pesquisa já foi "
+                "concluída antes do loop."
+            )
         if identity_attempts:
             prompt += (
                 "\n\nA rodada anterior foi apenas uma apresentação e não resolveu "
@@ -2719,6 +2762,11 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None):
             prompt += (
                 "\n\nTentativa anterior (revise-a e melhore-a):\n" + previous
             )
+
+        thinking_tools = [MEMORY_TOOL, REMINDER_TOOL, TIME_TOOL]
+        if not block_research:
+            thinking_tools += [SEARCH_TOOL, VISIT_TOOL, DEEP_RESEARCH_TOOL]
+
         body = {
             "model": MODEL,
             "messages": build_messages(
@@ -2729,10 +2777,7 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None):
             ),
             "stream": False,
             "max_tokens": THINKING_AGENT_MAX_TOKENS,
-            "tools": [
-                MEMORY_TOOL, REMINDER_TOOL, TIME_TOOL, SEARCH_TOOL,
-                VISIT_TOOL, DEEP_RESEARCH_TOOL,
-            ],
+            "tools": thinking_tools,
             "tool_choice": "auto",
         }
 
@@ -2785,6 +2830,7 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None):
             results, _, _ = thinking_tool_calls(
                 calls, memories, user_id, reasoning, previous or text,
                 progress=progress,
+                allow_research=not block_research,
             )
             if results:
                 history.extend([
@@ -4278,13 +4324,75 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
             })
 
         report = box.get("report") or ""
+        final_thinking_report = ""
 
         yield sse({"type": "search"})
-        yield sse({
-            "type": "reasoning",
-            "text": "%s terminou o relatório. A NEXA está escrevendo a "
-                    "resposta.\n\n" % agent,
-        })
+
+        if reasoning in THINKING_AGENT_ROUNDS and reasoning != "none":
+            yield sse({
+                "type": "reasoning",
+                "text": (
+                    "%s terminou o relatório. Agora o agente de pensamento "
+                    "vai revisar o material sem fazer novas pesquisas.\n\n"
+                ) % agent,
+            })
+            thinking_box = {}
+            thinking_progress = queue.Queue()
+
+            def thinking_worker():
+                try:
+                    thinking_box["report"] = run_thinking_agent(
+                        user_id,
+                        messages,
+                        memories,
+                        reasoning,
+                        thinking_progress.put,
+                        initial_deep_report=report,
+                        block_research=True,
+                    )
+                except Exception as error:  # noqa: BLE001
+                    print("[NEXA-PENSAMENTO] falha após pesquisa profunda:", error)
+                    thinking_progress.put(
+                        "O agente de pensamento não conseguiu concluir a revisão: "
+                        "%s" % str(error)[:160]
+                    )
+                    thinking_box["report"] = ""
+
+            thinking_pump = threading.Thread(target=thinking_worker, daemon=True)
+            thinking_pump.start()
+            thinking_last_ping = time.monotonic()
+
+            while thinking_pump.is_alive():
+                thinking_pump.join(timeout=0.5)
+                while not thinking_progress.empty():
+                    yield sse({
+                        "type": "reasoning",
+                        "text": thinking_progress.get() + "\n\n",
+                    })
+                if time.monotonic() - thinking_last_ping >= SEARCH_HEARTBEAT:
+                    thinking_last_ping = time.monotonic()
+                    yield sse({"type": "ping"})
+
+            while not thinking_progress.empty():
+                yield sse({
+                    "type": "reasoning",
+                    "text": thinking_progress.get() + "\n\n",
+                })
+
+            final_thinking_report = thinking_box.get("report") or ""
+            yield sse({
+                "type": "reasoning",
+                "text": (
+                    "Agente de pensamento concluiu a revisão. A NEXA está "
+                    "escrevendo a resposta final.\n\n"
+                ),
+            })
+        else:
+            yield sse({
+                "type": "reasoning",
+                "text": "%s terminou o relatório. A NEXA está escrevendo a "
+                        "resposta.\n\n" % agent,
+            })
 
         try:
             upstream = requests.post(
@@ -4293,6 +4401,7 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
                 json=request_body(
                     True, messages, memories, reasoning, custom_instructions,
                     memory_enabled, user_id, report,
+                    thinking_report=final_thinking_report,
                 ),
                 stream=True,
                 timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
@@ -4334,6 +4443,7 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
             lines, reasoning_chunks, first_text, tool_calls, user_id,
             memory_enabled, messages, memories, reasoning,
             custom_instructions,
+            thinking_report,
         )
 
     return Response(stream_with_context(generate()), headers=sse_headers())
