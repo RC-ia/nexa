@@ -28,7 +28,12 @@ const settingsViews = {
   live: document.getElementById("settingsLive"),
   memory: document.getElementById("settingsMemory"),
   instructions: document.getElementById("settingsInstructions"),
-  deep: document.getElementById("settingsDeep"),
+  agent: document.getElementById("settingsAgent"),
+  agentThinking: document.getElementById("settingsAgentThinking"),
+  agentDeep: document.getElementById("settingsAgentDeep"),
+  agentVision: document.getElementById("settingsAgentVision"),
+  agentIntent: document.getElementById("settingsAgentIntent"),
+  agentReminders: document.getElementById("settingsAgentReminders"),
   time: document.getElementById("settingsTime"),
   listen: document.getElementById("settingsListen"),
   reminders: document.getElementById("settingsReminders"),
@@ -2541,7 +2546,12 @@ function showSettingsView(viewName) {
     live: "Chamada",
     memory: "Memória",
     instructions: "Instruções",
-    deep: "Pesquisa profunda",
+    agent: "Agente",
+    agentThinking: "Pensamento",
+    agentDeep: "Pesquisa profunda",
+    agentVision: "Agente visual",
+    agentIntent: "Agente de tema/intenção",
+    agentReminders: "Lembretes",
     time: "Data e hora",
     listen: "Escuta",
     reminders: "Lembretes",
@@ -2561,8 +2571,8 @@ function showSettingsView(viewName) {
   } else if (viewName === "instructions") {
     customInstructionsInput.value = customInstructions;
     loadSystemPrompt();
-  } else if (viewName === "deep") {
-    loadDeepSettings();
+  } else if (viewName === "agent") {
+    loadAgentSettings();
   } else if (viewName === "time") {
     loadTimeSettings();
   } else if (viewName === "listen") {
@@ -2586,6 +2596,47 @@ async function loadDeepSettings() {
     status.textContent = "";
   } catch (error) {
     status.textContent = error.message;
+  }
+}
+
+function showAgentTab(agentName) {
+  const pages = {
+    thinking: "agentThinking",
+    deep: "agentDeep",
+    vision: "agentVision",
+    intent: "agentIntent",
+    reminders: "agentReminders",
+  };
+  Object.entries(pages).forEach(([name, viewName]) => {
+    settingsViews[viewName].hidden = name !== agentName;
+  });
+  settingsViews.agent.hidden = true;
+  settingsTitle.textContent = {
+    thinking: "Pensamento",
+    deep: "Pesquisa profunda",
+    vision: "Agente visual",
+    intent: "Agente de tema/intenção",
+    reminders: "Lembretes",
+  }[agentName] || "Agente";
+  if (agentName === "deep") {
+    loadDeepSettings();
+  }
+}
+
+async function loadAgentSettings() {
+  try {
+    const data = await api("GET", "/api/agent-settings");
+    document.getElementById("thinkingRoundsDisplay").value = data.thinking.rounds;
+    document.getElementById("thinkingTokensDisplay").value = data.thinking.max_tokens;
+    document.getElementById("deepModelDisplay").value = data.deep.model;
+    document.getElementById("visionModelDisplay").value = data.vision.model;
+    document.getElementById("visionPromptDisplay").value = data.vision.prompt;
+    document.getElementById("intentModelDisplay").value = data.intent.model;
+    document.getElementById("intentPromptDisplay").value = data.intent.prompt;
+    document.getElementById("reminderModelDisplay").value = data.reminders.model;
+    document.getElementById("reminderRoundsDisplay").value = data.reminders.rounds;
+  } catch (error) {
+    console.error("Erro ao carregar configurações dos agentes:", error);
   }
 }
 
@@ -3344,6 +3395,18 @@ document.querySelectorAll("[data-settings-open]").forEach(button => {
 document.querySelectorAll("[data-settings-back]").forEach(button => {
   button.addEventListener("click", function () {
     showSettingsView("home");
+  });
+});
+
+document.querySelectorAll("[data-agent-tab]").forEach(button => {
+  button.addEventListener("click", function () {
+    showAgentTab(button.dataset.agentTab);
+  });
+});
+
+document.querySelectorAll("[data-agent-back]").forEach(button => {
+  button.addEventListener("click", function () {
+    showSettingsView("agent");
   });
 });
 

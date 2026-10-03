@@ -21,7 +21,7 @@
 
   <title>NEXA</title>
 
-  <link rel="stylesheet" href="style.css?v=22">
+  <link rel="stylesheet" href="style.css?v=23">
 </head>
 
 <body>
@@ -500,9 +500,9 @@
               <strong>Chamada</strong>
               <span>Voz e acesso da chamada de voz</span>
             </button>
-            <button type="button" class="settings-category" data-settings-open="deep">
-              <strong>Pesquisa profunda</strong>
-              <span>Nome do agente e rodadas da investigação</span>
+            <button type="button" class="settings-category" data-settings-open="agent">
+              <strong>Agente</strong>
+              <span>Configurações dos agentes do chat</span>
             </button>
             <button type="button" class="settings-category" data-settings-open="time">
               <strong>Data e hora</strong>
@@ -588,22 +588,55 @@
           </div>
         </section>
 
-        <section id="settingsDeep" class="settings-view" hidden>
+        <section id="settingsAgent" class="settings-view" hidden>
           <button type="button" class="settings-back" data-settings-back>‹ Configurações</button>
-          <label class="settings-field" for="deepAgentInput">
-            <span>Nome do agente</span>
-            <input type="text" id="deepAgentInput" maxlength="40" placeholder="Pesquisador" autocomplete="off">
-          </label>
-          <p class="settings-description">Nome usado pelo pesquisador da pesquisa profunda no painel de pensamento e nas instruções que ele recebe.</p>
-          <label class="settings-field" for="deepRoundsInput">
-            <span>Rodadas (loops)</span>
-            <input type="number" id="deepRoundsInput" min="1" max="30" step="1" inputmode="numeric">
-          </label>
-          <p class="settings-description">Cada rodada é um ciclo do agente: decidir, buscar, ler páginas e continuar. Mais rodadas deixam a investigação mais completa e mais demorada.</p>
-          <div class="settings-page-actions">
-            <span id="deepSettingsStatus" class="settings-status" role="status"></span>
-            <button type="button" id="saveDeepSettings" class="settings-action">Salvar</button>
+          <p class="settings-description">Escolha um agente para configurar. Cada botão abre uma aba própria.</p>
+          <div class="agent-settings-tabs" role="tablist" aria-label="Agentes">
+            <button type="button" class="settings-category agent-settings-tab" data-agent-tab="thinking" role="tab">Pensamento<span>Rodadas e limite de revisão</span></button>
+            <button type="button" class="settings-category agent-settings-tab" data-agent-tab="deep" role="tab">Pesquisa profunda<span>Nome e rodadas da investigação</span></button>
+            <button type="button" class="settings-category agent-settings-tab" data-agent-tab="vision" role="tab">Agente visual<span>Modelo e instruções da análise de imagem</span></button>
+            <button type="button" class="settings-category agent-settings-tab" data-agent-tab="intent" role="tab">Agente de tema/intenção<span>Interpretação antes da pesquisa profunda</span></button>
+            <button type="button" class="settings-category agent-settings-tab" data-agent-tab="reminders" role="tab">Lembretes<span>Agente que executa e responde lembretes</span></button>
           </div>
+        </section>
+
+        <section id="settingsAgentThinking" class="settings-view agent-settings-page" hidden>
+          <button type="button" class="settings-back" data-agent-back>‹ Agentes</button>
+          <label class="settings-field"><span>Rodadas por nível</span><input type="text" id="thinkingRoundsDisplay" readonly></label>
+          <p class="settings-description">O agente de pensamento revisa a solução antes da resposta. Os limites são definidos pelo servidor e não podem ser alterados nesta conta.</p>
+          <label class="settings-field"><span>Limite por rodada</span><input type="text" id="thinkingTokensDisplay" readonly></label>
+          <p class="settings-description">Modo Rápido não usa este agente.</p>
+        </section>
+
+        <section id="settingsAgentDeep" class="settings-view agent-settings-page" hidden>
+          <button type="button" class="settings-back" data-agent-back>‹ Agentes</button>
+          <label class="settings-field" for="deepAgentInput"><span>Nome do agente</span><input type="text" id="deepAgentInput" maxlength="40" placeholder="Pesquisador" autocomplete="off"></label>
+          <p class="settings-description">Nome usado pelo pesquisador no painel de pensamento e nas instruções que ele recebe.</p>
+          <label class="settings-field" for="deepRoundsInput"><span>Rodadas (loops)</span><input type="number" id="deepRoundsInput" min="1" max="30" step="1" inputmode="numeric"></label>
+          <p class="settings-description">Cada rodada decide, busca, lê páginas e continua.</p>
+          <label class="settings-field"><span>Modelo do pesquisador</span><input type="text" id="deepModelDisplay" readonly></label>
+          <div class="settings-page-actions"><span id="deepSettingsStatus" class="settings-status" role="status"></span><button type="button" id="saveDeepSettings" class="settings-action">Salvar</button></div>
+        </section>
+
+        <section id="settingsAgentVision" class="settings-view agent-settings-page" hidden>
+          <button type="button" class="settings-back" data-agent-back>‹ Agentes</button>
+          <label class="settings-field"><span>Modelo visual</span><input type="text" id="visionModelDisplay" readonly></label>
+          <label class="settings-field"><span>Instruções do agente visual</span><textarea id="visionPromptDisplay" rows="8" readonly></textarea></label>
+          <p class="settings-description">O modelo e o prompt são definidos pelo servidor para manter a análise de imagens consistente.</p>
+        </section>
+
+        <section id="settingsAgentIntent" class="settings-view agent-settings-page" hidden>
+          <button type="button" class="settings-back" data-agent-back>‹ Agentes</button>
+          <label class="settings-field"><span>Modelo do agente de tema</span><input type="text" id="intentModelDisplay" readonly></label>
+          <label class="settings-field"><span>Instruções do agente de tema</span><textarea id="intentPromptDisplay" rows="8" readonly></textarea></label>
+          <p class="settings-description">Este agente transforma a solicitação em um tema autocontido antes da pesquisa profunda.</p>
+        </section>
+
+        <section id="settingsAgentReminders" class="settings-view agent-settings-page" hidden>
+          <button type="button" class="settings-back" data-agent-back>‹ Agentes</button>
+          <label class="settings-field"><span>Modelo do agente de lembretes</span><input type="text" id="reminderModelDisplay" readonly></label>
+          <label class="settings-field"><span>Limite de rodadas de ações</span><input type="text" id="reminderRoundsDisplay" readonly></label>
+          <p class="settings-description">O agente executa tarefas de lembretes no servidor. Essas definições são globais.</p>
         </section>
 
         <section id="settingsTime" class="settings-view" hidden>
@@ -747,7 +780,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
-  <script src="script.js?v=57"></script>
+  <script src="script.js?v=58"></script>
 
 </body>
 

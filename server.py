@@ -5177,6 +5177,47 @@ def update_deep_settings():
     return jsonify({"ok": True, **settings})
 
 
+@app.get("/api/agent-settings")
+def read_agent_settings():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para ver os agentes."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    rounds = {
+        level: THINKING_AGENT_ROUNDS.get(level, 0)
+        for level in ("low", "medium", "high", "xhigh")
+    }
+    return jsonify({
+        "thinking": {
+            "rounds": ", ".join(
+                "%s: %d" % (level, value)
+                for level, value in rounds.items()
+            ),
+            "max_tokens": THINKING_AGENT_MAX_TOKENS,
+            "model": MODEL,
+        },
+        "deep": {
+            "model": model_for_reasoning("none"),
+        },
+        "vision": {
+            "model": VISION_MODEL,
+            "prompt": VISION_AGENT_PROMPT,
+        },
+        "intent": {
+            "model": model_for_reasoning("none"),
+            "prompt": DEEP_INTENT_PROMPT,
+        },
+        "reminders": {
+            "model": model_for_reasoning("none"),
+            "rounds": REMINDER_ACTION_ROUNDS,
+        },
+    })
+
+
 @app.get("/api/time-settings")
 def read_time_settings():
     user = current_user()

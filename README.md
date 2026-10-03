@@ -357,10 +357,13 @@ Dentro dela:
 - **Chats anteriores** — a conversa aberta fica destacada, e a lista vem da
   mais recente para a mais antiga. Passando o mouse aparece o **✕** para
   apagar. O título de cada chat é a primeira mensagem que você mandou.
-- **Configurações** — reúne Chamada, Memória, Instruções, Lembretes e Mais.
-  Instruções e preferências de memória ficam separadas por usuário neste
-  navegador; os lembretes vivem no servidor (veja a seção **Lembretes**) e
-  disparam mesmo com a página fechada.
+- **Configurações** — reúne Chamada, Memória, Instruções, **Agente**, Lembretes e Mais.
+  A seção **Agente** tem uma página própria para Pensamento, Pesquisa profunda,
+  Agente visual, Agente de tema/intenção e Lembretes. A pesquisa profunda mantém
+  nome e rodadas editáveis por usuário; modelos, prompts internos e limites
+  técnicos globais aparecem como somente leitura. Instruções e preferências de
+  memória ficam separadas por usuário neste navegador; os lembretes vivem no
+  servidor (veja a seção **Lembretes**) e disparam mesmo com a página fechada.
   Na seção **Instruções**, o **system prompt** completo que o servidor usa pode
   ser visto e editado: ele fica em `memoria/<conta>.prompt.txt` (fora do git),
   separado por conta, e substitui o padrão embutido, com botão para restaurar

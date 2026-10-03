@@ -796,6 +796,27 @@ body {
   line-height: 1.4;
 }
 
+.agent-settings-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.agent-settings-tab {
+  width: 100%;
+  text-align: left;
+}
+
+.agent-settings-page {
+  min-height: 220px;
+}
+
+.settings-field input[readonly],
+.settings-field textarea[readonly] {
+  opacity: 0.78;
+  cursor: default;
+}
+
 .settings-back {
   justify-self: start;
   padding: 0;
@@ -3068,7 +3089,8 @@ html.keyboard-open footer {
     padding: 18px;
   }
 
-  .settings-grid {
+  .settings-grid,
+  .agent-settings-tabs {
     grid-template-columns: 1fr;
   }
 
