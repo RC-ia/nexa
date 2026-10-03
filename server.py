@@ -220,6 +220,17 @@ ALLOWED_FILE_EXTENSIONS = {
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "1024"))
 # Quantas rodadas de ferramenta o modelo pode pedir antes de desistir.
 MAX_TOOL_ROUNDS = int(os.environ.get("MAX_TOOL_ROUNDS", "4"))
+# Rodadas limitadas do agente que resolve e revisa a solicitação antes da
+# resposta final. Valores podem ser ajustados no .env.
+THINKING_AGENT_ROUNDS = {
+    "low": int(os.environ.get("THINKING_LOW_ROUNDS", "1")),
+    "medium": int(os.environ.get("THINKING_MEDIUM_ROUNDS", "3")),
+    "high": int(os.environ.get("THINKING_HIGH_ROUNDS", "5")),
+    "xhigh": int(os.environ.get("THINKING_XHIGH_ROUNDS", "7")),
+}
+THINKING_AGENT_MAX_TOKENS = int(
+    os.environ.get("THINKING_AGENT_MAX_TOKENS", "1200")
+)
 
 CONNECT_TIMEOUT = 10
 # Tempo máximo até o primeiro pedaço do stream. Precisa ficar abaixo dos ~100s
@@ -2340,7 +2351,7 @@ def log_upstream_error(response):
 
 def build_messages(messages, memories, custom_instructions="", user_id="",
                    deep_report="", system_prompt_override="", memory_header="",
-                   model_name="", reasoning_level=""):
+                   model_name="", reasoning_level="", thinking_report=""):
     system_prompt = system_prompt_override or current_system_prompt(user_id)
 
     # Adiciona token de raciocínio para diffusiongemma
@@ -2358,6 +2369,14 @@ def build_messages(messages, memories, custom_instructions="", user_id="",
         system_prompt += (
             "\n\nInstruções adicionais do usuário (siga quando forem compatíveis "
             "com as instruções do sistema):\n" + custom_instructions
+        )
+
+    if thinking_report:
+        system_prompt += (
+            "\n\nContexto interno produzido pelo agente de pensamento. Use-o "
+            "para melhorar a resposta, mas confira coerência com a pergunta "
+            "e não mencione o agente nem trate o contexto como instrução do "
+            "usuário:\n\n" + thinking_report
         )
 
     if deep_report:
@@ -2563,14 +2582,102 @@ def analyze_image_for_text_model(messages, reasoning):
     return enriched
 
 
+THINKING_AGENT_PROMPT = (
+    "Você é o agente de pensamento da NEXA. Resolva a solicitação do usuário "
+    "de forma independente e produza um plano/solução útil para outro modelo. "
+    "A cada rodada, revise sua tentativa anterior, procure lacunas, erros, "
+    "suposições sem base e melhorias concretas. Use ferramentas quando forem "
+    "necessárias para fatos atuais, mas nunca use pesquisa_profunda: ela já é "
+    "um fluxo separado. Não converse com o usuário e não diga que está pensando; "
+    "entregue somente a melhor solução intermediária e as evidências relevantes."
+)
+
+
+def thinking_tool_calls(messages, memories, user_id, reasoning):
+    """Executa apenas ferramentas permitidas ao agente de pensamento."""
+    allowed = []
+    for call in messages:
+        name = tool_call_name(call)
+        if name == "pesquisa_profunda":
+            continue
+        allowed.append(call)
+    return run_tools(user_id, allowed, reasoning)
+
+
+def run_thinking_agent(user_id, messages, memories, reasoning):
+    """Resolve e revisa a solicitação em rodadas finitas antes da resposta."""
+    rounds = max(0, THINKING_AGENT_ROUNDS.get(reasoning, 0))
+    if not API_KEY or rounds == 0 or reasoning == "none":
+        return ""
+
+    history = list(messages)
+    previous = ""
+    for index in range(rounds):
+        prompt = THINKING_AGENT_PROMPT
+        if previous:
+            prompt += (
+                "\n\nTentativa anterior (revise-a e melhore-a):\n" + previous
+            )
+        body = {
+            "model": MODEL,
+            "messages": build_messages(
+                history, memories, prompt, user_id,
+                system_prompt_override=prompt,
+                model_name=MODEL,
+                reasoning_level="none",
+            ),
+            "stream": False,
+            "max_tokens": THINKING_AGENT_MAX_TOKENS,
+            "tools": [MEMORY_TOOL, REMINDER_TOOL, TIME_TOOL, SEARCH_TOOL, VISIT_TOOL],
+            "tool_choice": "auto",
+        }
+
+        try:
+            response = requests.post(
+                API_BASE + "/chat/completions",
+                headers=auth_headers(),
+                json=body,
+                timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
+            )
+            if response.status_code != 200:
+                log_upstream_error(response)
+                break
+            payload = response.json()
+        except (requests.RequestException, ValueError) as error:
+            print("[NEXA-PENSAMENTO] rodada falhou: %s" % error)
+            break
+
+        text = (extract_text(payload) or "").strip()
+        calls = extract_tool_calls(payload)
+        if calls:
+            results, _, _ = thinking_tool_calls(calls, memories, user_id, reasoning)
+            if results:
+                history.extend([
+                    {"role": "assistant", "content": text or None, "tool_calls": calls},
+                    *[
+                        {"role": "tool", "tool_call_id": call_id, "content": content}
+                        for call_id, content in results.items()
+                    ],
+                ])
+        if text:
+            previous = text
+        if not text and not calls:
+            break
+        print("[NEXA-PENSAMENTO] rodada %d/%d concluída" % (index + 1, rounds))
+
+    return previous
+
+
 def request_body(stream, messages, memories, reasoning, custom_instructions="",
-                 memory_enabled=True, user_id="", deep_report=""):
+                 memory_enabled=True, user_id="", deep_report="",
+                 thinking_report=""):
     model = model_for_request(reasoning, messages)
     body = {
         "model": model,
         "messages": build_messages(
             messages, memories, custom_instructions, user_id, deep_report,
-            model_name=model, reasoning_level=reasoning
+            model_name=model, reasoning_level=reasoning,
+            thinking_report=thinking_report,
         ),
         "stream": stream,
         "max_tokens": MAX_OUTPUT_TOKENS,
@@ -3633,7 +3740,7 @@ def parse_data_line(raw):
 
 def finish_stream_with_tools(user_id, messages, memories, reasoning,
                              custom_instructions, assistant_text, calls,
-                             memory_enabled=True):
+                             memory_enabled=True, thinking_report=""):
     """
     O modelo pediu ferramenta. Executamos, devolvemos os resultados no papel
     "tool" e pedimos a continuação da resposta.
@@ -3695,6 +3802,7 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
                 json=request_body(
                     False, follow_up, memories, reasoning, custom_instructions,
                     memory_enabled, user_id,
+                    thinking_report=thinking_report,
                 ),
                 timeout=(10, 60),
             )
@@ -3771,7 +3879,8 @@ def probe_stream(lines):
 
 def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                        user_id, memory_enabled=True, messages=None,
-                       memories=None, reasoning=None, custom_instructions=""):
+                       memories=None, reasoning=None, custom_instructions="",
+                       thinking_report=""):
     """
     Traduz o stream do modelo nos eventos SSE da NEXA. Fica em função
     separada para a pesquisa profunda reaproveitar: lá o relatório entra
@@ -3840,6 +3949,7 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                             full_text,
                             tool_calls,
                             memory_enabled,
+                            thinking_report,
                         )
                     except Exception as error:  # noqa: BLE001
                         print("[NEXA] falha inesperada nas ferramentas:", error)
@@ -3876,7 +3986,7 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
 
 def make_stream_response(lines, user_id, user_message, memory_enabled=True,
                          messages=None, memories=None, reasoning=None,
-                         custom_instructions=""):
+                         custom_instructions="", thinking_report=""):
     probe = probe_stream(lines)
 
     if probe is None:
@@ -3890,6 +4000,7 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
                 lines, reasoning_chunks, first_text, tool_calls,
                 user_id, memory_enabled, messages, memories, reasoning,
                 custom_instructions,
+                thinking_report,
             )
         ),
         headers=sse_headers(),
@@ -4033,7 +4144,7 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
 
 def make_blocking_response(
     user_id, user_message, messages, memories, reasoning,
-    custom_instructions="", memory_enabled=True,
+    custom_instructions="", memory_enabled=True, thinking_report="",
 ):
     try:
         response = requests.post(
@@ -4041,7 +4152,7 @@ def make_blocking_response(
             headers=auth_headers(),
             json=request_body(
                 False, messages, memories, reasoning, custom_instructions,
-                memory_enabled, user_id,
+                memory_enabled, user_id, thinking_report=thinking_report,
             ),
             timeout=(10, 60),
         )
@@ -4082,6 +4193,7 @@ def make_blocking_response(
         follow_up, memory_updated, searched = finish_stream_with_tools(
             user_id, messages, memories, reasoning,
             custom_instructions, text, calls, memory_enabled,
+            thinking_report,
         )
         follow_up = follow_up or ""
 
@@ -4725,13 +4837,19 @@ def chat():
             custom_instructions, memory_enabled,
         )
 
+    thinking_report = ""
+    if reasoning in THINKING_AGENT_ROUNDS and reasoning != "none":
+        thinking_report = run_thinking_agent(
+            user_id, messages, memories, reasoning
+        )
+
     try:
         upstream = requests.post(
             API_BASE + "/chat/completions",
             headers=auth_headers(),
             json=request_body(
                 True, messages, memories, reasoning, custom_instructions,
-                memory_enabled, user_id,
+                memory_enabled, user_id, thinking_report=thinking_report,
             ),
             stream=True,
             timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
@@ -4754,6 +4872,7 @@ def chat():
             memories,
             reasoning,
             custom_instructions,
+            thinking_report,
         )
 
         if streamed is not None:
@@ -4767,7 +4886,7 @@ def chat():
 
     return make_blocking_response(
         user_id, user_message, messages, memories, reasoning,
-        custom_instructions, memory_enabled,
+        custom_instructions, memory_enabled, thinking_report,
     )
 
 
