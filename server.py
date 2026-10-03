@@ -2607,10 +2607,19 @@ THINKING_AGENT_PROMPT = (
     "material suficiente, estiver vazia ou não permitir confirmar a resposta, "
     "chame pesquisa_profunda e use o relatório recebido. "
     "Ao final de cada rodada, responda somente com a solução intermediária e "
-    "uma linha de controle: escreva `STATUS: CONTINUE` se ainda houver algo "
-    "importante para investigar ou corrigir; escreva `STATUS: FINAL` quando a "
-    "solução estiver pronta e não houver melhoria relevante a fazer. "
-    "Nunca use STATUS: FINAL apenas para se apresentar."
+    "uma linha de controle. Essa linha é obrigatória e deve ser a última linha "
+    "da resposta, sem texto depois, sem markdown e sem variações: escreva "
+    "exatamente `STATUS: CONTINUE` se ainda houver uma pendência concreta e "
+    "importante para investigar ou corrigir; escreva exatamente `STATUS: FINAL` "
+    "quando a solução já estiver pronta. "
+    "Se você acabou de produzir uma resposta final ou uma solução utilizável, "
+    "NÃO abra outra revisão: encerre imediatamente essa mesma rodada com "
+    "`STATUS: FINAL`. Se a tentativa anterior já estiver adequada, apenas faça "
+    "os ajustes necessários e finalize com `STATUS: FINAL`. Use `STATUS: CONTINUE` "
+    "somente quando conseguir apontar o que ainda falta resolver. "
+    "Nunca entregue uma solução final sem o marcador `STATUS: FINAL`, nunca "
+    "repita a mesma solução em outra rodada e nunca use STATUS: FINAL apenas "
+    "para se apresentar."
 )
 
 
@@ -2707,7 +2716,8 @@ def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context
 
     if regular:
         regular_results, memory_now, search_now = run_tools(
-            user_id, regular, reasoning, progress=progress
+            user_id, regular, reasoning, progress=progress,
+            allow_research=allow_research,
         )
         results.update(regular_results)
         memory_updated = memory_now
@@ -3266,7 +3276,8 @@ def run_deep_research(user_id, topic, progress=None, reasoning=None):
         print("[NEXA-PROFUNDA] falha no fechamento: %s" % error)
         return "A pesquisa profunda não conseguiu fechar o relatório."
 
-def run_tools(user_id, calls, reasoning=None, progress=None):
+def run_tools(user_id, calls, reasoning=None, progress=None,
+              allow_research=True):
     """
     Executa todas as ferramentas chamadas pelo modelo e devolve
     (resultados_por_id, memoria_atualizada, pesquisa_realizada).
@@ -3293,6 +3304,18 @@ def run_tools(user_id, calls, reasoning=None, progress=None):
         name = tool_call_name(call)
         call_id = tool_call_id(call)
         arguments = parse_tool_arguments(call)
+
+        if name in RESEARCH_TOOL_NAMES and not allow_research:
+            results[call_id] = (
+                "A pesquisa já foi executada antes desta resposta. "
+                "Use o relatório disponível e não faça outra pesquisa."
+            )
+            if progress:
+                progress(
+                    "A ferramenta de pesquisa foi bloqueada porque o relatório "
+                    "da pesquisa profunda já está disponível."
+                )
+            continue
 
         if name == "salvar_memoria":
             text = run_memory_tool(user_id, [call])
@@ -3965,7 +3988,8 @@ def parse_data_line(raw):
 
 def finish_stream_with_tools(user_id, messages, memories, reasoning,
                              custom_instructions, assistant_text, calls,
-                             memory_enabled=True, thinking_report=""):
+                             memory_enabled=True, thinking_report="",
+                             deep_report=""):
     """
     O modelo pediu ferramenta. Executamos, devolvemos os resultados no papel
     "tool" e pedimos a continuação da resposta.
@@ -3982,7 +4006,8 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
 
     for _ in range(MAX_TOOL_ROUNDS):
         results, memory_now, search_now = run_tools(
-            user_id, current_calls, reasoning
+            user_id, current_calls, reasoning,
+            allow_research=not bool(deep_report),
         )
 
         if not results:
@@ -4027,6 +4052,7 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
                 json=request_body(
                     False, follow_up, memories, reasoning, custom_instructions,
                     memory_enabled, user_id,
+                    deep_report=deep_report,
                     thinking_report=thinking_report,
                 ),
                 timeout=(10, 60),
@@ -4105,7 +4131,7 @@ def probe_stream(lines):
 def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                        user_id, memory_enabled=True, messages=None,
                        memories=None, reasoning=None, custom_instructions="",
-                       thinking_report=""):
+                       thinking_report="", deep_report=""):
     """
     Traduz o stream do modelo nos eventos SSE da NEXA. Fica em função
     separada para a pesquisa profunda reaproveitar: lá o relatório entra
@@ -4182,6 +4208,7 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                             tool_calls,
                             memory_enabled,
                             thinking_report,
+                            deep_report,
                         )
                     except Exception as error:  # noqa: BLE001
                         print("[NEXA] falha inesperada nas ferramentas:", error)
@@ -4443,7 +4470,8 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
             lines, reasoning_chunks, first_text, tool_calls, user_id,
             memory_enabled, messages, memories, reasoning,
             custom_instructions,
-            thinking_report,
+            final_thinking_report,
+            report,
         )
 
     return Response(stream_with_context(generate()), headers=sse_headers())

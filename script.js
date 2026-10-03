@@ -1233,10 +1233,10 @@ const md = window.markdownit
   const link = document.createElement("link");
   link.rel = "stylesheet";
   link.href =
-    "https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.min.css";
+    "https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.9.0/styles/atom-one-dark.min.css";
   document.head.appendChild(link);
   const script = document.createElement("script");
-  script.src = "https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/highlight.min.js";
+  script.src = "https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.9.0/highlight.min.js";
   script.onload = () => window.hljs.highlightAll();
   document.head.appendChild(script);
 })();
