@@ -36,9 +36,11 @@ API_GEMA=sua-chave-gemini-aqui
 ```
 
 Opcionais (já têm padrão): `API_BASE`, `MODEL`, `VISION_MODEL`, `PORT`,
-`MAX_OUTPUT_TOKENS`, `MEMORY_DIR`. `VISION_MODEL` define o modelo usado pelo
-agente que analisa imagens antes da resposta textual. O padrão é
-`nvidia/google/diffusiongemma-26b-a4b-it`.
+`MAX_OUTPUT_TOKENS`, `MEMORY_DIR`, `STUDIO_DIR`, `STREAM_TIMEOUT`,
+`REASONING_PARAM`, `REASONING_VALUES`, `AUTO_UPDATE`, `UPDATE_INTERVAL`,
+`GIT_REMOTE`, `GIT_BRANCH`, `ADMIN_USER`, `ADMIN_PASSWORD` e `SESSION_DAYS`.
+`VISION_MODEL` define o modelo usado pelo agente que analisa imagens antes da
+resposta textual. O padrão é `nvidia/google/diffusiongemma-26b-a4b-it`.
 Nunca versione o `.env` (ele já está no `.gitignore`).
 
 ## Login e painel admin
@@ -172,18 +174,32 @@ cloudflared tunnel --url http://localhost:8000
 O `cloudflared` imprime uma URL pública (`https://<algo>.trycloudflare.com`)
 que aponta para o servidor local.
 
-## Modelo
+## Modelos e multimodalidade
 
-- Base URL: `https://9router.rcscan.online/v1`
-- Modelo: `nada`
+- Base URL padrão: `https://9router.rcscan.online/v1`
+- Modelo textual padrão: `MODEL=nada`
+- Agente visual padrão: `VISION_MODEL=nvidia/google/diffusiongemma-26b-a4b-it`
+- Arquivos aceitos: textos, documentos simples, código e configurações até 2 MB.
+- Imagens: até 8 MB, analisadas pelo agente visual antes da resposta textual.
+- Executáveis e extensões desconhecidas são rejeitados.
+- É possível arrastar uma imagem ou arquivo do Windows para a página; o item
+  aparece no preview antes do envio.
+
+Quando há uma imagem, o agente visual produz um relatório detalhado para o
+modelo textual. Na pesquisa profunda, a imagem é analisada antes do agente de
+intenção, que recebe o relatório visual junto com o contexto recente antes de
+montar o tema para o pesquisador.
 
 ## Voz da NEXA
 
-O chat normal é **apenas texto**: não há leitura das respostas em voz alta nem
-motor de TTS. A única experiência de voz é a chamada Gemini Live em
-`/live.html`. A voz é escolhida **apenas** em **Configurações > Chamada** e fica
-salva no navegador; a página da chamada usa essa escolha e não tem seletor
-próprio.
+O chat normal não faz leitura das respostas em voz alta nem usa motor de TTS.
+Ele aceita mensagens de texto, imagens e arquivos de texto/código. Imagens e
+arquivos podem ser escolhidos pelo menu de anexos ou arrastados do Windows para
+a página; executáveis e extensões desconhecidas são rejeitados.
+
+A única experiência de voz é a chamada Gemini Live em `/live.html`. A voz é
+escolhida **apenas** em **Configurações > Chamada** e fica salva no navegador;
+a página da chamada usa essa escolha e não tem seletor próprio.
 
 ## Chamadas Gemini Live
 
@@ -219,8 +235,18 @@ e quando o assunto for específico ou técnico. Ela não pesquisa para opinar ou
 conversar, e cita a fonte quando usa um resultado.
 
 A busca traz título, trecho e link de até 5 resultados por consulta. O modelo
-pode pesquisar de novo na continuação, com limite de 4 rodadas
+pode pesquisar de novo na continuação, com limite padrão de 4 rodadas
 (`MAX_TOOL_ROUNDS`).
+
+### Pesquisa profunda
+
+Quando ativada no menu de anexos, a pesquisa profunda permanece ativa no chat
+até ser desligada manualmente. O fluxo é separado em agentes: se houver uma
+imagem, o agente visual a analisa primeiro; depois o agente de intenção recebe
+a pergunta, o contexto recente e o relatório visual; por fim, o agente
+pesquisador recebe uma instrução autocontida e faz as buscas. O relatório final
+é entregue a um modelo sem as ferramentas de pesquisa, que deve produzir uma
+resposta desenvolvida sem comprimir excessivamente o relatório.
 
 ### Tentativas de busca
 
@@ -378,9 +404,9 @@ Como funciona:
 - **Apagar** — apagar uma conversa no servidor vale para todos os aparelhos;
   quem estava com ela aberta em outro lugar a remove ao sincronizar. Isso
   vale também para **Apagar todas as conversas** (Configurações > Mais).
-- **Limites** — até 500 conversas por conta, 5 MB no total e 200.000
-  caracteres por mensagem. A lista de conversas nunca sai do navegador sem
-  login.
+- **Limites** — até 500 conversas por conta, 5.000 mensagens por conversa,
+  5 MB no total e 200.000 caracteres por mensagem. A lista de conversas nunca
+  sai do navegador sem login.
 
 Rotas: `GET /api/chats`, `PUT /api/chats/<id>`, `DELETE /api/chats/<id>` e
 `DELETE /api/chats`.
@@ -397,6 +423,18 @@ funcionou.
 
 O servidor expõe a versão em `GET /api/version`, e o `script.js` preenche o
 rodapé ao carregar a página.
+
+## Estúdio
+
+O Estúdio usa um espaço isolado por conta para listar, ler e escrever arquivos
+com o agente de código. O diretório padrão é `estudio/` e pode ser alterado por
+`STUDIO_DIR`. Os limites padrão são 60.000 caracteres para leitura, 200.000
+para escrita, 300 entradas na listagem, 8 rodadas de ferramentas e 8.000
+tokens de saída (`STUDIO_READ_LIMIT`, `STUDIO_WRITE_LIMIT`,
+`STUDIO_LIST_LIMIT`, `STUDIO_TOOL_ROUNDS` e `STUDIO_MAX_OUTPUT_TOKENS`).
+
+A interface está em `/studio.html` e o servidor oferece `GET /api/studio/files`,
+`GET /api/studio/file`, `GET /api/studio/raw` e `POST /api/studio/chat`.
 
 ## Reforço de raciocínio
 
