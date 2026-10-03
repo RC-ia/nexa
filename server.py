@@ -2630,7 +2630,7 @@ def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context
     return results, memory_updated, searched
 
 
-def run_thinking_agent(user_id, messages, memories, reasoning):
+def run_thinking_agent(user_id, messages, memories, reasoning, progress=None):
     """Resolve e revisa a solicitação em rodadas finitas antes da resposta."""
     rounds = max(0, THINKING_AGENT_ROUNDS.get(reasoning, 0))
     if not API_KEY or rounds == 0 or reasoning == "none":
@@ -2640,6 +2640,11 @@ def run_thinking_agent(user_id, messages, memories, reasoning):
     previous = ""
     tool_context = []
     for index in range(rounds):
+        if progress:
+            progress(
+                "Rodada %d de %d do agente de pensamento em andamento."
+                % (index + 1, rounds)
+            )
         prompt = THINKING_AGENT_PROMPT
         if previous:
             prompt += (
@@ -2693,6 +2698,10 @@ def run_thinking_agent(user_id, messages, memories, reasoning):
                 ])
         if text:
             previous = text
+            if progress:
+                progress(
+                    "Resposta da rodada %d:\n%s" % (index + 1, text)
+                )
         if not text and not calls:
             break
         print("[NEXA-PENSAMENTO] rodada %d/%d concluída" % (index + 1, rounds))
@@ -4192,6 +4201,88 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
     return Response(stream_with_context(generate()), headers=sse_headers())
 
 
+def make_thinking_response(
+    user_id, user_message, messages, memories, reasoning,
+    custom_instructions="", memory_enabled=True,
+):
+    """Executa o agente de pensamento em segundo plano e transmite progresso."""
+    def generate():
+        box = {}
+        progress = queue.Queue()
+
+        def worker():
+            try:
+                box["report"] = run_thinking_agent(
+                    user_id, messages, memories, reasoning, progress.put
+                )
+            except Exception as error:  # noqa: BLE001
+                print("[NEXA-PENSAMENTO] falha inesperada: %s" % error)
+                box["report"] = ""
+
+        yield sse({
+            "type": "reasoning",
+            "text": "Agente de pensamento iniciado. Vou revisar a solução antes de responder.\n\n",
+        })
+        pump = threading.Thread(target=worker, daemon=True)
+        pump.start()
+        last_ping = time.monotonic()
+
+        while pump.is_alive():
+            pump.join(timeout=0.5)
+            while not progress.empty():
+                yield sse({"type": "reasoning", "text": progress.get() + "\n\n"})
+            if time.monotonic() - last_ping >= SEARCH_HEARTBEAT:
+                last_ping = time.monotonic()
+                yield sse({"type": "ping"})
+
+        while not progress.empty():
+            yield sse({"type": "reasoning", "text": progress.get() + "\n\n"})
+
+        report = box.get("report") or ""
+        yield sse({
+            "type": "reasoning",
+            "text": "Agente de pensamento concluiu a revisão. Gerando a resposta final.\n\n",
+        })
+
+        try:
+            upstream = requests.post(
+                API_BASE + "/chat/completions",
+                headers=auth_headers(),
+                json=request_body(
+                    True, messages, memories, reasoning, custom_instructions,
+                    memory_enabled, user_id, thinking_report=report,
+                ),
+                stream=True,
+                timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
+            )
+        except requests.RequestException as error:
+            print("[NEXA] modelo após pensamento falhou: %s" % error)
+            yield sse({"type": "error", "error": "Falha ao consultar o modelo."})
+            return
+
+        if upstream.status_code != 200:
+            log_upstream_error(upstream)
+            upstream.close()
+            yield sse({"type": "error", "error": "Falha ao consultar o modelo."})
+            return
+
+        lines = upstream.iter_lines(decode_unicode=False)
+        probe = probe_stream(lines)
+        if probe is None:
+            upstream.close()
+            yield sse({"type": "error", "error": "O modelo não devolveu resposta."})
+            return
+
+        reasoning_chunks, first_text, tool_calls = probe
+        yield from stream_chat_events(
+            lines, reasoning_chunks, first_text, tool_calls, user_id,
+            memory_enabled, messages, memories, reasoning,
+            custom_instructions, report,
+        )
+
+    return Response(stream_with_context(generate()), headers=sse_headers())
+
+
 def make_blocking_response(
     user_id, user_message, messages, memories, reasoning,
     custom_instructions="", memory_enabled=True, thinking_report="",
@@ -4894,12 +4985,13 @@ def chat():
             custom_instructions, memory_enabled,
         )
 
-    thinking_report = ""
     if reasoning in THINKING_AGENT_ROUNDS and reasoning != "none":
-        thinking_report = run_thinking_agent(
-            user_id, messages, memories, reasoning
+        return make_thinking_response(
+            user_id, user_message, messages, memories, reasoning,
+            custom_instructions, memory_enabled,
         )
 
+    thinking_report = ""
     try:
         upstream = requests.post(
             API_BASE + "/chat/completions",
