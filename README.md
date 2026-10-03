@@ -454,7 +454,9 @@ selecionar de novo na próxima sessão.
 Nos níveis diferentes de Rápido, o agente de pensamento resolve e revisa a
 solicitação em ciclos. A quantidade padrão de ciclos é: **Mínimo: 1, Baixo: 3,
 Médio: 6, Alto: 8, Muito alto: 12, Máximo: 16 e Ultra: 24**. Rápido continua
-sendo o caminho normal, sem esse agente adicional.
+sendo o caminho normal, sem esse agente adicional. O loop termina quando o
+agente marca a solução como final, quando uma revisão não traz mudança ou
+quando o modelo repete apenas uma apresentação sem resolver a solicitação.
 
 O parâmetro enviado à API e as rodadas do agente são configuráveis no `.env`:
 

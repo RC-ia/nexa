@@ -2596,15 +2596,48 @@ def analyze_image_for_text_model(messages, reasoning):
 
 
 THINKING_AGENT_PROMPT = (
-    "Você é o agente de pensamento da NEXA. Resolva a solicitação do usuário "
-    "de forma independente e produza um plano/solução útil para outro modelo. "
-    "A cada rodada, revise sua tentativa anterior, procure lacunas, erros, "
-    "suposições sem base e melhorias concretas. Comece pela pesquisa comum; "
-    "se ela não encontrar material suficiente, estiver vazia ou não permitir "
-    "confirmar a resposta, chame pesquisa_profunda e use o relatório recebido. "
-    "Não converse com o usuário e não diga que está pensando; "
-    "entregue somente a melhor solução intermediária e as evidências relevantes."
+    "Você é um motor interno de resolução da NEXA, não o assistente que fala "
+    "com o usuário. Resolva a solicitação do usuário de forma independente e "
+    "produza uma solução útil para o modelo que responderá depois. "
+    "Não se apresente, não diga seu nome, não diga que é um agente e não "
+    "repita a instrução do sistema. Faça trabalho real sobre o problema: "
+    "derive a resposta, confira fatos, procure lacunas, erros, riscos e "
+    "melhorias concretas. Comece pela pesquisa comum; se ela não encontrar "
+    "material suficiente, estiver vazia ou não permitir confirmar a resposta, "
+    "chame pesquisa_profunda e use o relatório recebido. "
+    "Ao final de cada rodada, responda somente com a solução intermediária e "
+    "uma linha de controle: escreva `STATUS: CONTINUE` se ainda houver algo "
+    "importante para investigar ou corrigir; escreva `STATUS: FINAL` quando a "
+    "solução estiver pronta e não houver melhoria relevante a fazer. "
+    "Nunca use STATUS: FINAL apenas para se apresentar."
 )
+
+
+def thinking_output_status(text):
+    """Lê e remove o marcador final mesmo quando vem na mesma linha."""
+    text = (text or "").strip()
+    match = re.search(
+        r"(?:STATUS|ESTADO)\s*:\s*(FINAL|CONTINUE)\s*[`*_]*\s*$",
+        text,
+        re.I,
+    )
+    if not match:
+        return "continue", text
+
+    cleaned = text[:match.start()].rstrip(" \t-–—:|`*_\n")
+    status = match.group(1).lower()
+    return status, cleaned
+
+
+def thinking_is_identity_only(text):
+    """Evita que uma apresentação do modelo seja tratada como solução."""
+    normalized = re.sub(r"[*_`]", "", (text or "").strip().lower())
+    normalized = re.sub(r"\s+", " ", normalized)
+    return bool(re.fullmatch(
+        r"(?:sou|eu sou|meu nome é|meu nome e|me chamo) "
+        r"(?:o )?(?:agente de pensamento(?: da nexa)?|nexa)[.!]?",
+        normalized,
+    ))
 
 
 def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context=""):
@@ -2652,6 +2685,8 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None):
 
     history = list(messages)
     previous = ""
+    previous_signature = ""
+    identity_attempts = 0
     for index in range(rounds):
         if progress:
             progress(
@@ -2659,6 +2694,12 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None):
                 % (index + 1, rounds)
             )
         prompt = THINKING_AGENT_PROMPT
+        if identity_attempts:
+            prompt += (
+                "\n\nA rodada anterior foi apenas uma apresentação e não resolveu "
+                "a solicitação. Ignore esse impulso e comece agora pela análise "
+                "concreta da pergunta do usuário."
+            )
         if previous:
             prompt += (
                 "\n\nTentativa anterior (revise-a e melhore-a):\n" + previous
@@ -2696,6 +2737,7 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None):
             break
 
         text = (extract_text(payload) or "").strip()
+        status, text = thinking_output_status(text)
         calls = extract_tool_calls(payload)
         if calls:
             results, _, _ = thinking_tool_calls(
@@ -2709,13 +2751,38 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None):
                         for call_id, content in results.items()
                     ],
                 ])
-        if text:
+
+        identity_only = thinking_is_identity_only(text)
+        if identity_only:
+            identity_attempts += 1
+            text = ""
+            if progress:
+                progress(
+                    "A resposta intermediária não trouxe uma solução; "
+                    "vou exigir uma análise concreta na próxima rodada."
+                )
+        elif text:
+            identity_attempts = 0
             previous = text
+            signature = re.sub(r"\s+", " ", text).strip().lower()
+            if signature == previous_signature:
+                status = "final"
+                if progress:
+                    progress("A solução não mudou nesta revisão; encerrando o loop.")
+            previous_signature = signature
             if progress:
                 progress(
                     "Resposta da rodada %d:\n%s" % (index + 1, text)
                 )
-        if not text and not calls:
+
+        if status == "final" and not calls and previous and not identity_only:
+            if progress:
+                progress("O agente identificou que a solução está pronta.")
+            break
+        if not text and not calls and not previous and not identity_only:
+            break
+        if identity_attempts >= 2 and not calls:
+            print("[NEXA-PENSAMENTO] modelo não produziu uma solução útil")
             break
         print("[NEXA-PENSAMENTO] rodada %d/%d concluída" % (index + 1, rounds))
 
