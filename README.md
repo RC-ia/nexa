@@ -489,10 +489,14 @@ naquela resposta. Todos começam fechados, e o ponto ao lado do botão pulsa
 enquanto o modelo pensa.
 
 O painel é preenchido em tempo real, conforme o raciocínio chega no stream,
-e cada mensagem é independente: abrir ou fechar uma não mexe nas outras. O
-raciocínio também é salvo junto da conversa no `localStorage`, então as
-mensagens antigas continuam com o botão funcionando depois de recarregar a
-página.
+e cada mensagem é independente: abrir ou fechar uma não mexe nas outras. Nos
+níveis diferentes de Rápido, ele também informa cada rodada do agente de
+pensamento, quando o modelo está sendo consultado e quando uma ferramenta é
+chamada. Se o agente chamar a pesquisa comum ou profunda, o painel mostra o
+início, o progresso e a conclusão dessa pesquisa enquanto a resposta ainda
+está sendo preparada. O raciocínio também é salvo junto da conversa no
+`localStorage`, então as mensagens antigas continuam com o botão funcionando
+depois de recarregar a página.
 
 O raciocínio só aparece se o modelo realmente o enviar: o backend lê
 `reasoning_content` (o campo mais comum), `reasoning` ou `thinking` — tanto

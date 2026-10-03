@@ -2640,12 +2640,17 @@ def thinking_is_identity_only(text):
     ))
 
 
-def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context=""):
-    """Executa ferramentas; a pesquisa profunda recebe só o contexto pensado."""
+def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context="",
+                        progress=None):
+    """Executa ferramentas e transmite o andamento para a aba Pensamento."""
     regular = []
     results = {}
     memory_updated = False
     searched = False
+
+    def note(text):
+        if progress:
+            progress(text)
 
     for call in messages:
         if tool_call_name(call) != "pesquisa_profunda":
@@ -2657,17 +2662,27 @@ def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context
         topic = arguments.get("topico")
         topic = topic if isinstance(topic, str) else ""
         context = thinking_context.strip() or topic
+        note(
+            "🔎 O agente de pensamento chamou a pesquisa profunda para confirmar "
+            "a solução."
+        )
         research_topic = interpret_deep_intent(
-            user_id, context, [], reasoning, None, ""
+            user_id, context, [], reasoning, progress, ""
         )
-        results[call_id] = run_deep_research(
-            user_id, research_topic or context, None, reasoning
+        note("Pesquisa profunda iniciada para: %s" % (research_topic or context))
+        report = run_deep_research(
+            user_id, research_topic or context, progress, reasoning
         )
+        results[call_id] = report
         searched = True
+        note(
+            "✅ Pesquisa profunda concluída. O relatório foi entregue ao agente "
+            "de pensamento para a próxima revisão."
+        )
 
     if regular:
         regular_results, memory_now, search_now = run_tools(
-            user_id, regular, reasoning
+            user_id, regular, reasoning, progress=progress
         )
         results.update(regular_results)
         memory_updated = memory_now
@@ -2721,6 +2736,12 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None):
             "tool_choice": "auto",
         }
 
+        if progress:
+            progress(
+                "Consultando o modelo para elaborar a rodada %d..."
+                % (index + 1)
+            )
+
         try:
             response = requests.post(
                 API_BASE + "/chat/completions",
@@ -2730,18 +2751,40 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None):
             )
             if response.status_code != 200:
                 log_upstream_error(response)
+                if progress:
+                    progress(
+                        "O modelo não respondeu à rodada %d (HTTP %d)."
+                        % (index + 1, response.status_code)
+                    )
                 break
             payload = response.json()
         except (requests.RequestException, ValueError) as error:
             print("[NEXA-PENSAMENTO] rodada falhou: %s" % error)
+            if progress:
+                progress(
+                    "A rodada %d falhou ao consultar o modelo; vou encerrar "
+                    "esta revisão."
+                    % (index + 1)
+                )
             break
 
         text = (extract_text(payload) or "").strip()
+        if progress:
+            progress("O modelo respondeu à rodada %d." % (index + 1))
         status, text = thinking_output_status(text)
         calls = extract_tool_calls(payload)
         if calls:
+            tool_names = ", ".join(
+                tool_call_name(call) for call in calls if tool_call_name(call)
+            )
+            if progress:
+                progress(
+                    "O agente solicitou a ferramenta: %s. Aguardando o resultado."
+                    % (tool_names or "ferramenta desconhecida")
+                )
             results, _, _ = thinking_tool_calls(
-                calls, memories, user_id, reasoning, previous or text
+                calls, memories, user_id, reasoning, previous or text,
+                progress=progress,
             )
             if results:
                 history.extend([
@@ -3177,7 +3220,7 @@ def run_deep_research(user_id, topic, progress=None, reasoning=None):
         print("[NEXA-PROFUNDA] falha no fechamento: %s" % error)
         return "A pesquisa profunda não conseguiu fechar o relatório."
 
-def run_tools(user_id, calls, reasoning=None):
+def run_tools(user_id, calls, reasoning=None, progress=None):
     """
     Executa todas as ferramentas chamadas pelo modelo e devolve
     (resultados_por_id, memoria_atualizada, pesquisa_realizada).
@@ -3192,6 +3235,10 @@ def run_tools(user_id, calls, reasoning=None):
     results = {}
     memory_updated = False
     searched = False
+
+    def note(text):
+        if progress:
+            progress(text)
 
     if not calls:
         return results, memory_updated, searched
@@ -3224,6 +3271,7 @@ def run_tools(user_id, calls, reasoning=None):
 
         if name == "pesquisar":
             term = arguments.get("termo")
+            note("🔍 Pesquisando na web: «%s»" % term)
             found, error = run_web_search(term)
             print(
                 "[NEXA-PESQUISA] %r -> %d resultado(s)%s"
@@ -3232,6 +3280,7 @@ def run_tools(user_id, calls, reasoning=None):
 
             if found:
                 searched = True
+                note("✅ Pesquisa comum concluída: %d resultado(s)." % len(found))
                 results[call_id] = format_search_results(term, found, user_id)
             elif error:
                 results[call_id] = error
@@ -3243,7 +3292,11 @@ def run_tools(user_id, calls, reasoning=None):
         if name == "pesquisa_profunda":
             topic = arguments.get("topico")
             print("[NEXA-PROFUNDA] ferramenta chamada: %r" % topic)
-            results[call_id] = run_deep_research(user_id, topic, reasoning=reasoning)
+            note("🔎 O modelo chamou a pesquisa profunda: «%s»" % topic)
+            results[call_id] = run_deep_research(
+                user_id, topic, progress=progress, reasoning=reasoning
+            )
+            note("✅ Pesquisa profunda concluída e devolvida ao modelo.")
             searched = True
             continue
 
@@ -3251,7 +3304,12 @@ def run_tools(user_id, calls, reasoning=None):
             paginas = arguments.get("paginas", [])
             if not isinstance(paginas, list):
                 paginas = []
+            note(
+                "📄 Lendo %d página(s) da pesquisa anterior."
+                % len(paginas)
+            )
             results[call_id] = fetch_pages(user_id, paginas)
+            note("✅ Leitura das páginas concluída.")
             continue
 
     return results, memory_updated, searched
@@ -4297,6 +4355,10 @@ def make_thinking_response(
                 )
             except Exception as error:  # noqa: BLE001
                 print("[NEXA-PENSAMENTO] falha inesperada: %s" % error)
+                progress.put(
+                    "O agente de pensamento encontrou uma falha e encerrou a "
+                    "revisão: %s" % str(error)[:160]
+                )
                 box["report"] = ""
 
         yield sse({
