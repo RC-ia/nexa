@@ -4248,6 +4248,13 @@ def make_blocking_response(
         follow_up = follow_up or ""
 
     def generate():
+        if thinking_report:
+            yield sse({
+                "type": "reasoning",
+                "text": "Agente de pensamento:\n\n"
+                        + thinking_report + "\n\n",
+            })
+
         if thinking:
             yield sse({"type": "reasoning", "text": thinking})
 
