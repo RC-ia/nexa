@@ -7,6 +7,8 @@ máquina e ser exposta com o túnel do Cloudflare (`cloudflared`).
 Estrutura:
 
 - `server.py` — servidor Flask (serve o site + `/api/chat` com streaming SSE)
+- `image_generator.py` — monta o gerador de imagens local dentro do servidor principal
+- `geração de imagem local/` — interface do gerador, integração com Automatic1111 e saída local
 - `auth.py` — login, sessões e painel admin
 - `run.py` — supervisor: roda o servidor e aplica auto-update via git
 - `launcher.py` — sobe/derruba o supervisor desanexado (daemon)
@@ -37,8 +39,8 @@ API_GEMA=sua-chave-gemini-aqui
 
 Opcionais (já têm padrão): `API_BASE`, `MODEL`, `VISION_MODEL`, `PORT`,
 `MAX_OUTPUT_TOKENS`, `MEMORY_DIR`, `STUDIO_DIR`, `STREAM_TIMEOUT`,
-`REASONING_PARAM`, `REASONING_VALUES`, `THINKING_MINIMUM_ROUNDS`,
-`THINKING_LOW_ROUNDS`, `THINKING_MEDIUM_ROUNDS`, `THINKING_HIGH_ROUNDS`,
+`THINKING_MINIMUM_ROUNDS`, `THINKING_LOW_ROUNDS`,
+`THINKING_MEDIUM_ROUNDS`, `THINKING_HIGH_ROUNDS`,
 `THINKING_VERY_HIGH_ROUNDS`, `THINKING_MAXIMUM_ROUNDS`,
 `THINKING_ULTRA_ROUNDS`, `THINKING_AGENT_MAX_TOKENS`, `AUTO_UPDATE`,
 `UPDATE_INTERVAL`, `GIT_REMOTE`, `GIT_BRANCH`, `ADMIN_USER`,
@@ -98,7 +100,11 @@ O `run.py` inicia o servidor e fica verificando o repositório git a cada
 python server.py
 ```
 
-A aplicação sobe em `http://localhost:8000`.
+A aplicação sobe em `http://localhost:8000`. O botão **Gerador de imagens** e a
+rota `http://localhost:8000/gerador/` abrem o gerador integrado. O servidor
+principal inicia a preparação do Automatic1111 em segundo plano, usando as
+configurações `AUTOMATIC1111_*` do `.env`; não é necessário executar um segundo
+servidor Flask. Para desativar esse módulo, use `IMAGE_GENERATOR_ENABLED=0`.
 
 ### Opção C — Processo desanexado/daemon (sobrevive ao fechar o terminal)
 
@@ -465,28 +471,23 @@ sendo o caminho normal, sem esse agente adicional. O loop termina quando o
 agente marca a solução como final, quando uma revisão não traz mudança ou
 quando o modelo repete apenas uma apresentação sem resolver a solicitação.
 
-O parâmetro enviado à API e as rodadas do agente são configuráveis no `.env`:
+As rodadas do agente são configuráveis no `.env`:
 
-- `REASONING_PARAM` — nome do campo no corpo da requisição (padrão
-  `reasoning_effort`).
 - `THINKING_MINIMUM_ROUNDS`, `THINKING_LOW_ROUNDS`,
-  `THINKING_MEDIUM_ROUNDS`, `THINKING_HIGH_ROUNDS`,
-  `THINKING_VERY_HIGH_ROUNDS`, `THINKING_MAXIMUM_ROUNDS` e
-  `THINKING_ULTRA_ROUNDS` — quantidade de ciclos do agente de pensamento em
-  cada nível. Os valores padrão são `1`, `3`, `6`, `8`, `12`, `16` e `24`.
+ `THINKING_MEDIUM_ROUNDS`, `THINKING_HIGH_ROUNDS`,
+ `THINKING_VERY_HIGH_ROUNDS`, `THINKING_MAXIMUM_ROUNDS` e
+ `THINKING_ULTRA_ROUNDS` — quantidade de ciclos do agente de pensamento em
+ cada nível. Os valores padrão são `1`, `3`, `6`, `8`, `12`, `16` e `24`.
 - `THINKING_AGENT_MAX_TOKENS` — limite de tokens por ciclo do agente de
-  pensamento. O agente pode usar a pesquisa comum e chamar `pesquisa_profunda`
-  quando os resultados forem insuficientes; nessa chamada, o agente de
-  intenção/tema recebe somente o contexto produzido pelo pensamento, sem o
-  histórico bruto da conversa.
-- `REASONING_VALUES` — valores enviados ao parâmetro externo da API, na ordem
-  dos níveis (`none`, `minimum`, `low`, `medium`, `high`, `veryhigh`,
-  `maximum`, `ultra`). Use uma vírgula inicial para Rápido não enviar nada.
-  Por exemplo: `REASONING_VALUES=,minimum,low,medium,high,veryhigh,maximum,ultra`.
-  Essa lista é independente da quantidade de ciclos internos acima.
+ pensamento. O agente pode usar a pesquisa comum e chamar `pesquisa_profunda`
+ quando os resultados forem insuficientes; nessa chamada, o agente de
+ intenção/tema recebe somente o contexto produzido pelo pensamento, sem o
+ histórico bruto da conversa.
 
-Se o modelo não suportar esse parâmetro, basta deixar `REASONING_PARAM`
-vazio (desliga o recurso).
+O reforço é implementado pelo número de ciclos do agente de pensamento. A NEXA
+não envia mais um campo externo como `reasoning_effort`; isso evita depender de
+parâmetros que alguns modelos não aceitam. O provedor pode aplicar o próprio
+reforço internamente.
 
 ## Ver o pensamento
 

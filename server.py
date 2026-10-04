@@ -15,6 +15,7 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
+from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -241,17 +242,6 @@ CONNECT_TIMEOUT = 10
 # do proxy (que responde 524), para o servidor desistir antes e cair no
 # caminho bloqueante em vez de esperar o proxy cortar.
 STREAM_TIMEOUT = int(os.environ.get("STREAM_TIMEOUT", "45"))
-
-REASONING_PARAM = os.environ.get("REASONING_PARAM", "reasoning_effort").strip()
-REASONING_LEVELS = [
-    "none", "minimum", "low", "medium", "high", "veryhigh", "maximum", "ultra"
-]
-REASONING_VALUES = [
-    value.strip()
-    for value in os.environ.get(
-        "REASONING_VALUES", ",minimum,low,medium,high,veryhigh,maximum,ultra"
-    ).split(",")
-]
 
 STATIC_FILES = {
     "index.html", "style.css", "script.js",
@@ -701,6 +691,28 @@ TIME_TOOL = {
 
 app = Flask(__name__)
 app.register_blueprint(auth_bp)
+
+# O gerador usa a mesma sessão do servidor principal: /gerador/ serve a
+# interface e /gerador/api/* encaminha as chamadas para o A1111 local.
+IMAGE_GENERATOR_ENABLED = os.environ.get("IMAGE_GENERATOR_ENABLED", "1").strip().lower() not in {
+    "0", "false", "no", "off",
+}
+IMAGE_GENERATOR_APP = None
+IMAGE_GENERATOR_START = None
+if IMAGE_GENERATOR_ENABLED:
+    try:
+        from image_generator import (
+            app as IMAGE_GENERATOR_APP,
+            start_automatic1111_setup as IMAGE_GENERATOR_START,
+        )
+    except (ImportError, OSError, RuntimeError) as error:
+        print("[NEXA] gerador de imagens indisponível:", error)
+
+if IMAGE_GENERATOR_APP is not None:
+    app.wsgi_app = DispatcherMiddleware(
+        app.wsgi_app,
+        {"/gerador": IMAGE_GENERATOR_APP},
+    )
 
 
 # =========================
@@ -1344,10 +1356,6 @@ def run_reminder_action(user_id, instrucao, when_text):
             "stream": False,
             "max_tokens": MAX_OUTPUT_TOKENS,
         }
-        # Lembrete de ação não é conversa: vale o modelo normal no
-        # raciocínio ultra para o resultado sair com mais qualidade.
-        body.update(reasoning_payload("ultra"))
-
         try:
             response = requests.post(
                 API_BASE + "/chat/completions",
@@ -2467,27 +2475,6 @@ def normalize_reasoning_level(level):
     return REASONING_ALIASES.get(level, level)
 
 
-def reasoning_payload(level):
-    level = normalize_reasoning_level(level)
-    if not REASONING_PARAM or not level:
-        return {}
-
-    try:
-        index = REASONING_LEVELS.index(level)
-    except ValueError:
-        return {}
-
-    if index >= len(REASONING_VALUES):
-        return {}
-
-    value = REASONING_VALUES[index]
-
-    if not value:
-        return {}
-
-    return {REASONING_PARAM: value}
-
-
 def message_has_image(messages):
     return any(
         isinstance(message, dict)
@@ -2912,8 +2899,6 @@ def request_body(stream, messages, memories, reasoning, custom_instructions="",
                 DEEP_RESEARCH_TOOL,
             ]
         body["tool_choice"] = "auto"
-
-    body.update(reasoning_payload(reasoning))
 
     return body
 
@@ -3814,7 +3799,6 @@ def studio_request_body(stream, messages, user_id, reasoning):
         "tools": STUDIO_TOOLS,
         "tool_choice": "auto",
     }
-    body.update(reasoning_payload(reasoning))
     return body
 
 def finish_studio_with_tools(user_id, messages, reasoning, assistant_text, calls):
@@ -5890,4 +5874,7 @@ if __name__ == "__main__":
     threading.Thread(
         target=reminder_scheduler_loop, daemon=True, name="nexa-reminders"
     ).start()
+    if IMAGE_GENERATOR_START is not None:
+        print("[NEXA] iniciando o gerador de imagens em segundo plano...")
+        IMAGE_GENERATOR_START()
     app.run(host="0.0.0.0", port=PORT, threaded=True)
