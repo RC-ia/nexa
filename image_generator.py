@@ -26,4 +26,3 @@ def _load_generator_module() -> ModuleType:
 
 _generator_module = _load_generator_module()
 app = _generator_module.app
-start_automatic1111_setup = _generator_module.start_automatic1111_setup

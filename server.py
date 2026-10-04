@@ -693,18 +693,14 @@ app = Flask(__name__)
 app.register_blueprint(auth_bp)
 
 # O gerador usa a mesma sessão do servidor principal: /gerador/ serve a
-# interface e /gerador/api/* encaminha as chamadas para o A1111 local.
+# interface e /gerador/api/* chama a API externa de imagens configurada.
 IMAGE_GENERATOR_ENABLED = os.environ.get("IMAGE_GENERATOR_ENABLED", "1").strip().lower() not in {
     "0", "false", "no", "off",
 }
 IMAGE_GENERATOR_APP = None
-IMAGE_GENERATOR_START = None
 if IMAGE_GENERATOR_ENABLED:
     try:
-        from image_generator import (
-            app as IMAGE_GENERATOR_APP,
-            start_automatic1111_setup as IMAGE_GENERATOR_START,
-        )
+        from image_generator import app as IMAGE_GENERATOR_APP
     except (ImportError, OSError, RuntimeError) as error:
         print("[NEXA] gerador de imagens indisponível:", error)
 
@@ -5874,7 +5870,4 @@ if __name__ == "__main__":
     threading.Thread(
         target=reminder_scheduler_loop, daemon=True, name="nexa-reminders"
     ).start()
-    if IMAGE_GENERATOR_START is not None:
-        print("[NEXA] iniciando o gerador de imagens em segundo plano...")
-        IMAGE_GENERATOR_START()
     app.run(host="0.0.0.0", port=PORT, threaded=True)
