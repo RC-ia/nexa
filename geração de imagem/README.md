@@ -1,52 +1,80 @@
-# Sistema de geração de imagens
+# Sistema local de geração de imagens com Automatic1111
 
 ## Objetivo
 
-Criar um sistema capaz de localizar modelos no [Civitai](https://civitai.com/), selecionar uma versão compatível e enviar parâmetros de geração para um backend de imagens. O sistema deverá registrar os modelos utilizados, os parâmetros da geração e os arquivos resultantes.
+Executar um gerador local de imagens no computador usando o [Automatic1111 / Stable Diffusion WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui) como backend real. A interface web em estilo chat envia prompts para `/sdapi/v1/txt2img` e exibe a imagem resultante no próprio chat.
 
-## Terminologia
+## Backend local
 
-Neste projeto, **1.1.1.1** significa **AUTOMATIC1111 (A1111)**, a interface/backend local de Stable Diffusion. O Automatic1111 executa a geração por meio da API `txt2img`; o Civitai fornece o catálogo e os modelos que podem ser baixados conforme suas licenças.
+A geração é feita pelo Automatic1111 em execução localmente em:
 
-O endereço da API do Automatic1111 é configurável por `AUTOMATIC1111_URL` e não deve ser confundido com o DNS `1.1.1.1` da Cloudflare.
+```text
+http://127.0.0.1:7860
+```
 
-## Primeira versão implementada
+O app Flask deste diretório consulta `OPTIONS` e `TXT2IMG` na API do SD WebUI. A URL pode ser ajustada com `AUTOMATIC1111_URL` no `.env` local.
+
+## Requisito crítico de ambiente
+
+O Automatic1111 v1.10.1 usado neste fluxo foi validado com Python 3.10.x. O ambiente atual com Python 3.11.x falha ao tentar instalar o pacote `clip` do pipeline legado do SD1.x.
+
+Para evitar a falha, use Python 3.10.6 e mantenha o ambiente virtual em `automatic1111/venv` criado pela própria bootstrap do projeto.
+
+## Interface implementada
 
 A pasta contém um site Flask independente com uma interface simples em estilo chat:
 
-- entrada de texto para o prompt;
+- entrada de texto do prompt;
 - envio com **Enter** e nova linha com **Shift+Enter**;
 - saída da imagem diretamente na conversa;
 - link para abrir e baixar a imagem;
-- status de conexão do Automatic1111;
-- consulta opcional de modelos do Civitai pela API;
-- poucos parâmetros fixos no servidor, sem um painel excessivo de controles.
+- status de conexão com o Automatic1111;
+- poucos parâmetros fixos no servidor, sem painel complexo.
 
 Arquivos principais:
 
-- `app.py`: servidor Flask, integração A1111/Civitai e armazenamento das imagens;
+- `app.py`: servidor Flask, integração com o Automatic1111 e armazenamento das imagens;
 - `templates/index.html`: tela do chat;
 - `static/app.css`: visual da interface;
 - `static/app.js`: envio do prompt, estado de carregamento e exibição do resultado;
-- `generated/`: imagens geradas localmente.
+- `generated/`: imagens geradas localmente;
+- `start-local.bat`: inicialização local com verificação de Python 3.10.
 
 ### Executar
 
-Com o ambiente virtual do projeto ativo, a partir da raiz do repositório:
+O modo recomendado é abrir o script local:
 
 ```powershell
-.venv\Scripts\python.exe "geração de imagem\app.py"
+.\start-local.bat
 ```
 
-O servidor escuta em `0.0.0.0:5000`, permitindo acesso pelos dispositivos da rede através do IP do computador, por exemplo `http://192.168.0.10:5000`. A porta pode ser alterada com `IMAGE_APP_PORT`.
-
-O Automatic1111 precisa estar em execução com a API habilitada, normalmente com `--api`, por exemplo:
+Também é possível rodar isoladamente o app Flask:
 
 ```powershell
-webui-user.bat --api
+.\..\.venv\Scripts\python.exe "geração de imagem local\app.py"
 ```
 
-Configure uma cópia de `.env.example` como `.env` quando necessário. A chave do Civitai é opcional para a primeira geração e serve para consultas autenticadas ao catálogo.
+Nesse modo independente, o servidor local escuta em `0.0.0.0:5001` por padrão, permitindo acesso pelos dispositivos da rede pelo IP do computador, por exemplo `http://192.168.0.10:5001`. A porta pode ser alterada com `IMAGE_APP_PORT`.
+
+## Variáveis esperadas
+
+Configure uma cópia de `.env.example` como `.env` e use as variáveis do backend local:
+
+```dotenv
+AUTOMATIC1111_URL=http://127.0.0.1:7860
+AUTOMATIC1111_API_KEY=
+AUTOMATIC1111_CHECKPOINT=
+AUTOMATIC1111_STEPS=28
+AUTOMATIC1111_WIDTH=768
+AUTOMATIC1111_HEIGHT=768
+AUTOMATIC1111_CFG_SCALE=7
+AUTOMATIC1111_SAMPLER=DPM++ 2M Karras
+IMAGE_APP_PORT=5001
+```
+
+## Status atual
+
+A app Flask já está pronta para a integração com Automatic1111, mas o backend local ainda depende de um ambiente compatível com Python 3.10 para concluir a instalação do CLIP e subir o SD WebUI. Sem isso, a startup falha antes da API responder em `:7860`.
 
 ## Arquitetura proposta
 
@@ -188,6 +216,7 @@ Os nomes dos campos serão adaptados conforme a API do backend escolhido. O sist
 ## Próximos passos
 
 - Adicionar uma busca discreta de modelos do Civitai à tela, sem transformar o chat em um painel complexo.
+- Adicionar seleção e download manual de modelos do Civitai, com confirmação de licença e espaço em disco.
 - Persistir histórico de prompts e imagens.
 - Adicionar autenticação antes de expor o site fora de uma rede confiável.
 - Configurar HTTPS ou um proxy reverso quando o serviço for usado além da rede local.

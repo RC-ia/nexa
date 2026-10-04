@@ -65,6 +65,8 @@ h1 { margin: 1px 0 0; font-size: 17px; font-weight: 650; letter-spacing: -.01em;
 .status-dot { width: 7px; height: 7px; border-radius: 999px; background: #fbbf24; box-shadow: 0 0 9px currentColor; }
 .connection.online { color: #86efac; }
 .connection.online .status-dot { background: #4ade80; }
+.connection.starting { color: #fbbf24; }
+.connection.starting .status-dot { background: #fbbf24; }
 .connection.offline { color: var(--danger); }
 .connection.offline .status-dot { background: var(--danger); }
 

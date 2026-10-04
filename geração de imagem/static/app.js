@@ -34,7 +34,7 @@ function addLoadingMessage() {
 function addResult(result) {
   const message = document.createElement('div');
   message.className = 'assistant-message';
-  const seed = result.seed === null || result.seed === undefined ? '' : `Seed ${escapeHtml(result.seed)}`;
+  const provider = result.provider ? escapeHtml(result.provider) : 'Novita AI';
   const duration = result.duration_ms ? `${escapeHtml(result.duration_ms)} ms` : '';
   message.innerHTML = `
     <div class="result-head"><span class="assistant-avatar" aria-hidden="true">✦</span><span>NEXA criou sua imagem</span></div>
@@ -43,7 +43,7 @@ function addResult(result) {
         <img src="${escapeHtml(result.image_url)}" alt="Imagem gerada a partir do prompt" loading="lazy">
       </a>
       <div class="result-meta">
-        ${seed ? `<span>${seed}</span>` : ''}
+        <span>${provider}</span>
         ${duration ? `<span>${duration}</span>` : ''}
         <a href="${escapeHtml(result.image_url)}" download>Baixar imagem</a>
       </div>
@@ -64,11 +64,16 @@ async function checkStatus() {
   try {
     const response = await fetch('api/status');
     const data = await response.json();
-    connectionStatus.classList.toggle('online', data.ok);
-    connectionStatus.classList.toggle('offline', !data.ok);
-    connectionStatus.querySelector('span:last-child').textContent = data.ok ? 'conectado' : 'offline';
+    const configured = data.status === 'configured';
+    connectionStatus.classList.toggle('online', configured);
+    connectionStatus.classList.toggle('starting', false);
+    connectionStatus.classList.toggle('offline', !configured);
+    connectionStatus.querySelector('span:last-child').textContent = configured
+      ? 'Novita conectada'
+      : 'configure a Novita';
     if (data.model) modelName.textContent = data.model;
   } catch (_) {
+    connectionStatus.classList.remove('online', 'starting');
     connectionStatus.classList.add('offline');
     connectionStatus.querySelector('span:last-child').textContent = 'offline';
   }
@@ -125,3 +130,4 @@ promptInput.addEventListener('input', () => {
 });
 
 checkStatus();
+window.setInterval(checkStatus, 5000);
