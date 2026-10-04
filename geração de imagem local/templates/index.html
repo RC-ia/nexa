@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NEXA · Geração de imagens</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', _external=False) }}">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand-mark" aria-hidden="true">✦</div>
+        <div>
+          <p class="eyebrow">NEXA STUDIO</p>
+          <h1>Geração de imagens</h1>
+        </div>
+        <div class="connection" id="connection-status" title="Estado da Novita AI">
+          <span class="status-dot"></span>
+          <span>verificando</span>
+        </div>
+      </header>
+
+      <section class="chat" aria-label="Conversa de geração de imagens">
+        <div class="welcome-message">
+          <div class="assistant-avatar" aria-hidden="true">✦</div>
+          <div class="message-copy">
+            <p class="message-author">NEXA</p>
+            <p>Descreva a imagem que você quer criar. Eu cuido do resto.</p>
+          </div>
+        </div>
+        <div id="conversation" class="conversation" aria-live="polite"></div>
+      </section>
+
+      <section class="composer-wrap" aria-label="Criar uma imagem">
+        <form id="generate-form" class="composer">
+          <label class="sr-only" for="prompt">Descreva sua imagem</label>
+          <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required
+            placeholder="Descreva uma imagem... (Enter para gerar, Shift+Enter para nova linha)"></textarea>
+          <div class="composer-footer">
+            <div class="model-line">
+              <span class="model-icon">◈</span>
+              <span id="model-name">{{ model_name }}</span>
+            </div>
+            <button id="generate-button" type="submit">
+              <span>Gerar</span>
+              <span class="send-icon" aria-hidden="true">↑</span>
+            </button>
+          </div>
+        </form>
+        <p class="hint">As imagens são geradas pela Novita AI configurada no servidor.</p>
+      </section>
+    </main>
+    <script src="{{ url_for('static', filename='app.js', _external=False) }}"></script>
+  </body>
+</html>
