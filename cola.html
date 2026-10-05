@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatGPT Visual - Interativo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-main: #212121;
+            --bg-sidebar: #171717;
+            --bg-hover: #2f2f2f;
+            --bg-active: #3a3a3a;
+            --text-primary: #ececec;
+            --text-secondary: #b4b4b4;
+            --border-color: #424242;
+            --accent-blue: #3b82f6;
+            --radius-full: 9999px;
+            /* Curva de animação suave */
+            --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+            /* Suaviza a renderização da fonte */
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* --- Sidebar --- */
+        .sidebar {
+            width: 260px;
+            background-color: var(--bg-sidebar);
+            display: flex;
+            flex-direction: column;
+            padding: 16px 12px;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            margin-bottom: 20px;
+        }
+
+        .logo {
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .sidebar-header .icons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .new-chat-btn {
+            background-color: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-full);
+            padding: 12px 18px;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            transition: var(--transition);
+            margin-bottom: 24px;
+        }
+
+        .new-chat-btn:hover {
+            background-color: var(--bg-hover);
+            border-color: #555;
+            transform: translateY(-1px);
+        }
+
+        .new-chat-btn:active {
+            transform: scale(0.97);
+            background-color: var(--bg-active);
+        }
+
+        .nav-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-radius: var(--radius-full);
+            color: var(--text-primary);
+            font-size: 14px;
+            text-decoration: none;
+            cursor: pointer;
+            transition: var(--transition);
+            border: none;
+            background: transparent;
+            width: 100%;
+            text-align: left;
+        }
+
+        .nav-item:hover {
+            background-color: var(--bg-hover);
+            transform: translateX(2px); /* Efeito de deslizar para a direita */
+        }
+
+        .nav-item:active {
+            transform: scale(0.97);
+        }
+
+        /* Estado ativo do menu */
+        .nav-item.active {
+            background-color: var(--bg-active);
+            font-weight: 600;
+        }
+
+        .nav-item svg {
+            color: var(--text-secondary);
+            width: 18px;
+            height: 18px;
+            transition: var(--transition);
+        }
+
+        .nav-item:hover svg {
+            color: var(--text-primary);
+        }
+
+        .sidebar-footer {
+            margin-top: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .recentes-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            padding: 0 16px;
+            margin-bottom: 4px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        
+        .recentes-title:hover {
+            color: var(--text-primary);
+        }
+
+        .user-profile {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            border-radius: var(--radius-full);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .user-profile:hover {
+            background-color: var(--bg-hover);
+        }
+
+        .user-profile:active {
+            transform: scale(0.98);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .avatar {
+            width: 32px;
+            height: 32px;
+            background-color: #10a37f;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 600;
+            transition: var(--transition);
+        }
+
+        .user-profile:hover .avatar {
+            transform: scale(1.05);
+        }
+
+        .user-details {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .user-name { font-size: 13px; font-weight: 500; }
+        .user-plan { font-size: 11px; color: var(--text-secondary); }
+
+        .upgrade-btn {
+            background-color: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 6px 14px;
+            border-radius: var(--radius-full);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .upgrade-btn:hover {
+            background-color: var(--bg-hover);
+            border-color: #555;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.05);
+        }
+
+        .upgrade-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* --- Main Content --- */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            height: 60px;
+        }
+
+        .model-selector {
+            display: flex;
+            align-items: center;
+            background-color: #2f2f2f;
+            border-radius: var(--radius-full);
+            padding: 4px;
+            margin: 0 auto;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            top: 14px;
+            border: 1px solid #3a3a3a;
+        }
+
+        .model-option {
+            padding: 8px 20px;
+            font-size: 13px;
+            font-weight: 500;
+            border-radius: var(--radius-full);
+            cursor: pointer;
+            color: var(--text-secondary);
+            transition: var(--transition);
+            user-select: none;
+        }
+
+        .model-option:hover:not(.active) {
+            color: var(--text-primary);
+        }
+
+        .model-option.active {
+            background-color: #4a4a4a;
+            color: var(--text-primary);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .model-option:active {
+            transform: scale(0.95);
+        }
+
+        .top-right-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-left: auto;
+        }
+
+        .ver-planos {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #a78bfa;
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+            cursor: pointer;
+            padding: 8px 12px;
+            border-radius: var(--radius-full);
+            transition: var(--transition);
+        }
+
+        .ver-planos:hover {
+            background-color: var(--bg-hover);
+            text-shadow: 0 0 8px rgba(167, 139, 250, 0.4);
+        }
+
+        .ver-planos:active {
+            transform: scale(0.95);
+        }
+
+        .icon-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px;
+            border-radius: 50%;
+            transition: var(--transition);
+        }
+
+        .icon-btn:hover {
+            background-color: var(--bg-hover);
+            color: var(--text-primary);
+            transform: rotate(15deg) scale(1.1); /* Efeito de rotação no hover */
+        }
+
+        .icon-btn:active {
+            transform: scale(0.85);
+        }
+
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            max-width: 800px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        .greeting {
+            font-size: 28px;
+            font-weight: 500;
+            margin-bottom: 36px;
+            text-align: center;
+            animation: fadeInDown 0.6s ease-out; /* Animação de entrada */
+        }
+
+        .input-wrapper {
+            width: 100%;
+            background-color: #2f2f2f;
+            border-radius: var(--radius-full);
+            display: flex;
+            align-items: center;
+            padding: 10px 16px 10px 20px;
+            gap: 12px;
+            margin-bottom: 32px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border: 1px solid #3a3a3a;
+            transition: var(--transition);
+        }
+
+        /* Efeito de foco no input */
+        .input-wrapper:focus-within {
+            border-color: #666;
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.08);
+            transform: translateY(-2px); /* Levanta levemente ao focar */
+            background-color: #333;
+        }
+
+        .input-wrapper input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 15px;
+            outline: none;
+        }
+
+        .input-wrapper input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .input-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .think-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 8px 16px;
+            border-radius: var(--radius-full);
+            font-size: 13px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .think-btn:hover {
+            background-color: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .think-btn:active {
+            transform: scale(0.92);
+        }
+
+        .voice-btn {
+            background-color: var(--accent-blue);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .voice-btn:hover {
+            background-color: #2563eb;
+            transform: scale(1.1);
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+        }
+
+        .voice-btn:active {
+            transform: scale(0.85);
+        }
+
+        .suggestions {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+            max-width: 600px;
+            align-items: flex-start;
+        }
+
+        .suggestion-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text-primary);
+            font-size: 14px;
+            cursor: pointer;
+            padding: 12px 20px;
+            border-radius: var(--radius-full);
+            border: 1px solid transparent;
+            transition: var(--transition);
+            animation: fadeInUp 0.6s ease-out backwards; /* Animação de entrada */
+        }
+
+        .suggestion-item:nth-child(1) { animation-delay: 0.1s; }
+        .suggestion-item:nth-child(2) { animation-delay: 0.2s; }
+        .suggestion-item:nth-child(3) { animation-delay: 0.3s; }
+
+        .suggestion-item:hover {
+            background-color: var(--bg-hover);
+            border-color: #3a3a3a;
+            transform: translateX(8px); /* Desliza para a direita */
+        }
+
+        .suggestion-item:active {
+            transform: scale(0.98) translateX(8px);
+        }
+
+        .suggestion-item svg {
+            color: var(--text-secondary);
+            width: 18px;
+            height: 18px;
+            transition: var(--transition);
+        }
+        
+        .suggestion-item:hover svg {
+            color: var(--text-primary);
+        }
+
+        /* SVG Styles */
+        svg {
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        /* Keyframes para animação de entrada */
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <span>ChatGPT</span>
+            </div>
+            <div class="icons">
+                <button class="icon-btn"><svg width="18" height="18" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>
+                <button class="icon-btn"><svg width="18" height="18" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg></button>
+            </div>
+        </div>
+
+        <button class="new-chat-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+            Novo chat
+        </button>
+
+        <nav class="nav-menu">
+            <button class="nav-item">
+                <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                Imagens
+            </button>
+            <button class="nav-item">
+                <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                Biblioteca
+            </button>
+            <button class="nav-item">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                Agendados
+            </button>
+            <button class="nav-item">
+                <svg viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                Plugins
+            </button>
+            <button class="nav-item">
+                <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                Projetos
+            </button>
+            <button class="nav-item">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg>
+                Mais
+            </button>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="recentes-title">Recentes ></div>
+            <div class="user-profile">
+                <div class="user-info">
+                    <div class="avatar">A</div>
+                    <div class="user-details">
+                        <span class="user-name">Aldair Do...</span>
+                        <span class="user-plan">Free</span>
+                    </div>
+                </div>
+                <button class="upgrade-btn">Fazer upgrade</button>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="top-bar">
+            <div class="model-selector">
+                <div class="model-option active">Chat</div>
+                <div class="model-option">+ Work</div>
+            </div>
+            <div class="top-right-actions">
+                <a class="ver-planos">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2L14.5 9H22L16 13.5L18.5 20.5L12 16L5.5 20.5L8 13.5L2 9H9.5L12 2Z"/></svg>
+                    Ver planos
+                </a>
+                <button class="icon-btn">
+                    <svg width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                </button>
+            </div>
+        </header>
+
+        <div class="chat-container">
+            <h1 class="greeting">Por onde começamos?</h1>
+
+            <div class="input-wrapper">
+                <button class="icon-btn">
+                    <svg width="20" height="20" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                </button>
+                <input type="text" placeholder="Pergunte qualquer coisa" id="mainInput">
+                <div class="input-actions">
+                    <button class="think-btn">
+                        <svg width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                        Pensar
+                    </button>
+                    <button class="icon-btn">
+                        <svg width="18" height="18" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                    </button>
+                    <button class="voice-btn" id="voiceBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="suggestions">
+                <div class="suggestion-item">
+                    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                    Crie uma imagem ou figurinha
+                </div>
+                <div class="suggestion-item">
+                    <svg viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                    Escreva ou edite
+                </div>
+                <div class="suggestion-item">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                    Pesquise na web
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- JavaScript para Interatividade -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            
+            // 1. Interatividade do Seletor de Modelo (Chat / Work)
+            const modelOptions = document.querySelectorAll('.model-option');
+            modelOptions.forEach(option => {
+                option.addEventListener('click', () => {
+                    // Remove a classe 'active' de todos
+                    modelOptions.forEach(opt => opt.classList.remove('active'));
+                    // Adiciona a classe 'active' apenas no clicado
+                    option.classList.add('active');
+                });
+            });
+
+            // 2. Interatividade do Menu Lateral (Sidebar)
+            const navItems = document.querySelectorAll('.nav-item');
+            navItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    // Remove a classe 'active' de todos os itens
+                    navItems.forEach(nav => nav.classList.remove('active'));
+                    // Adiciona a classe 'active' no item clicado
+                    item.classList.add('active');
+                });
+            });
+
+            // 3. Efeito de clique no botão de voz
+            const voiceBtn = document.getElementById('voiceBtn');
+            voiceBtn.addEventListener('click', () => {
+                // Um feedback visual rápido
+                voiceBtn.style.backgroundColor = '#10a37f'; // Muda para verde
+                setTimeout(() => {
+                    voiceBtn.style.backgroundColor = ''; // Volta ao normal
+                }, 300);
+            });
+
+            // 4. Focar no input ao clicar em qualquer lugar da tela principal
+            const mainInput = document.getElementById('mainInput');
+            const mainContent = document.querySelector('.main-content');
+            
+            mainContent.addEventListener('click', (e) => {
+                // Evita focar se clicar em um botão ou link
+                if(e.target.tagName !== 'BUTTON' && e.target.tagName !== 'A' && e.target.tagName !== 'SVG' && e.target.tagName !== 'PATH') {
+                    mainInput.focus();
+                }
+            });
+
+        });
+    </script>
+</body>
+</html>
