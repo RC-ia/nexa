@@ -1383,6 +1383,7 @@ function addMessage(text, type, thinkingText, memoryUpdated, messageId, image, f
   }
   chat.appendChild(message);
   scrollConversationToBottom();
+  renderWelcomeState();
 }
 
 /*
@@ -2125,7 +2126,16 @@ function renderChat() {
     restoreConversation();
   }
 
+  renderWelcomeState();
   scrollConversationToBottom();
+}
+
+/*
+  Estado da página inicial: sem mensagens,
+  a saudação e as sugestões ocupam o centro.
+*/
+function renderWelcomeState() {
+  app.classList.toggle("welcome", history.length === 0);
 }
 
 function startNewChat() {
@@ -4109,6 +4119,7 @@ const authPanel = document.getElementById("authPanel");
 const authError = document.getElementById("authError");
 const loginForm = document.getElementById("loginForm");
 const drawerEmail = document.getElementById("drawerEmail");
+const drawerAvatar = document.getElementById("drawerAvatar");
 const drawerLogout = document.getElementById("drawerLogout");
 const drawerAdmin = document.getElementById("drawerAdmin");
 const adminPanel = document.getElementById("adminPanel");
@@ -4236,6 +4247,7 @@ function enterApp(user, issuedMessageKey) {
   authPanel.hidden = true;
   drawerEmail.textContent = user.username;
   drawerEmail.title = user.username;
+  drawerAvatar.textContent = user.username.trim().charAt(0).toUpperCase() || "N";
   drawerAdmin.hidden = !user.isAdmin;
 
   if (!appStarted) {
