@@ -1410,7 +1410,6 @@ function retryFromMessage(messageId) {
   renderChat();
 
   const userMsgId = makeMessageId();
-  addMessage(userMessage, "user", "", false, userMsgId, userImage, userFile);
 
   history.push({
     role: "user",
@@ -1419,6 +1418,8 @@ function retryFromMessage(messageId) {
     image: userImage,
     file: userFile
   });
+
+  addMessage(userMessage, "user", "", false, userMsgId, userImage, userFile);
 
   showTyping();
   setGenerating(true);
@@ -2062,17 +2063,10 @@ async function askNexa(text, deep, image, file) {
   }
 
   /*
-    Salva a conversa somente depois
-    que a resposta terminou.
+    A mensagem do usuário já entrou no `history` no envio
+    (é o que tira a página do estado de boas-vindas antes
+    da resposta chegar). Aqui entra só a resposta.
   */
-
-  history.push({
-    role: "user",
-    content: text,
-    id: makeMessageId(),
-    image: image || null,
-    file: file || null
-  });
 
   const assistantMessageId = makeMessageId();
   addActions(assistantMessageId);
@@ -3341,10 +3335,6 @@ async function submitImagePrompt(prompt) {
   const titleChatId = isFirstMessage ? activeChatId : null;
 
   const userMsgId = makeMessageId();
-  addMessage(prompt, "user", "", false, userMsgId);
-
-  input.value = "";
-  clearAttachment();
 
   history.push({
     role: "user",
@@ -3353,6 +3343,11 @@ async function submitImagePrompt(prompt) {
     image: null,
     file: null
   });
+
+  addMessage(prompt, "user", "", false, userMsgId);
+
+  input.value = "";
+  clearAttachment();
 
   setGenerating(true);
   showTyping();
@@ -3499,10 +3494,21 @@ composer.addEventListener(
       : null;
 
     /*
-      Mostra a mensagem do usuário.
+      Mostra a mensagem do usuário e já registra no `history`:
+      é o que tira a página do estado de boas-vindas antes
+      da resposta chegar.
     */
 
     const userMsgId = makeMessageId();
+
+    history.push({
+      role: "user",
+      content: messageText,
+      id: userMsgId,
+      image: submittedImage || null,
+      file: submittedFile || null
+    });
+
     addMessage(messageText, "user", "", false, userMsgId, submittedImage);
 
     input.value = "";
