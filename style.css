@@ -1840,13 +1840,13 @@ body {
   scale: 1.1;
 }
 
-.composer > #stopButton {
+.composer > #sendButton.stopping {
   background: var(--danger);
 
   color: #fff;
 }
 
-.composer > #stopButton:hover {
+.composer > #sendButton.stopping:hover {
   background: #f87171;
 }
 

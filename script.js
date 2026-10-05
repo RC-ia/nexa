@@ -32,7 +32,6 @@ function scrollConversationToBottom() {
 const micButton = document.getElementById("micButton");
 const liveCallButton = document.getElementById("liveCallButton");
 const sendButton = document.getElementById("sendButton");
-const stopButton = document.getElementById("stopButton");
 
 let abortController = null;
 
@@ -3276,17 +3275,19 @@ async function generateChatTitle(message) {
 
 function setGenerating(generating) {
   if (generating) {
-    sendButton.hidden = true;
-    stopButton.hidden = false;
-    stopButton.disabled = false;
+    sendButton.classList.add("stopping");
+    sendButton.querySelector(".send-icon").textContent = "■";
+    sendButton.setAttribute("aria-label", "Parar geração");
+    sendButton.title = "Parar geração";
     input.disabled = true;
     micButton.disabled = true;
     drawerNewChat.disabled = true;
     abortController = new AbortController();
   } else {
-    sendButton.hidden = false;
-    stopButton.hidden = true;
-    stopButton.disabled = true;
+    sendButton.classList.remove("stopping");
+    sendButton.querySelector(".send-icon").textContent = "➤";
+    sendButton.setAttribute("aria-label", "Enviar");
+    sendButton.title = "Enviar mensagem";
     input.disabled = false;
     micButton.disabled = false;
     drawerNewChat.disabled = false;
@@ -3294,7 +3295,7 @@ function setGenerating(generating) {
   }
 }
 
-stopButton.addEventListener("click", () => {
+sendButton.addEventListener("click", () => {
   if (abortController) {
     abortController.abort();
   }
@@ -3440,6 +3441,15 @@ composer.addEventListener(
 
     const text =
       input.value.trim();
+
+    /*
+      Durante a geração, o botão vira ■ e o clique para
+      (o listener do botão aborta); o submit só retorna.
+    */
+    if (abortController) {
+      abortController.abort();
+      return;
+    }
 
     if (
       (!text && !pendingImage && !pendingFile) ||
