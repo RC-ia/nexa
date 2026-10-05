@@ -764,9 +764,14 @@ def _security_headers(response):
     response.headers.setdefault("Referrer-Policy", "same-origin")
     response.headers.setdefault(
         "Content-Security-Policy",
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
-        "media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'",
+        "default-src 'self'; script-src 'self' 'unsafe-inline' "
+        "cdn.jsdelivr.net cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net "
+        "cdnjs.cloudflare.com fonts.googleapis.com; "
+        "font-src 'self' fonts.gstatic.com; "
+        "img-src 'self' data: blob:; "
+        "media-src 'self' blob:; connect-src 'self' cdn.jsdelivr.net; "
+        "frame-ancestors 'none'",
     )
     if (
         request.is_secure
