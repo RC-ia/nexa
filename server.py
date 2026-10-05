@@ -1,10 +1,12 @@
 import base64
 import calendar
+import hashlib
 import html
 import json
 import os
 import queue
 import re
+import sqlite3
 import threading
 import time
 import urllib.parse
@@ -705,10 +707,75 @@ if IMAGE_GENERATOR_ENABLED:
         print("[NEXA] gerador de imagens indisponível:", error)
 
 if IMAGE_GENERATOR_APP is not None:
+    AUTH_DB_FILE = BASE_DIR / os.environ.get("AUTH_DB", "auth.db")
+
+    def _generator_session_valid(environ):
+        """Confere o cookie de sessão no auth.db, sem depender do Flask."""
+        cookies = environ.get("HTTP_COOKIE", "")
+        token = ""
+        for part in cookies.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name.strip() == "nexa_session":
+                token = value.strip()
+                break
+        if not token:
+            return False
+        try:
+            conn = sqlite3.connect("file:%s?mode=ro" % AUTH_DB_FILE, uri=True, timeout=5)
+            try:
+                row = conn.execute(
+                    "SELECT 1 FROM sessions WHERE token_hash = ? AND expires_at > ?",
+                    (hashlib.sha256(token.encode()).hexdigest(), int(time.time())),
+                ).fetchone()
+            finally:
+                conn.close()
+        except (sqlite3.Error, OSError, ValueError):
+            return False
+        return row is not None
+
+    def _require_generator_login(wrapped):
+        """Barra /gerador/ sem sessão: redirect p/ navegador, 401 p/ API."""
+        def gated(environ, start_response):
+            if not _generator_session_valid(environ):
+                if "text/html" in environ.get("HTTP_ACCEPT", ""):
+                    start_response("302 Found", [("Location", "/")])
+                    return [b""]
+                start_response(
+                    "401 Unauthorized",
+                    [("Content-Type", "application/json")],
+                )
+                return [b'{"error":"Fa\xc3\xa7a login."}']
+            return wrapped(environ, start_response)
+        return gated
+
+    IMAGE_GENERATOR_APP.wsgi_app = _require_generator_login(
+        IMAGE_GENERATOR_APP.wsgi_app
+    )
     app.wsgi_app = DispatcherMiddleware(
         app.wsgi_app,
         {"/gerador": IMAGE_GENERATOR_APP},
     )
+
+
+@app.after_request
+def _security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+        "media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'",
+    )
+    if (
+        request.is_secure
+        or request.headers.get("X-Forwarded-Proto", "") == "https"
+    ):
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
 
 
 # =========================

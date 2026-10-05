@@ -112,10 +112,11 @@ def init_auth_db():
             return
 
         password = ADMIN_PASSWORD
-        generated = not password
 
-        if generated:
-            password = secrets.token_urlsafe(9)
+        if not password:
+            raise RuntimeError(
+                "Defina ADMIN_PASSWORD no .env antes do primeiro start."
+            )
 
         conn.execute(
             "INSERT OR REPLACE INTO users (username, password_hash, is_admin) "
@@ -123,18 +124,7 @@ def init_auth_db():
             (ADMIN_USER, generate_password_hash(password)),
         )
 
-    if generated:
-        print(
-            "\n[NEXA-auth] Conta admin criada.\n"
-            "            usuário: %s\n"
-            "            senha:   %s\n"
-            "            (anote agora: só aparece esta vez. Para escolher a sua,\n"
-            "             defina ADMIN_PASSWORD no .env antes do primeiro start.)\n"
-            % (ADMIN_USER, password),
-            flush=True,
-        )
-    else:
-        print("[NEXA-auth] Conta admin criada (usuário: %s)." % ADMIN_USER, flush=True)
+    print("[NEXA-auth] Conta admin criada (usuário: %s)." % ADMIN_USER, flush=True)
 
 
 # =========================
