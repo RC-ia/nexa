@@ -3456,8 +3456,11 @@ composer.addEventListener(
     /*
       No modo Criar imagem o texto é o prompt: a geração
       acontece fora do chat e o resultado vira mensagem.
+      Depois de gerar, o modo desliga: a próxima mensagem
+      é de texto normal.
     */
     if (imageMode && text && !pendingImage && !pendingFile) {
+      setImageMode(false);
       await submitImagePrompt(text);
       return;
     }

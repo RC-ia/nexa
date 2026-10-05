@@ -857,12 +857,15 @@ def _security_headers(response):
     response.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; script-src 'self' 'unsafe-inline' "
-        "cdn.jsdelivr.net cdnjs.cloudflare.com; "
+        "cdn.jsdelivr.net cdnjs.cloudflare.com "
+        "static.cloudflareinsights.com; "
         "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net "
         "cdnjs.cloudflare.com fonts.googleapis.com; "
         "font-src 'self' fonts.gstatic.com; "
         "img-src 'self' data: blob:; "
-        "media-src 'self' blob:; connect-src 'self' cdn.jsdelivr.net; "
+        "media-src 'self' blob:; "
+        "connect-src 'self' cdn.jsdelivr.net "
+        "static.cloudflareinsights.com; "
         "frame-ancestors 'none'",
     )
     if (
