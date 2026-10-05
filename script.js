@@ -33,7 +33,6 @@ const micButton = document.getElementById("micButton");
 const liveCallButton = document.getElementById("liveCallButton");
 const sendButton = document.getElementById("sendButton");
 const stopButton = document.getElementById("stopButton");
-const newChatButton = document.getElementById("newChatButton");
 
 let abortController = null;
 
@@ -3288,7 +3287,6 @@ function setGenerating(generating) {
     stopButton.disabled = false;
     input.disabled = true;
     micButton.disabled = true;
-    newChatButton.disabled = true;
     drawerNewChat.disabled = true;
     abortController = new AbortController();
   } else {
@@ -3297,7 +3295,6 @@ function setGenerating(generating) {
     stopButton.disabled = true;
     input.disabled = false;
     micButton.disabled = false;
-    newChatButton.disabled = false;
     drawerNewChat.disabled = false;
     abortController = null;
   }
@@ -3577,11 +3574,6 @@ composer.addEventListener(
   NOVA CONVERSA
   ==========================================
 */
-
-newChatButton.addEventListener(
-  "click",
-  startNewChat
-);
 
 drawerNewChat.addEventListener(
   "click",
