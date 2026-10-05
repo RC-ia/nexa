@@ -21,7 +21,7 @@
 
   <title>NEXA</title>
 
-  <link rel="stylesheet" href="style.css?v=24">
+  <link rel="stylesheet" href="style.css?v=25">
 </head>
 
 <body>
@@ -68,14 +68,6 @@
         >
           Estúdio
         </button>
-
-        <a
-          class="new-chat-button image-generator-button"
-          href="/gerador/"
-          aria-label="Abrir gerador de imagens"
-        >
-          Gerador de imagens
-        </a>
 
         <button
           type="button"
@@ -179,40 +171,45 @@
 
     <div class="feed">
 
-    <section class="hero">
-
-      <div class="core">
-
-        <div class="core-aura"></div>
-        <div class="core-glow"></div>
-
-        <div class="core-ring ring-one"></div>
-        <div class="core-ring ring-two"></div>
-        <div class="core-ring ring-three"></div>
-
-        <div class="core-inner"></div>
-
-        <div class="particle particle-one"></div>
-        <div class="particle particle-two"></div>
-        <div class="particle particle-three"></div>
-        <div class="particle particle-four"></div>
-        <div class="particle particle-five"></div>
-        <div class="particle particle-six"></div>
-        <div class="particle particle-seven"></div>
-        <div class="particle particle-eight"></div>
-
-        <div class="core-energy"></div>
-        <div class="core-dot"></div>
-
-      </div>
+    <section class="hero" id="hero">
 
       <h2>
-        Olá. Eu sou a NEXA.
+        Por onde começamos?
       </h2>
 
-      <p>
-        Seu assistente pessoal está pronto para começar.
-      </p>
+      <div class="suggestions">
+
+        <button
+          type="button"
+          class="suggestion"
+          data-suggestion="image"
+        >
+          <span class="suggestion-icon" aria-hidden="true">✦</span>
+          <span>Criar imagem</span>
+          <span class="suggestion-hint">Descreva e a NEXA desenha</span>
+        </button>
+
+        <button
+          type="button"
+          class="suggestion"
+          data-suggestion="Pesquise na web sobre"
+        >
+          <span class="suggestion-icon" aria-hidden="true">🌐</span>
+          <span>Pesquisar na web</span>
+          <span class="suggestion-hint">Busca atualizada e fontes</span>
+        </button>
+
+        <button
+          type="button"
+          class="suggestion"
+          data-suggestion="Escreva um e-mail para"
+        >
+          <span class="suggestion-icon" aria-hidden="true">✉</span>
+          <span>Escrever um e-mail</span>
+          <span class="suggestion-hint">Rascunho pronto para enviar</span>
+        </button>
+
+      </div>
 
     </section>
 
@@ -426,6 +423,18 @@
           id="attachMenu"
           role="menu"
         >
+          <button
+            type="button"
+            class="reasoning-item"
+            id="attachGen"
+            role="menuitemcheckbox"
+            aria-checked="false"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Criar imagem</span>
+              <span class="reasoning-item-hint">A NEXA gera a imagem a partir do texto</span>
+            </span>
+          </button>
           <button
             type="button"
             class="reasoning-item"

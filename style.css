@@ -416,6 +416,32 @@ body {
 }
 
 
+/* =========================
+   SIDEBAR NO DESKTOP
+   Abre empurrando o conteúdo (estrutural),
+   como o ChatGPT; no celular vira sobreposição.
+========================= */
+
+@media (min-width: 1025px) {
+  .drawer {
+    position: fixed;
+  }
+
+  .app {
+    transition: margin-left 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .app.drawer-open {
+    margin-left: 280px;
+  }
+
+  .app.drawer-open .drawer-scrim {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+
 .drawer-head {
   display: flex;
   align-items: center;
@@ -1530,7 +1556,7 @@ body {
 }
 
 .hero h2 {
-  margin: 24px 0 8px;
+  margin: 0 0 30px;
 
   color: #fff;
 
@@ -1539,362 +1565,70 @@ body {
 
   letter-spacing: -0.4px;
 
-  text-shadow:
-    0 0 30px rgba(155, 108, 255, 0.3),
-    0 0 60px rgba(155, 108, 255, 0.1);
-
   background: linear-gradient(135deg, #fff 0%, #e8e0f5 40%, #d4c0ff 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-.hero p {
-  margin: 0;
-
-  color: var(--muted-strong);
-
-  font-size: 14.5px;
-  font-weight: 300;
-  letter-spacing: 0.1px;
-}
-
-
-/* =========================
-   CORE
-========================= */
-
-.core {
-  width: var(--core-size);
-  height: var(--core-size);
-
-  margin: auto;
-
-  position: relative;
-
+.suggestions {
   display: grid;
-  place-items: center;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 
-  border-radius: 50%;
-
-  background:
-    radial-gradient(
-      circle,
-      rgba(139, 92, 246, 0.13),
-      rgba(76, 29, 149, 0.05) 42%,
-      transparent 70%
-    );
-
-  animation: coreBreathing 4s infinite ease-in-out;
+  max-width: 720px;
+  margin: 0 auto;
 }
 
-@keyframes coreBreathing {
-  0%,
-  100% {
-    transform: scale(0.97);
-  }
+.suggestion {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
 
-  50% {
-    transform: scale(1.035);
-  }
+  padding: 14px 16px;
+
+  border: 1px solid var(--line);
+  border-radius: 14px;
+
+  background: rgba(139, 92, 246, 0.05);
+
+  color: var(--text);
+
+  font-size: 13.5px;
+  font-family: inherit;
+  line-height: 1.35;
+  text-align: left;
+
+  cursor: pointer;
+
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    transform 0.2s ease;
 }
 
-
-/* =========================
-   CORE AURA
-========================= */
-
-.core-aura {
-  position: absolute;
-
-  width: var(--core-size);
-  height: var(--core-size);
-
-  border-radius: 50%;
-
-  background:
-    radial-gradient(
-      circle,
-      rgba(139, 92, 246, 0.22),
-      rgba(76, 29, 149, 0.09) 42%,
-      transparent 72%
-    );
-
-  filter: blur(13px);
-
-  animation: auraPulse 4s infinite ease-in-out;
+.suggestion:hover {
+  border-color: var(--line-hover);
+  background: rgba(139, 92, 246, 0.12);
+  transform: translateY(-2px);
 }
 
-@keyframes auraPulse {
-  0%,
-  100% {
-    opacity: 0.55;
-    transform: scale(0.88);
-  }
+.suggestion-icon {
+  margin-bottom: 3px;
 
-  50% {
-    opacity: 1;
-    transform: scale(1.12);
-  }
+  color: var(--accent-light);
+
+  font-size: 16px;
+  line-height: 1;
 }
 
+.suggestion-hint {
+  color: var(--muted);
 
-/* =========================
-   CORE GLOW
-========================= */
-
-.core-glow {
-  position: absolute;
-
-  width: calc(var(--core-size) * 0.634);
-  height: calc(var(--core-size) * 0.634);
-
-  border-radius: 50%;
-
-  background:
-    radial-gradient(
-      circle,
-      rgba(255, 255, 255, 0.22),
-      rgba(167, 139, 250, 0.38) 14%,
-      rgba(139, 92, 246, 0.23) 34%,
-      transparent 72%
-    );
-
-  filter: blur(9px);
-
-  animation: coreGlow 2.8s infinite ease-in-out;
+  font-size: 12px;
 }
 
-@keyframes coreGlow {
-  0%,
-  100% {
-    opacity: 0.55;
-    transform: scale(0.82);
-  }
-
-  50% {
-    opacity: 1;
-    transform: scale(1.15);
-  }
-}
-
-
-/* =========================
-   CORE RINGS
-========================= */
-
-.core-ring {
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-}
-
-.ring-one {
-  width: calc(var(--core-size) * 0.524);
-  height: calc(var(--core-size) * 0.524);
-  border: 1px solid rgba(212, 192, 255, 0.9);
-  box-shadow:
-    0 0 18px rgba(155, 108, 255, 0.4),
-    inset 0 0 8px rgba(212, 192, 255, 0.15);
-  animation: ringOne 5s infinite linear;
-}
-
-.ring-two {
-  width: calc(var(--core-size) * 0.717);
-  height: calc(var(--core-size) * 0.717);
-  border: 1px solid rgba(155, 108, 255, 0.55);
-  border-left-color: transparent;
-  border-right-color: rgba(196, 167, 255, 0.8);
-  box-shadow:
-    0 0 14px rgba(139, 92, 246, 0.25),
-    inset 0 0 6px rgba(155, 108, 255, 0.1);
-  animation: ringTwo 7s infinite linear;
-}
-
-.ring-three {
-  width: calc(var(--core-size) * 0.91);
-  height: calc(var(--core-size) * 0.91);
-  border: 1px solid rgba(139, 92, 246, 0.25);
-  border-top-color: rgba(196, 167, 255, 0.75);
-  border-bottom-color: transparent;
-  box-shadow:
-    0 0 24px rgba(91, 33, 182, 0.22),
-    inset 0 0 10px rgba(139, 92, 246, 0.08);
-  animation: ringThree 11s infinite linear;
-}
-
-@keyframes ringOne {
-  from {
-    transform: rotate(0deg) scale(0.94);
-  }
-
-  50% {
-    transform: rotate(180deg) scale(1.08);
-  }
-
-  to {
-    transform: rotate(360deg) scale(0.94);
-  }
-}
-
-@keyframes ringTwo {
-  from {
-    transform: rotate(360deg) scale(0.96);
-  }
-
-  to {
-    transform: rotate(0deg) scale(0.96);
-  }
-}
-
-@keyframes ringThree {
-  from {
-    transform: rotate(0deg) scale(0.98);
-  }
-
-  50% {
-    transform: rotate(180deg) scale(1.04);
-  }
-
-  to {
-    transform: rotate(360deg) scale(0.98);
-  }
-}
-
-
-/* =========================
-   CORE INNER GLOW
-========================= */
-
-.core-inner {
-  position: absolute;
-  width: calc(var(--core-size) * 0.38);
-  height: calc(var(--core-size) * 0.38);
-  border-radius: 50%;
-  background:
-    radial-gradient(
-      circle,
-      rgba(255, 255, 255, 0.35) 0%,
-      rgba(196, 167, 255, 0.25) 25%,
-      rgba(155, 108, 255, 0.15) 50%,
-      transparent 75%
-    );
-  filter: blur(6px);
-  animation: innerPulse 2.2s infinite ease-in-out;
-}
-
-@keyframes innerPulse {
-  0%, 100% { transform: scale(0.9); opacity: 0.7; }
-  50% { transform: scale(1.15); opacity: 1; }
-}
-
-
-/* =========================
-   ENERGY
-========================= */
-
-.core-energy {
-  position: absolute;
-
-  width: calc(var(--core-size) * 0.28);
-  height: calc(var(--core-size) * 0.28);
-
-  border-radius: 50%;
-
-  background:
-    radial-gradient(
-      circle,
-      rgba(255, 255, 255, 0.95) 0%,
-      rgba(212, 192, 255, 0.7) 15%,
-      rgba(155, 108, 255, 0.4) 35%,
-      rgba(139, 92, 246, 0.15) 55%,
-      transparent 80%
-    );
-
-  filter: blur(4px);
-
-  animation:
-    energyPulse 2.1s infinite ease-in-out;
-}
-
-@keyframes energyPulse {
-  0%, 100% { transform: scale(0.75); opacity: 0.55; filter: blur(3px); }
-  50% { transform: scale(1.3); opacity: 1; filter: blur(6px); }
-}
-
-
-/* =========================
-   CORE DOT
-========================= */
-
-.core-dot {
-  position: absolute;
-
-  width: calc(var(--core-size) * 0.11);
-  height: calc(var(--core-size) * 0.11);
-
-  border-radius: 50%;
-
-  background:
-    radial-gradient(
-      circle at 30% 30%,
-      #fff 0%,
-      #f0e8ff 40%,
-      #d4c0ff 70%
-    );
-
-  box-shadow:
-    0 0 6px #fff,
-    0 0 14px #fff,
-    0 0 28px 6px var(--accent),
-    0 0 48px 12px rgba(155, 108, 255, 0.55),
-    inset 0 -2px 4px rgba(0,0,0,0.15);
-
-  animation:
-    dotPulse 1.7s infinite ease-in-out;
-}
-
-@keyframes dotPulse {
-  0%, 100% { transform: scale(0.85); filter: brightness(0.9); }
-  50% { transform: scale(1.2); filter: brightness(1.3); }
-}
-
-
-/* =========================
-   PARTICLES
-========================= */
-
-.particle {
-  position: absolute;
-  border-radius: 50%;
-  animation: particlePulse 2.8s infinite ease-in-out;
-}
-
-.particle::before {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  border-radius: 50%;
-  background: inherit;
-  filter: blur(4px);
-  opacity: 0.6;
-}
-
-.particle-one { width: 5px; height: 5px; top: 12.4%; left: 49.7%; background: #d4c0ff; box-shadow: 0 0 8px #c4a7ff, 0 0 18px rgba(155,108,255,0.9); }
-.particle-two { width: 4px; height: 4px; top: 29%; right: 13.8%; background: #c4a7ff; box-shadow: 0 0 7px #a78bfa, 0 0 15px rgba(139,92,246,0.8); animation-delay: 0.35s; }
-.particle-three { width: 4px; height: 4px; right: 5.5%; bottom: 33.1%; background: #b99cff; box-shadow: 0 0 7px #9f7aea, 0 0 14px rgba(124,58,237,0.7); animation-delay: 0.7s; }
-.particle-four { width: 5px; height: 5px; bottom: 10.3%; right: 42.1%; background: #d4c0ff; box-shadow: 0 0 8px #c4a7ff, 0 0 18px rgba(155,108,255,0.9); animation-delay: 1.1s; }
-.particle-five { width: 4px; height: 4px; bottom: 18.6%; left: 20.7%; background: #c4a7ff; box-shadow: 0 0 7px #a78bfa, 0 0 15px rgba(139,92,246,0.8); animation-delay: 0.25s; }
-.particle-six { width: 4px; height: 4px; left: 4.8%; top: 38.6%; background: #b99cff; box-shadow: 0 0 7px #9f7aea, 0 0 14px rgba(124,58,237,0.7); animation-delay: 0.85s; }
-.particle-seven { width: 3px; height: 3px; left: 25.5%; top: 15.2%; background: #c4a7ff; box-shadow: 0 0 6px #a78bfa, 0 0 12px rgba(139,92,246,0.7); animation-delay: 1.4s; }
-.particle-eight { width: 3px; height: 3px; right: 24.1%; bottom: 17.9%; background: #b99cff; box-shadow: 0 0 6px #9f7aea, 0 0 12px rgba(124,58,237,0.7); animation-delay: 1.7s; }
-
-@keyframes particlePulse {
-  0%, 100% { opacity: 0.2; transform: scale(0.55) translateY(0); }
-  25% { opacity: 0.6; transform: scale(1.1) translateY(-8px); }
-  50% { opacity: 1; transform: scale(1.4) translateY(0); }
-  75% { opacity: 0.6; transform: scale(1.1) translateY(8px); }
-}
 
 
 /* =========================
@@ -2199,6 +1933,14 @@ body {
   margin-top: 8px;
   border-radius: 10px;
   object-fit: contain;
+}
+
+.message-content img {
+  display: block;
+  max-width: min(480px, 100%);
+  margin-top: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
 }
 
 .composer {
@@ -2971,6 +2713,10 @@ footer {
 
   .hero h2 {
     font-size: 24px;
+  }
+
+  .suggestions {
+    grid-template-columns: 1fr;
   }
 
   .hero p {

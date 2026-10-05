@@ -6,9 +6,7 @@ máquina e ser exposta com o túnel do Cloudflare (`cloudflared`).
 
 Estrutura:
 
-- `server.py` — servidor Flask (serve o site + `/api/chat` com streaming SSE)
-- `image_generator.py` — monta o gerador de imagens local dentro do servidor principal
-- `geração de imagem local/` — interface do gerador, integração com a Novita AI e saída local
+- `server.py` — servidor Flask (serve o site + `/api/chat` com streaming SSE + `/api/images/generate` do gerador de imagens)
 - `auth.py` — login, sessões e painel admin
 - `run.py` — supervisor: roda o servidor e aplica auto-update via git
 - `launcher.py` — sobe/derruba o supervisor desanexado (daemon)
@@ -100,11 +98,11 @@ O `run.py` inicia o servidor e fica verificando o repositório git a cada
 python server.py
 ```
 
-A aplicação sobe em `http://localhost:8000`. O botão **Gerador de imagens** e a
-rota `http://localhost:8000/gerador/` abrem o gerador integrado. O gerador
-usa a API da Novita AI configurada por `API_IMAGE`, `MODEL_IMAGE` e
-`IMAGE_API_URL` no `.env`; não é necessário executar um segundo servidor
-Flask. Para desativar esse módulo, use `IMAGE_GENERATOR_ENABLED=0`.
+A aplicação sobe em `http://localhost:8000`. O gerador de imagens é um
+modo do chat: botão **+** do composer → **Criar imagem**. Ele usa a
+API da Novita AI configurada por `API_IMAGE`, `MODEL_IMAGE` e
+`IMAGE_API_URL` no `.env` e salva as imagens em `generated/`; não é
+necessário executar um segundo servidor Flask.
 
 ### Opção C — Processo desanexado/daemon (sobrevive ao fechar o terminal)
 

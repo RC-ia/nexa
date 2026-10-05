@@ -88,6 +88,8 @@ const LIVE_VOICE_KEY = "nexa_live_voice";
 const MEMORY_ENABLED_KEY = "nexa_memory_enabled:";
 const INSTRUCTIONS_KEY = "nexa_custom_instructions:";
 const DEEP_MODE_KEY = "nexa_deep_mode:";
+const IMAGE_MODE_KEY = "nexa_image_mode:";
+const DRAWER_KEY = "nexa_drawer";
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const ALLOWED_FILE_EXTENSIONS = new Set([
@@ -365,6 +367,63 @@ function setDeepMode(isOn) {
   renderDeepMode();
 }
 
+/*
+  Modo Criar imagem: o texto do composer vira o prompt
+  da Novita AI e o resultado entra no chat como markdown.
+*/
+
+let imageMode = false;
+
+function renderImageMode() {
+  const option =
+    document.getElementById("attachGen");
+  const input =
+    document.getElementById("messageInput");
+
+  if (option) {
+    option.classList.toggle("active", imageMode);
+
+    option.setAttribute(
+      "aria-checked",
+      imageMode ? "true" : "false"
+    );
+  }
+
+  if (input && !pendingImage && !pendingFile) {
+    input.placeholder = imageMode
+      ? "Descreva a imagem que a NEXA deve criar..."
+      : deepMode
+        ? "Descreva o tema da pesquisa profunda..."
+        : "Digite uma mensagem...";
+  }
+}
+
+function imageModeStorageKey() {
+  return IMAGE_MODE_KEY + (currentUser ? currentUser.id : "anonymous");
+}
+
+function loadImageMode() {
+  try {
+    imageMode = localStorage.getItem(imageModeStorageKey()) === "true";
+  } catch (error) {
+    imageMode = false;
+  }
+}
+
+function saveImageMode() {
+  try {
+    localStorage.setItem(imageModeStorageKey(), imageMode ? "true" : "false");
+  } catch (error) {
+    console.error("Erro ao salvar o modo de imagem:", error);
+  }
+}
+
+function setImageMode(isOn) {
+  imageMode = isOn === true;
+  saveImageMode();
+  renderImageMode();
+}
+
 function renderImagePreview() {
   const preview = document.getElementById("imagePreview");
   const image = document.getElementById("imagePreviewImage");
@@ -582,6 +641,8 @@ function setupAttachUI() {
 
       if (item.id === "attachDeep") {
         setDeepMode(!deepMode);
+      } else if (item.id === "attachGen") {
+        setImageMode(!imageMode);
       } else if (item.id === "attachImage" && imageInput) {
         imageInput.click();
       } else if (item.id === "attachFile" && fileInput) {
@@ -2448,6 +2509,12 @@ function openDrawer() {
   app.classList.add("drawer-open");
   drawerScrim.hidden = false;
 
+  try {
+    localStorage.setItem(DRAWER_KEY, "open");
+  } catch (error) {
+    /* preferência de layout */
+  }
+
   drawerToggle.setAttribute(
     "aria-expanded",
     "true"
@@ -2470,6 +2537,12 @@ function closeDrawer() {
   drawerOpen = false;
   app.classList.remove("drawer-open");
   drawerScrim.hidden = true;
+
+  try {
+    localStorage.setItem(DRAWER_KEY, "closed");
+  } catch (error) {
+    /* preferência de layout */
+  }
 
   drawerToggle.setAttribute(
     "aria-expanded",
@@ -3226,6 +3299,138 @@ stopButton.addEventListener("click", () => {
   }
 });
 
+/*
+  Sugestões da página inicial: preenchem o campo
+  ou ativam o modo Criar imagem.
+*/
+document.querySelectorAll(".suggestion").forEach(function (button) {
+  button.addEventListener("click", function () {
+    const kind = button.dataset.suggestion;
+
+    if (kind === "image") {
+      setImageMode(true);
+      input.focus();
+      return;
+    }
+
+    if (kind) {
+      input.value = kind;
+      input.focus();
+    }
+  });
+});
+
+/*
+  ==========================================
+  GERAR IMAGEM NO CHAT
+  O prompt vira uma chamada para a Novita AI e o
+  resultado entra no histórico como markdown,
+  igual a qualquer outra resposta da NEXA.
+  ==========================================
+*/
+
+async function submitImagePrompt(prompt) {
+  const isFirstMessage = history.length === 0;
+  const titleChatId = isFirstMessage ? activeChatId : null;
+
+  const userMsgId = makeMessageId();
+  addMessage(prompt, "user", "", false, userMsgId);
+
+  input.value = "";
+  clearAttachment();
+
+  history.push({
+    role: "user",
+    content: prompt,
+    id: userMsgId,
+    image: null,
+    file: null
+  });
+
+  setGenerating(true);
+  showTyping();
+
+  try {
+    const response = await fetch("/api/images/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Nexa-Message-Key": messageKey
+      },
+      body: JSON.stringify({ prompt }),
+      signal: abortController ? abortController.signal : undefined
+    });
+
+    hideTyping();
+
+    if (response.status === 401) {
+      showAuth();
+      throw new Error("Sua sessão expirou. Entre de novo.");
+    }
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      // Resposta não era JSON.
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        (data && data.error) || `Erro na API (HTTP ${response.status}).`
+      );
+    }
+
+    const modelText =
+      `![Imagem gerada a partir do prompt](${data.image_url})`;
+    const assistantMsgId = makeMessageId();
+    addMessage(modelText, "nexa", "", false, assistantMsgId);
+
+    history.push({
+      role: "model",
+      content: modelText,
+      id: assistantMsgId,
+      thinking: "",
+      memoryUpdated: false,
+      searched: false
+    });
+
+    saveMemory();
+
+    if (isFirstMessage) {
+      const aiTitle = await generateChatTitle(prompt);
+      if (aiTitle) {
+        const chat = findChat(titleChatId);
+        if (chat) {
+          chat.title = aiTitle;
+          chat.updatedAt = Date.now();
+          chat.dirty = true;
+          saveChats();
+          renderChatList();
+          scheduleChatsPush();
+        }
+      }
+    }
+  } catch (error) {
+    if (error.name === "AbortError") {
+      hideTyping();
+    } else {
+      console.error("NEXA image error:", error);
+      hideTyping();
+      addMessage(
+        "Erro ao gerar a imagem: " +
+          (error && error.message ? error.message : "erro desconhecido"),
+        "nexa",
+        "",
+        false
+      );
+    }
+  } finally {
+    setGenerating(false);
+    input.focus();
+  }
+}
+
 composer.addEventListener(
   "submit",
   async function (event) {
@@ -3238,6 +3443,15 @@ composer.addEventListener(
       (!text && !pendingImage && !pendingFile) ||
       sendButton.disabled
     ) {
+      return;
+    }
+
+    /*
+      No modo Criar imagem o texto é o prompt: a geração
+      acontece fora do chat e o resultado vira mensagem.
+    */
+    if (imageMode && text && !pendingImage && !pendingFile) {
+      await submitImagePrompt(text);
       return;
     }
 
@@ -3792,6 +4006,43 @@ function restoreConversation() {
   });
 }
 
+/*
+  Sidebar no estilo ChatGPT: aberta por padrão no
+  desktop e recolhível; no celular vira sobreposição.
+*/
+function restoreDrawerPreference() {
+  let open = false;
+
+  try {
+    const saved = localStorage.getItem(DRAWER_KEY);
+    open = saved === "open" ||
+      (saved === null &&
+        window.matchMedia("(min-width: 1025px)").matches);
+  } catch (error) {
+    open = false;
+  }
+
+  if (!open) {
+    return;
+  }
+
+  drawerOpen = true;
+  app.classList.add("drawer-open");
+  drawerScrim.hidden = false;
+
+  drawerToggle.setAttribute(
+    "aria-expanded",
+    "true"
+  );
+
+  drawerToggle.setAttribute(
+    "aria-label",
+    "Fechar menu"
+  );
+
+  renderChatList();
+}
+
 function bootApp() {
   loadChats();
   renderChat();
@@ -3801,6 +4052,9 @@ function bootApp() {
   renderReasoning();
   setupAttachUI();
   renderDeepMode();
+  loadImageMode();
+  renderImageMode();
+  restoreDrawerPreference();
 }
 
 /*
