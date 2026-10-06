@@ -86,7 +86,6 @@ const LIVE_VOICE_KEY = "nexa_live_voice";
 const MEMORY_ENABLED_KEY = "nexa_memory_enabled:";
 const INSTRUCTIONS_KEY = "nexa_custom_instructions:";
 const DEEP_MODE_KEY = "nexa_deep_mode:";
-const IMAGE_MODE_KEY = "nexa_image_mode:";
 const DRAWER_KEY = "nexa_drawer";
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -396,29 +395,8 @@ function renderImageMode() {
   }
 }
 
-function imageModeStorageKey() {
-  return IMAGE_MODE_KEY + (currentUser ? currentUser.id : "anonymous");
-}
-
-function loadImageMode() {
-  try {
-    imageMode = localStorage.getItem(imageModeStorageKey()) === "true";
-  } catch (error) {
-    imageMode = false;
-  }
-}
-
-function saveImageMode() {
-  try {
-    localStorage.setItem(imageModeStorageKey(), imageMode ? "true" : "false");
-  } catch (error) {
-    console.error("Erro ao salvar o modo de imagem:", error);
-  }
-}
-
 function setImageMode(isOn) {
   imageMode = isOn === true;
-  saveImageMode();
   renderImageMode();
 }
 
@@ -1285,6 +1263,19 @@ const md = window.markdownit
       },
     })
   : null;
+
+if (md) {
+  const renderImage = md.renderer.rules.image;
+  md.renderer.rules.image = (tokens, index, options, env, renderer) => {
+    const token = tokens[index];
+    const source = token.attrGet("src") || "";
+    if (!source.startsWith("/generated/")) {
+      const alt = md.utils.escapeHtml(token.content || "conteúdo visual");
+      return `<span>Imagem omitida fora do modo Criar imagem: ${alt}</span>`;
+    }
+    return renderImage(tokens, index, options, env, renderer);
+  };
+}
 
 /* Carrega highlight.js para syntax highlighting nos blocos de código */
 (function loadHighlightJS() {
@@ -4073,7 +4064,6 @@ function bootApp() {
   renderReasoning();
   setupAttachUI();
   renderDeepMode();
-  loadImageMode();
   renderImageMode();
   restoreDrawerPreference();
 }

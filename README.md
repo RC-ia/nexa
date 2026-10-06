@@ -102,7 +102,10 @@ A aplicação sobe em `http://localhost:8000`. O gerador de imagens é um
 modo do chat: botão **+** do composer → **Criar imagem**. Ele usa a
 API da Novita AI configurada por `API_IMAGE`, `MODEL_IMAGE` e
 `IMAGE_API_URL` no `.env` e salva as imagens em `generated/`; não é
-necessário executar um segundo servidor Flask.
+necessário executar um segundo servidor Flask. O modo só fica ativo até a
+imagem ser solicitada e não é restaurado ao reabrir a página. Imagens Markdown
+de URLs externas nas respostas normais são mostradas como texto, não carregadas
+automaticamente.
 
 ### Opção C — Processo desanexado/daemon (sobrevive ao fechar o terminal)
 
