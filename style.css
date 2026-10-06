@@ -3015,8 +3015,16 @@ html.keyboard-open footer {
   overflow: hidden;
 }
 
+.app:not(.welcome) .hero {
+  display: none;
+}
+
 .app.welcome .chat {
   display: none;
+}
+
+.app:not(.welcome) .chat {
+  padding-top: 8px;
 }
 
 .app.welcome .composer {

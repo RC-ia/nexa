@@ -2121,6 +2121,62 @@ function renderWelcomeState() {
   app.classList.toggle("welcome", history.length === 0);
 }
 
+async function showPersonalizedGreeting() {
+  const greetingChatId = activeChatId;
+  const initialMessageCount = history.length;
+  const username = currentUser?.username || "por aqui";
+  let memory = "";
+
+  if (memoryEnabled) {
+    try {
+      const data = await api("GET", "/api/memories");
+      memory = (data.memories || [])
+        .map(item => typeof item.memory === "string" ? item.memory : "")
+        .join("\n")
+        .split(/\r?\n/)
+        .map(line => line.replace(/^\s*(?:[-*]|\d+\.)\s*/, "").trim())
+        .find(line => line && !line.startsWith("#")) || "";
+    } catch (error) {
+      console.error("Não foi possível carregar a memória para a saudação:", error);
+    }
+  }
+
+  if (
+    activeChatId !== greetingChatId ||
+    history.length !== initialMessageCount ||
+    sendButton.disabled
+  ) {
+    return;
+  }
+
+  const normalizedMemory = memory.replace(/[.!?…]+$/, "");
+  const memorySnippet = normalizedMemory.length > 140
+    ? normalizedMemory.slice(0, 137).trimEnd() + "…"
+    : normalizedMemory;
+  const greeting = memorySnippet
+    ? `Oi, ${username}! Lembro das suas anotações: ${memorySnippet}. Quer retomar esse assunto ou começar algo novo?`
+    : `Oi, ${username}! Que bom te ver por aqui. Por onde começamos?`;
+
+  if (history.length === 0) {
+    const heading = document.querySelector(".hero h2");
+    if (heading) {
+      heading.textContent = greeting;
+    }
+    return;
+  }
+
+  const message = document.createElement("div");
+  message.className = "message nexa personalized-greeting";
+  const label = document.createElement("span");
+  label.className = "label";
+  label.textContent = "NEXA";
+  const content = document.createElement("p");
+  content.textContent = greeting;
+  message.append(label, content);
+  chat.appendChild(message);
+  scrollConversationToBottom();
+}
+
 function startNewChat() {
   const current = currentChat();
 
@@ -4259,7 +4315,11 @@ function enterApp(user, issuedMessageKey) {
   startReminderPolling();
   syncNativePushKey();
   syncPushToken();
-  syncChatsFromServer().catch(function () {});
+  syncChatsFromServer()
+    .catch(function (error) {
+      console.error("Não foi possível sincronizar as conversas ao entrar:", error);
+    })
+    .finally(showPersonalizedGreeting);
 }
 
 loginForm.addEventListener("submit", async function (event) {

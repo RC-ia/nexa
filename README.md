@@ -233,6 +233,10 @@ chamada com o resultado e pede a continuação da resposta, que já sai com a
 memória atualizada no system prompt. O arquivo é limitado a 10.000 caracteres
 e pode ser editado à mão em **Configurações > Memória**.
 
+Ao entrar, a tela de boas-vindas usa uma anotação salva para montar uma
+saudação personalizada, desde que o uso de memória esteja ativado. Essa
+saudação não é gravada no histórico da conversa.
+
 Apagar a pasta `memoria/` remove a memória persistente (as conversas do
 navegador continuam no `localStorage`).
 
