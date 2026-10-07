@@ -2377,6 +2377,38 @@ footer {
 
 
 /* =========================
+   ZOOM GLOBAL
+   Tudo o site20% maior, como um Ctrl +. Vale só a partir de
+   601px: no mobile o composer e a gaveta já ocupam a largura
+   toda e não sobra espaço para crescer — com zoom o botão de
+   envio sairia da tela.
+========================= */
+
+@media (min-width: 601px) {
+  :root {
+    --site-zoom: 1.2;
+
+    zoom: var(--site-zoom);
+  }
+
+  /*
+    100vh/100dvh já saem multiplicados pelo zoom: sem dividir de
+    volta, .app ficaria20% mais alto que a tela e o composer
+    cairia para fora da área visível.
+  */
+  body {
+    min-height: calc(100vh / var(--site-zoom));
+    min-height: calc(100dvh / var(--site-zoom));
+  }
+
+  .app {
+    height: calc(100vh / var(--site-zoom));
+    height: calc(100dvh / var(--site-zoom));
+  }
+}
+
+
+/* =========================
    MOBILE
 ========================= */
 
