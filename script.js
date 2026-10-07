@@ -90,7 +90,6 @@ const INSTRUCTIONS_KEY = "nexa_custom_instructions:";
 const DEEP_MODE_KEY = "nexa_deep_mode:";
 const SPICY_MODE_KEY = "nexa_spicy_mode:";
 const DRAWER_KEY = "nexa_drawer";
-const GREETING_KEY = "nexa_daily_greeting";
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const ALLOWED_FILE_EXTENSIONS = new Set([
@@ -2195,154 +2194,40 @@ function renderWelcomeState() {
 }
 
 /*
-  Dia no fuso do navegador (YYYY-MM-DD): é a chave que decide se a
-  saudação do dia precisa ser gerada de novo.
-*/
-function greetingDateKey() {
-  const now = new Date();
-  const mes = String(now.getMonth() + 1).padStart(2, "0");
-  const dia = String(now.getDate()).padStart(2, "0");
-
-  return now.getFullYear() + "-" + mes + "-" + dia;
-}
-
-/*
-  Saudação guardada no localStorage. A data gravada é a do servidor
-  (fuso configurado em Configurações > Data e hora); ela vale enquanto
-  não for anterior ao dia de hoje aqui, então o cache quebra sozinho
-  quando o dia vira.
-*/
-function cachedGreeting(username, dateKey) {
-  try {
-    const saved = JSON.parse(localStorage.getItem(GREETING_KEY) || "null");
-
-    if (
-      saved &&
-      saved.user === username &&
-      typeof saved.date === "string" &&
-      saved.date >= dateKey &&
-      typeof saved.greeting === "string" &&
-      saved.greeting.trim()
-    ) {
-      return saved.greeting.trim();
-    }
-  } catch {
-    // JSON inválido: deixa o modelo gerar outra vez.
-  }
-
-  return "";
-}
-
-function saveGreeting(username, dateKey, greeting) {
-  try {
-    localStorage.setItem(
-      GREETING_KEY,
-      JSON.stringify({ user: username, date: dateKey, greeting: greeting })
-    );
-  } catch {
-    // Sem espaço no localStorage: vale só para esta sessão.
-  }
-}
-
-/*
-  Versão local da saudação: montada a partir da primeira anotação da
-  memória. Só entra em cena quando o modelo não responde.
-*/
-async function localGreeting(username) {
-  let memory = "";
-
-  if (memoryEnabled) {
-    try {
-      const data = await api("GET", "/api/memories");
-      memory = (data.memories || [])
-        .map(item => typeof item.memory === "string" ? item.memory : "")
-        .join("\n")
-        .split(/\r?\n/)
-        .map(line => line.replace(/^\s*(?:[-*]|\d+\.)\s*/, "").trim())
-        .find(line => line && !line.startsWith("#")) || "";
-    } catch (error) {
-      console.error("Não foi possível carregar a memória para a saudação:", error);
-    }
-  }
-
-  const normalizedMemory = memory.replace(/[.!?…]+$/, "");
-  const memorySnippet = normalizedMemory.length > 140
-    ? normalizedMemory.slice(0, 137).trimEnd() + "…"
-    : normalizedMemory;
-
-  return memorySnippet
-    ? `Oi, ${username}! Lembro das suas anotações: ${memorySnippet}. Quer retomar esse assunto ou começar algo novo?`
-    : `Oi, ${username}! Que bom te ver por aqui. Por onde começamos?`;
-}
-
-/*
   ==========================================
-  SAUDAÇÃO DO DIA
-  Ao entrar, o sistema pede ao modelo uma saudação para o usuário,
-  com a memória da conta no prompt (POST /api/greeting). O servidor
-  gera uma por dia e o localStorage evita repetir o pedido enquanto
-  o dia não virar. Com a conversa já aberta, o texto só fica guardado
-  para a próxima tela de boas-vindas.
+  SAUDAÇÃO DA BOAS-VINDAS
+  O título da tela de boas-vindas é montado
+  no próprio navegador, pelo horário do
+  usuário: cumprimento curto com o nome,
+  sem chamada ao modelo e sem texto longo.
   ==========================================
 */
-async function showPersonalizedGreeting() {
-  const greetingChatId = activeChatId;
-  const username = currentUser?.username || "por aqui";
-  const dateKey = greetingDateKey();
+function simpleGreeting(username) {
+  const hora = new Date().getHours();
 
-  const stillOnWelcome = function () {
-    return (
-      history.length === 0 &&
-      activeChatId === greetingChatId &&
-      !sendButton.disabled
-    );
-  };
+  const periodo =
+    hora >= 5 && hora < 12
+      ? "Bom dia"
+      : hora >= 12 && hora < 18
+        ? "Boa tarde"
+        : "Boa noite";
 
-  const show = function (text) {
-    const heading = document.querySelector(".hero h2");
+  const nome = (username || "").trim();
 
-    /*
-      O título pertence só à tela de boas-vindas: com a conversa
-      já aberta ele não pode vazar para dentro do chat como se
-      fosse uma mensagem da NEXA.
-    */
-    if (heading && text && stillOnWelcome()) {
-      heading.textContent = text;
-    }
-  };
+  return nome ? periodo + ", " + nome + "!" : periodo + "!";
+}
 
-  const saved = cachedGreeting(username, dateKey);
+function showPersonalizedGreeting() {
+  const heading = document.querySelector(".hero h2");
 
-  if (saved) {
-    show(saved);
-    return;
+  /*
+    O título pertence só à tela de boas-vindas: com a conversa
+    já aberta ele não pode vazar para dentro do chat como se
+    fosse uma mensagem da NEXA.
+  */
+  if (heading && history.length === 0 && !sendButton.disabled) {
+    heading.textContent = simpleGreeting(currentUser?.username || "");
   }
-
-  let greeting = "";
-  let serverDate = "";
-
-  try {
-    const data = await api("POST", "/api/greeting", {
-      memoryEnabled: memoryEnabled
-    });
-
-    greeting = typeof data.greeting === "string" ? data.greeting.trim() : "";
-    serverDate = typeof data.date === "string" ? data.date : "";
-  } catch (error) {
-    console.error("Não foi possível gerar a saudação do dia:", error);
-  }
-
-  if (greeting) {
-    saveGreeting(username, serverDate || dateKey, greeting);
-    show(greeting);
-    return;
-  }
-
-  if (!stillOnWelcome()) {
-    return;
-  }
-
-  show(await localGreeting(username));
 }
 
 function startNewChat() {
