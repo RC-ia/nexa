@@ -1,6 +1,0 @@
-.env
-auth.db
-.nexa_version
-.venv/
-__pycache__/
-*.pyc
