@@ -90,6 +90,7 @@ const INSTRUCTIONS_KEY = "nexa_custom_instructions:";
 const DEEP_MODE_KEY = "nexa_deep_mode:";
 const SPICY_MODE_KEY = "nexa_spicy_mode:";
 const DRAWER_KEY = "nexa_drawer";
+const GREETING_KEY = "nexa_daily_greeting";
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const ALLOWED_FILE_EXTENSIONS = new Set([
@@ -2193,10 +2194,61 @@ function renderWelcomeState() {
   app.classList.toggle("welcome", history.length === 0);
 }
 
-async function showPersonalizedGreeting() {
-  const greetingChatId = activeChatId;
-  const initialMessageCount = history.length;
-  const username = currentUser?.username || "por aqui";
+/*
+  Dia no fuso do navegador (YYYY-MM-DD): é a chave que decide se a
+  saudação do dia precisa ser gerada de novo.
+*/
+function greetingDateKey() {
+  const now = new Date();
+  const mes = String(now.getMonth() + 1).padStart(2, "0");
+  const dia = String(now.getDate()).padStart(2, "0");
+
+  return now.getFullYear() + "-" + mes + "-" + dia;
+}
+
+/*
+  Saudação guardada no localStorage. A data gravada é a do servidor
+  (fuso configurado em Configurações > Data e hora); ela vale enquanto
+  não for anterior ao dia de hoje aqui, então o cache quebra sozinho
+  quando o dia vira.
+*/
+function cachedGreeting(username, dateKey) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(GREETING_KEY) || "null");
+
+    if (
+      saved &&
+      saved.user === username &&
+      typeof saved.date === "string" &&
+      saved.date >= dateKey &&
+      typeof saved.greeting === "string" &&
+      saved.greeting.trim()
+    ) {
+      return saved.greeting.trim();
+    }
+  } catch {
+    // JSON inválido: deixa o modelo gerar outra vez.
+  }
+
+  return "";
+}
+
+function saveGreeting(username, dateKey, greeting) {
+  try {
+    localStorage.setItem(
+      GREETING_KEY,
+      JSON.stringify({ user: username, date: dateKey, greeting: greeting })
+    );
+  } catch {
+    // Sem espaço no localStorage: vale só para esta sessão.
+  }
+}
+
+/*
+  Versão local da saudação: montada a partir da primeira anotação da
+  memória. Só entra em cena quando o modelo não responde.
+*/
+async function localGreeting(username) {
   let memory = "";
 
   if (memoryEnabled) {
@@ -2213,36 +2265,84 @@ async function showPersonalizedGreeting() {
     }
   }
 
-  if (
-    activeChatId !== greetingChatId ||
-    history.length !== initialMessageCount ||
-    sendButton.disabled
-  ) {
-    return;
-  }
-
   const normalizedMemory = memory.replace(/[.!?…]+$/, "");
   const memorySnippet = normalizedMemory.length > 140
     ? normalizedMemory.slice(0, 137).trimEnd() + "…"
     : normalizedMemory;
-  const greeting = memorySnippet
+
+  return memorySnippet
     ? `Oi, ${username}! Lembro das suas anotações: ${memorySnippet}. Quer retomar esse assunto ou começar algo novo?`
     : `Oi, ${username}! Que bom te ver por aqui. Por onde começamos?`;
+}
 
-  /*
-    O título dinâmico pertence só à tela de boas-vindas. Quando a
-    página é atualizada com a conversa já aberta, ele não pode vazar
-    para dentro do chat como se fosse uma mensagem da NEXA.
-  */
-  if (history.length !== 0) {
+/*
+  ==========================================
+  SAUDAÇÃO DO DIA
+  Ao entrar, o sistema pede ao modelo uma saudação para o usuário,
+  com a memória da conta no prompt (POST /api/greeting). O servidor
+  gera uma por dia e o localStorage evita repetir o pedido enquanto
+  o dia não virar. Com a conversa já aberta, o texto só fica guardado
+  para a próxima tela de boas-vindas.
+  ==========================================
+*/
+async function showPersonalizedGreeting() {
+  const greetingChatId = activeChatId;
+  const username = currentUser?.username || "por aqui";
+  const dateKey = greetingDateKey();
+
+  const stillOnWelcome = function () {
+    return (
+      history.length === 0 &&
+      activeChatId === greetingChatId &&
+      !sendButton.disabled
+    );
+  };
+
+  const show = function (text) {
+    const heading = document.querySelector(".hero h2");
+
+    /*
+      O título pertence só à tela de boas-vindas: com a conversa
+      já aberta ele não pode vazar para dentro do chat como se
+      fosse uma mensagem da NEXA.
+    */
+    if (heading && text && stillOnWelcome()) {
+      heading.textContent = text;
+    }
+  };
+
+  const saved = cachedGreeting(username, dateKey);
+
+  if (saved) {
+    show(saved);
     return;
   }
 
-  const heading = document.querySelector(".hero h2");
+  let greeting = "";
+  let serverDate = "";
 
-  if (heading) {
-    heading.textContent = greeting;
+  try {
+    const data = await api("POST", "/api/greeting", {
+      memoryEnabled: memoryEnabled
+    });
+
+    greeting = typeof data.greeting === "string" ? data.greeting.trim() : "";
+    serverDate = typeof data.date === "string" ? data.date : "";
+  } catch (error) {
+    console.error("Não foi possível gerar a saudação do dia:", error);
   }
+
+  if (greeting) {
+    saveGreeting(username, serverDate || dateKey, greeting);
+    show(greeting);
+    return;
+  }
+
+  if (!stillOnWelcome()) {
+    return;
+  }
+
+  show(await localGreeting(username));
 }
 
 function startNewChat() {

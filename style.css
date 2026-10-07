@@ -3146,6 +3146,31 @@ html.keyboard-open footer {
   display: none !important;
 }
 
+/*
+  Os balões acompanham o conteúdo: os prompts da página de imagens são
+  curtos e a caixa ocupando a tela inteira deixava a conversa enorme.
+  NEXA fica à esquerda, o usuário à direita.
+*/
+.app.image-mode #imageChat .message {
+  width: fit-content;
+  max-width: 70%;
+}
+
+.app.image-mode #imageChat .message.nexa {
+  margin-right: auto;
+}
+
+.app.image-mode #imageChat .message.user {
+  margin-left: auto;
+}
+
+/* No celular a tela é estreita: o balão pode ocupar mais largura. */
+@media (max-width: 600px) {
+  .app.image-mode #imageChat .message {
+    max-width: 85%;
+  }
+}
+
 /* A galeria só aparece na aba de boas-vindas do modo imagem. */
 .app:not(.welcome) #imageGallery {
   display: none !important;

@@ -231,9 +231,14 @@ chamada com o resultado e pede a continuação da resposta, que já sai com a
 memória atualizada no system prompt. O arquivo é limitado a 10.000 caracteres
 e pode ser editado à mão em **Configurações > Memória**.
 
-Ao entrar, a tela de boas-vindas usa uma anotação salva para montar uma
-saudação personalizada, desde que o uso de memória esteja ativado. Essa
-saudação não é gravada no histórico da conversa.
+Ao entrar, a tela de boas-vindas mostra uma saudação escrita pelo **próprio
+modelo**: o servidor monta o prompt com a memória da conta e guarda o
+resultado por dia (`POST /api/greeting`, uma chamada por usuário por dia,
+com o fuso configurado em **Configurações > Data e hora**), enquanto o
+`localStorage` evita repetir o pedido enquanto o dia não virar. O uso de
+memória obedece ao interruptor de **Configurações > Memória**; se o modelo
+não responder, vale a versão local montada a partir da anotação salva.
+Essa saudação não é gravada no histórico da conversa.
 
 Apagar a pasta `memoria/` remove a memória persistente (as conversas do
 navegador continuam no `localStorage`).
