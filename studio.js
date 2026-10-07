@@ -16,8 +16,6 @@ const viewerTabs = document.getElementById("viewerTabs");
 const viewerPanels = document.getElementById("viewerPanels");
 const viewerEmpty = document.getElementById("viewerEmpty");
 const btnStop = document.getElementById("btnStop");
-const suggestions = document.getElementById("suggestions");
-const suggestionButtons = suggestions?.querySelectorAll(".studio-suggestion") || [];
 
 const STORAGE_PREFIX = "nexa_studio:";
 let HISTORY_KEY = "";
@@ -162,13 +160,6 @@ function loadHistory() {
       String(message.content || "")
     );
   }
-  updateSuggestionsVisibility();
-}
-
-function updateSuggestionsVisibility() {
-  if (suggestions) {
-    suggestions.hidden = history.length > 0;
-  }
 }
 
 async function sendMessage(text) {
@@ -182,7 +173,6 @@ async function sendMessage(text) {
   abortController = new AbortController();
   input.value = "";
   setStatus("Pensando…", true);
-  updateSuggestionsVisibility();
 
   addMessage("user", clean);
   history.push({ role: "user", content: clean });
@@ -310,12 +300,6 @@ input.addEventListener("keydown", (event) => {
     event.preventDefault();
     composer.requestSubmit();
   }
-});
-
-suggestionButtons.forEach(btn => {
-  btn.addEventListener("click", () => {
-    sendMessage(btn.dataset.text);
-  });
 });
 
 function setPaneOpen(open) {

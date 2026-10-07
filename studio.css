@@ -1,50 +1,129 @@
+/* ============================================================
+   ESTÚDIO — visual e layout (v9)
+   Workspace em três cartões: Arquivos | Visor | Chat.
+
+   Regras de ouro deste arquivo:
+   1) O zoom global de 20% (style.css) multiplica 100vh; sem
+      dividir de volta, os cartões ficavam 20% mais altos que a
+      tela e o composer era cortado.
+   2) O visor é minmax(0, 1fr): ele encolhe, nunca empurra a
+      página para fora (na versão anterior o grid estourava na
+      horizontal com Arquivos + aba de arquivo + chat abertos).
+   3) Abaixo de 1280px os Arquivos deixam de acoplar e viram uma
+      gaveta flutuante — assim o visor nunca é esmagado a 240px.
+   ============================================================ */
+
 :root {
   --studio-accent: #8b5cf6;
+  --studio-accent-strong: #a78bfa;
+  --studio-accent-light: #c4b5fd;
   --studio-accent-dim: rgba(139, 92, 246, 0.15);
   --studio-accent-glow: rgba(139, 92, 246, 0.35);
   --studio-panel: rgba(13, 9, 19, 0.98);
   --studio-panel-hover: rgba(18, 13, 27, 0.95);
   --studio-bubble: rgba(139, 92, 246, 0.08);
   --studio-border: rgba(139, 92, 246, 0.18);
-  --studio-border-strong: rgba(139, 92, 246, 0.3);
+  --studio-border-strong: rgba(139, 92, 246, 0.34);
+  --studio-card: 16px;
+  --studio-shadow: 0 12px 40px rgba(0, 0, 0, 0.38);
+  --studio-pad: 12px;
   --files-width: 320px;
   --chat-width: 380px;
 }
 
+/*
+  display:none tem que vencer os estilos de autor: sem isto, os
+  elementos com [hidden] (aba de visor vazia, chips, painel de
+  arquivos) continuavam visíveis por causa do display:flex.
+*/
+[hidden] {
+  display: none !important;
+}
+
 .studio-body {
+  position: relative;
   display: grid;
-  grid-template-columns: 0 minmax(240px, 1fr) minmax(280px, min(var(--chat-width), 30vw));
+  grid-template-columns:
+    0
+    minmax(0, 1fr)
+    clamp(280px, min(var(--chat-width), 40%), 400px);
+  gap: var(--studio-pad);
+  padding: var(--studio-pad);
   min-width: 320px;
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
   background:
-    radial-gradient(ellipse at 50% 0%, rgba(139, 92, 246, 0.12), transparent 40rem),
-    radial-gradient(ellipse at 80% 20%, rgba(124, 58, 237, 0.08), transparent 30rem),
+    radial-gradient(ellipse at 50% -10%, rgba(139, 92, 246, 0.14), transparent 45rem),
+    radial-gradient(ellipse at 85% 15%, rgba(124, 58, 237, 0.10), transparent 35rem),
     var(--bg, #07050b);
 }
 
-body:has(.studio-files:not([hidden])) {
-  grid-template-columns: minmax(240px, var(--files-width)) minmax(240px, 1fr) minmax(280px, var(--chat-width));
+@media (min-width: 601px) {
+  .studio-body {
+    height: calc(100vh / var(--site-zoom, 1));
+    height: calc(100dvh / var(--site-zoom, 1));
+  }
 }
+
+/* ========================= CARTÕES ========================= */
 
 .studio-page {
   grid-column: 2;
+  grid-row: 1;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
-  padding: 20px 24px 16px;
+  padding: 18px 20px 16px;
+  border: 1px solid var(--studio-border);
+  border-radius: var(--studio-card);
+  background: var(--studio-panel);
+  box-shadow: var(--studio-shadow);
 }
+
+.studio-chat-pane {
+  grid-column: 3;
+  grid-row: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 18px 18px 14px;
+  border: 1px solid var(--studio-border);
+  border-radius: var(--studio-card);
+  background: var(--studio-panel);
+  box-shadow: var(--studio-shadow);
+}
+
+.studio-files {
+  grid-column: 1;
+  grid-row: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--studio-border);
+  border-radius: var(--studio-card);
+  background: var(--studio-panel);
+  box-shadow: var(--studio-shadow);
+}
+
+/* ========================= TOPO ========================= */
 
 .studio-topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  min-height: 48px;
+  min-height: 44px;
   padding-bottom: 12px;
+  margin-bottom: 10px;
   border-bottom: 1px solid var(--studio-border);
-  margin-bottom: 8px;
 }
 
 .studio-back {
@@ -53,47 +132,51 @@ body:has(.studio-files:not([hidden])) {
   gap: 8px;
   color: var(--text, #f2eef7);
   text-decoration: none;
-  padding: 6px 10px;
-  border-radius: 10px;
-  border: 1px solid transparent;
+  padding: 5px 12px 5px 6px;
+  border-radius: 12px;
+  border: 1px solid var(--studio-border);
+  background: rgba(255, 255, 255, 0.03);
   transition: border-color 0.2s, background 0.2s, color 0.2s;
 }
 
 .studio-back:hover {
-  border-color: var(--studio-border);
+  border-color: var(--studio-accent);
   background: var(--studio-accent-dim);
   color: var(--studio-accent);
 }
 
-.studio-back span {
+.studio-back > span:first-child {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--studio-border);
-  border-radius: 10px;
-  color: var(--studio-accent);
-  font-size: 22px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--studio-accent-dim);
+  color: var(--studio-accent-light);
+  font-size: 20px;
   line-height: 1;
+  padding-bottom: 2px;
   transition: transform 0.15s;
 }
 
-.studio-back:hover span {
+.studio-back:hover > span:first-child {
   transform: translateX(-2px);
 }
 
 .studio-back-text {
   font-weight: 600;
-  font-size: 14px;
-  letter-spacing: 0.02em;
+  font-size: 13px;
+  letter-spacing: 0.03em;
 }
 
 .studio-title {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
   flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
 }
 
 .studio-title strong {
@@ -115,8 +198,8 @@ body:has(.studio-files:not([hidden])) {
   gap: 8px;
   padding: 8px 14px;
   border: 1px solid var(--studio-border);
-  border-radius: 10px;
-  background: transparent;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
   color: var(--text, #f2eef7);
   font-size: 12px;
   font-weight: 500;
@@ -127,18 +210,21 @@ body:has(.studio-files:not([hidden])) {
 .studio-files-toggle:hover {
   background: var(--studio-accent-dim);
   border-color: var(--studio-accent);
-  color: var(--studio-accent);
+  color: var(--studio-accent-light);
 }
 
 .studio-files-toggle[aria-expanded="true"] {
   background: var(--studio-accent-dim);
   border-color: var(--studio-accent);
-  color: var(--studio-accent);
+  color: var(--studio-accent-light);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
 }
+
+/* ========================= VISOR ========================= */
 
 .studio-viewer {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   min-height: 0;
   overflow: hidden;
@@ -146,8 +232,8 @@ body:has(.studio-files:not([hidden])) {
 
 .studio-viewer-tabs {
   display: flex;
-  gap: 4px;
-  padding: 4px 4px 0;
+  gap: 6px;
+  padding: 0 2px;
   overflow-x: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--studio-border) transparent;
@@ -166,32 +252,29 @@ body:has(.studio-files:not([hidden])) {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 7px 10px;
   border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 8px 8px 0 0;
+  border-radius: 10px;
   background: transparent;
   color: var(--muted, rgba(242, 238, 247, 0.55));
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.15s;
-  min-width: 0;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .studio-viewer-tab:hover {
   background: var(--studio-panel-hover);
-  color: var(--text);
+  color: var(--text, #f2eef7);
   border-color: var(--studio-border);
 }
 
 .studio-viewer-tab[aria-selected="true"] {
-  background: var(--studio-panel);
-  color: var(--studio-accent);
-  border-color: var(--studio-border);
-  border-bottom-color: var(--studio-panel);
-  box-shadow: 0 -2px 8px rgba(139, 92, 246, 0.15);
+  background: var(--studio-accent-dim);
+  border-color: var(--studio-border-strong);
+  color: var(--studio-accent-light);
 }
 
 .studio-viewer-tab-name {
@@ -206,9 +289,9 @@ body:has(.studio-files:not([hidden])) {
   width: 18px;
   height: 18px;
   border: none;
-  border-radius: 4px;
+  border-radius: 5px;
   background: transparent;
-  color: var(--muted);
+  color: var(--muted, rgba(242, 238, 247, 0.55));
   cursor: pointer;
   opacity: 0;
   transition: all 0.15s;
@@ -226,10 +309,9 @@ body:has(.studio-files:not([hidden])) {
 }
 
 .studio-viewer-panels {
-  flex: 1;
+  position: relative;
   min-height: 0;
   overflow: hidden;
-  position: relative;
 }
 
 .studio-viewer-panel {
@@ -237,6 +319,7 @@ body:has(.studio-files:not([hidden])) {
   inset: 0;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.15s, visibility 0.15s;
@@ -252,9 +335,10 @@ body:has(.studio-files:not([hidden])) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--studio-border);
-  background: var(--studio-panel);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .studio-viewer-panel-path {
@@ -265,11 +349,13 @@ body:has(.studio-files:not([hidden])) {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+  min-width: 0;
 }
 
 .studio-viewer-panel-actions {
   display: flex;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .studio-viewer-panel-btn {
@@ -278,9 +364,9 @@ body:has(.studio-files:not([hidden])) {
   width: 28px;
   height: 28px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
-  color: var(--muted);
+  color: var(--muted, rgba(242, 238, 247, 0.55));
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -288,13 +374,16 @@ body:has(.studio-files:not([hidden])) {
 .studio-viewer-panel-btn:hover {
   background: var(--studio-accent-dim);
   border-color: var(--studio-border);
-  color: var(--studio-accent);
+  color: var(--studio-accent-light);
 }
 
 .studio-viewer-panel-content {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--studio-border) transparent;
 }
 
 .studio-viewer-panel-content pre {
@@ -321,15 +410,19 @@ body:has(.studio-files:not([hidden])) {
   background: transparent;
 }
 
+/* Estado vazio: ocupa a mesma faixa do painel, centralizado. */
 .studio-viewer-empty {
+  grid-row: 2;
+  grid-column: 1;
+  place-self: center;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
   color: var(--muted, rgba(242, 238, 247, 0.45));
   text-align: center;
   padding: 24px;
+  z-index: 2;
 }
 
 .studio-viewer-empty svg {
@@ -349,41 +442,33 @@ body:has(.studio-files:not([hidden])) {
   opacity: 0.7;
 }
 
-.studio-chat-pane {
-  grid-column: 3;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 20px 22px 16px;
-  border-left: 1px solid var(--studio-border);
-  background: var(--studio-panel);
-}
+/* ========================= CHAT ========================= */
 
 .studio-chat-resize {
   position: absolute;
-  top: 0;
-  left: -3px;
-  bottom: 0;
-  width: 6px;
+  top: 10px;
+  bottom: 10px;
+  left: -7px;
+  width: 8px;
   cursor: col-resize;
   touch-action: none;
-  background: linear-gradient(90deg, transparent, var(--studio-border));
+  border-radius: 4px;
+  background: var(--studio-accent);
   opacity: 0;
   transition: opacity 0.2s;
 }
 
 .studio-chat-resize:hover,
 .studio-chat-resize:active {
-  opacity: 1;
+  opacity: 0.6;
 }
 
 .studio-chat {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 12px;
-  padding: 0 0 12px;
+  gap: 10px;
+  padding: 2px 2px 12px;
   overflow-y: auto;
   min-height: 0;
   scrollbar-width: thin;
@@ -418,22 +503,25 @@ body:has(.studio-files:not([hidden])) {
 }
 
 .bubble {
-  max-width: 85%;
-  padding: 11px 14px;
-  border: 1px solid var(--studio-border);
-  border-radius: 14px;
-  background: var(--studio-bubble);
+  max-width: 88%;
+  padding: 10px 14px;
+  border: 1px solid rgba(139, 92, 246, 0.16);
+  border-radius: 16px;
+  border-bottom-left-radius: 6px;
+  background: rgba(255, 255, 255, 0.045);
   color: var(--text, #f2eef7);
   font-size: 14px;
   line-height: 1.55;
   overflow-wrap: anywhere;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
 }
 
 .message-user .bubble {
-  background: var(--studio-accent-dim);
-  border-color: var(--studio-accent-glow);
-  box-shadow: 0 2px 12px rgba(139, 92, 246, 0.15);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.42), rgba(124, 58, 237, 0.26));
+  border-color: rgba(167, 139, 250, 0.5);
+  border-radius: 16px;
+  border-bottom-right-radius: 6px;
+  border-bottom-left-radius: 16px;
 }
 
 .bubble pre {
@@ -454,12 +542,13 @@ body:has(.studio-files:not([hidden])) {
 
 .bubble :not(pre) > code {
   padding: 2px 6px;
-  border-radius: 4px;
-  background: rgba(139, 92, 246, 0.15);
+  border-radius: 5px;
+  background: rgba(139, 92, 246, 0.18);
   font-size: 0.9em;
 }
 
-.bubble ul, .bubble ol {
+.bubble ul,
+.bubble ol {
   margin: 8px 0;
   padding-left: 20px;
 }
@@ -485,7 +574,8 @@ body:has(.studio-files:not([hidden])) {
   font-size: 12px;
 }
 
-.bubble th, .bubble td {
+.bubble th,
+.bubble td {
   border: 1px solid var(--studio-border);
   padding: 6px 10px;
   text-align: left;
@@ -493,7 +583,7 @@ body:has(.studio-files:not([hidden])) {
 
 .bubble th {
   background: var(--studio-accent-dim);
-  color: var(--studio-accent);
+  color: var(--studio-accent-light);
 }
 
 .message-note .bubble {
@@ -502,29 +592,43 @@ body:has(.studio-files:not([hidden])) {
   color: var(--muted, rgba(242, 238, 247, 0.6));
   font-size: 12px;
   padding: 8px 12px;
+  box-shadow: none;
 }
+
+/* ========================= COMPOSER ========================= */
 
 .studio-composer {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 0 0 auto;
 }
 
 .studio-composer-bar {
   display: flex;
   align-items: flex-end;
   gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--studio-border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.studio-composer-bar:focus-within {
+  border-color: var(--studio-accent);
+  box-shadow: 0 0 0 3px var(--studio-accent-dim);
 }
 
 .studio-composer-btn {
   display: grid;
   place-items: center;
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   border: 1px solid var(--studio-border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--studio-panel);
-  color: var(--muted);
+  color: var(--muted, rgba(242, 238, 247, 0.55));
   cursor: pointer;
   transition: all 0.15s;
   flex-shrink: 0;
@@ -536,20 +640,25 @@ body:has(.studio-files:not([hidden])) {
   color: #ef4444;
 }
 
+/*
+  min-height comporta o placeholder em duas linhas ("Peça algo: um
+  site, um script, um jogo…") quando o chat está na largura mínima —
+  com uma linha a segunda ficava cortada.
+*/
 .studio-composer textarea {
   flex: 1;
-  min-height: 48px;
+  min-width: 0;
+  min-height: 62px;
   max-height: 180px;
-  padding: 12px 16px;
-  border: 1px solid var(--studio-border);
-  border-radius: 12px;
-  background: var(--studio-panel);
+  padding: 10px 8px;
+  border: none;
+  background: transparent;
   color: var(--text, #f2eef7);
   font: inherit;
   font-size: 14px;
+  line-height: 1.5;
   resize: none;
   outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .studio-composer textarea::placeholder {
@@ -557,19 +666,18 @@ body:has(.studio-files:not([hidden])) {
 }
 
 .studio-composer textarea:focus {
-  border-color: var(--studio-accent);
-  box-shadow: 0 0 0 3px var(--studio-accent-dim);
+  outline: none;
 }
 
 .studio-composer button[type="submit"] {
   display: grid;
   place-items: center;
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   border: 1px solid var(--studio-accent-glow);
-  border-radius: 10px;
+  border-radius: 12px;
   background: linear-gradient(135deg, var(--studio-accent), #7c3aed);
-  color: white;
+  color: #fff;
   font-size: 18px;
   cursor: pointer;
   transition: all 0.15s;
@@ -579,76 +687,40 @@ body:has(.studio-files:not([hidden])) {
 
 .studio-composer button[type="submit"]:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.45);
 }
 
 .studio-composer button[type="submit"]:active {
   transform: translateY(0);
 }
 
-.studio-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 4px 2px;
-}
-
-.studio-suggestion {
-  padding: 8px 14px;
-  border: 1px solid var(--studio-border);
-  border-radius: 20px;
-  background: var(--studio-panel-hover);
-  color: var(--muted, rgba(242, 238, 247, 0.7));
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-
-.studio-suggestion:hover {
-  background: var(--studio-accent-dim);
-  border-color: var(--studio-accent);
-  color: var(--studio-accent);
-}
-
-.studio-files {
-  grid-column: 1;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-right: 1px solid var(--studio-border);
-  background: var(--studio-panel);
-}
-
-.studio-files[hidden] {
-  display: none;
-}
+/* ========================= ARQUIVOS ========================= */
 
 .studio-files-resize {
   position: absolute;
-  top: 0;
-  right: -3px;
-  bottom: 0;
-  width: 6px;
+  top: 10px;
+  bottom: 10px;
+  right: -7px;
+  width: 8px;
   cursor: col-resize;
   touch-action: none;
-  background: linear-gradient(270deg, transparent, var(--studio-border));
+  border-radius: 4px;
+  background: var(--studio-accent);
   opacity: 0;
   transition: opacity 0.2s;
+  z-index: 5;
 }
 
 .studio-files-resize:hover,
 .studio-files-resize:active {
-  opacity: 1;
+  opacity: 0.6;
 }
 
 .studio-files > header {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 16px;
+  padding: 14px 14px 12px;
   border-bottom: 1px solid var(--studio-border);
 }
 
@@ -673,7 +745,7 @@ body:has(.studio-files:not([hidden])) {
   padding: 0 8px;
   border-radius: 11px;
   background: var(--studio-accent-dim);
-  color: var(--studio-accent);
+  color: var(--studio-accent-light);
   font-size: 11px;
   font-weight: 600;
 }
@@ -689,9 +761,9 @@ body:has(.studio-files:not([hidden])) {
   width: 32px;
   height: 32px;
   border: 1px solid var(--studio-border);
-  border-radius: 8px;
+  border-radius: 9px;
   background: transparent;
-  color: var(--muted);
+  color: var(--muted, rgba(242, 238, 247, 0.55));
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -699,24 +771,25 @@ body:has(.studio-files:not([hidden])) {
 .studio-files-actions button:hover {
   background: var(--studio-accent-dim);
   border-color: var(--studio-accent);
-  color: var(--studio-accent);
+  color: var(--studio-accent-light);
 }
 
 .studio-files-search {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin: 12px 14px 0;
   padding: 8px 12px;
   border: 1px solid var(--studio-border);
-  border-radius: 8px;
-  background: var(--studio-panel-hover);
-  color: var(--muted);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted, rgba(242, 238, 247, 0.55));
   font-size: 13px;
 }
 
 .studio-files-search:focus-within {
   border-color: var(--studio-accent);
-  color: var(--text);
+  color: var(--text, #f2eef7);
 }
 
 .studio-files-search svg {
@@ -726,6 +799,7 @@ body:has(.studio-files:not([hidden])) {
 
 .studio-files-search input {
   flex: 1;
+  min-width: 0;
   border: none;
   background: transparent;
   color: inherit;
@@ -741,7 +815,7 @@ body:has(.studio-files:not([hidden])) {
   flex: 1;
   min-height: 0;
   margin: 0;
-  padding: 8px 8px 12px;
+  padding: 10px;
   list-style: none;
   overflow-y: auto;
   scrollbar-width: thin;
@@ -765,17 +839,16 @@ body:has(.studio-files:not([hidden])) {
   position: relative;
 }
 
+/*
+  O <details> nativo já esconde os filhos quando fechado. A versão
+  anterior escondia o <ul> com max-height:0 e tentava reabri-lo com
+  li[open] — mas quem recebe o atributo open é o <details>, então a
+  pasta ficava sempre fechada: os arquivos dentro dela nunca apareciam.
+*/
 .studio-file-tree ul {
   margin: 0;
   padding: 0;
   list-style: none;
-  overflow: hidden;
-  max-height: 0;
-  transition: max-height 0.2s ease;
-}
-
-.studio-file-tree li[open] > ul {
-  max-height: 500px;
 }
 
 .studio-file-tree summary {
@@ -783,12 +856,13 @@ body:has(.studio-files:not([hidden])) {
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   color: var(--text, #f2eef7);
   font-size: 12.5px;
   font-weight: 500;
   user-select: none;
+  list-style: none;
   transition: background 0.15s;
 }
 
@@ -805,6 +879,7 @@ body:has(.studio-files:not([hidden])) {
   display: inline-block;
   width: 14px;
   height: 14px;
+  flex-shrink: 0;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cpolyline points='9 18 15 12 9 6'%3E%3C/polyline%3E%3C/svg%3E") center/contain no-repeat;
   background: currentColor;
   opacity: 0.5;
@@ -812,7 +887,7 @@ body:has(.studio-files:not([hidden])) {
   transition: transform 0.15s;
 }
 
-.studio-file-tree li[open] > summary::before {
+.studio-file-tree details[open] > summary::before {
   transform: rotate(0deg);
 }
 
@@ -820,7 +895,7 @@ body:has(.studio-files:not([hidden])) {
   display: inline-flex;
   width: 16px;
   height: 16px;
-  color: var(--studio-accent);
+  color: var(--studio-accent-light);
   flex-shrink: 0;
 }
 
@@ -843,11 +918,11 @@ body:has(.studio-files:not([hidden])) {
   align-items: center;
   gap: 6px;
   padding: 6px 8px 6px 30px;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text, #f2eef7);
   font-size: 12.5px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
 .studio-file-tree .studio-file-item:hover {
@@ -857,6 +932,17 @@ body:has(.studio-files:not([hidden])) {
 .studio-file-tree .studio-file-item:focus-visible {
   outline: 2px solid var(--studio-accent);
   outline-offset: -2px;
+}
+
+/* Arquivo aberto no visor: destacado na árvore (antes não existia). */
+.studio-file-tree .studio-file-item.studio-active {
+  background: var(--studio-accent-dim);
+  color: var(--studio-accent-light);
+  box-shadow: inset 2px 0 0 var(--studio-accent);
+}
+
+.studio-file-tree .studio-active .studio-file-icon {
+  color: var(--studio-accent-light);
 }
 
 .studio-file-tree .studio-file-icon {
@@ -894,7 +980,7 @@ body:has(.studio-files:not([hidden])) {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  color: var(--muted);
+  color: var(--muted, rgba(242, 238, 247, 0.55));
   font-size: 12px;
 }
 
@@ -912,40 +998,78 @@ body:has(.studio-files:not([hidden])) {
   to { transform: rotate(360deg); }
 }
 
-/* Mobile */
-@media (max-width: 760px) {
-  .studio-body {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr auto;
-  }
+/* =========================
+   RESPONSIVO
+   1280px+  → Arquivos acoplado (3 cartões lado a lado).
+   760–1279 → Arquivos em gaveta flutuante; visor e chat não
+              perdem espaço (era aqui que a aba esmagava).
+   ≤759     → coluna única; gaveta de arquivos em tela cheia e
+              chat como painel inferior sempre acessível.
+========================= */
 
+@media (min-width: 1280px) {
+  body:has(.studio-files:not([hidden])) {
+    grid-template-columns:
+      clamp(240px, min(var(--files-width), 32%), 380px)
+      minmax(0, 1fr)
+      clamp(280px, min(var(--chat-width), 40%), 400px);
+  }
+}
+
+@media (min-width: 760px) and (max-width: 1279.98px) {
   body:has(.studio-files:not([hidden])) .studio-files {
-    grid-row: 1;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 50;
-    border-right: none;
-    border-bottom: 1px solid var(--studio-border);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    grid-column: auto;
+    grid-row: auto;
+    position: absolute;
+    top: var(--studio-pad);
+    bottom: var(--studio-pad);
+    left: var(--studio-pad);
+    width: clamp(260px, 30%, 360px);
+    z-index: 30;
+    border-color: var(--studio-border-strong);
+    box-shadow: var(--studio-shadow), 0 6px 24px rgba(0, 0, 0, 0.5);
   }
 
-  body:has(.studio-files:not([hidden])) .studio-page {
-    grid-row: 2;
+  body:has(.studio-files:not([hidden])) .studio-files-resize {
+    display: none;
+  }
+}
+
+@media (max-width: 759.98px) {
+  .studio-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0;
+    padding: 8px;
+  }
+
+  /* Visor ocupa a tela inteira; o chat é um bottom-sheet colado
+     na base (altura do conteúdo, teto de 46% da tela). */
+  .studio-page {
+    grid-column: 1;
+    grid-row: 1;
+    padding: 14px 14px 12px;
   }
 
   .studio-chat-pane {
-    grid-row: 3;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    border-left: none;
-    border-top: 1px solid var(--studio-border);
-    z-index: 40;
-    max-height: 70vh;
+    grid-column: 1;
+    grid-row: 1;
+    align-self: end;
+    max-height: 46%;
+    z-index: 60;
+  }
+
+  /* Gaveta em tela cheia; o chat (z 60) fica por cima, então
+     lista de arquivos e conversa continuam usáveis juntas. */
+  body:has(.studio-files:not([hidden])) .studio-files {
+    grid-column: auto;
+    grid-row: auto;
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
   }
 
   .studio-chat-resize,
@@ -953,16 +1077,23 @@ body:has(.studio-files:not([hidden])) {
     display: none;
   }
 
-  .studio-page {
-    padding: 16px 16px 12px;
+  .studio-back {
+    padding: 4px 10px 4px 5px;
   }
 
-  .studio-chat-pane {
-    padding: 16px 16px 12px;
+  .studio-topbar {
+    gap: 8px;
+    min-height: 40px;
+    padding-bottom: 10px;
+    margin-bottom: 8px;
   }
 
-  .studio-viewer-tabs {
-    -webkit-overflow-scrolling: touch;
+  .studio-files-toggle span {
+    display: none;
+  }
+
+  .studio-files-toggle {
+    padding: 8px 10px;
   }
 }
 
