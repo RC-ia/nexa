@@ -2766,12 +2766,6 @@ html.keyboard-open footer {
   white-space: nowrap;
 }
 
-.user-plan {
-  color: var(--muted);
-
-  font-size: 11px;
-}
-
 .drawer-logout {
   flex: none;
 
