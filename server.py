@@ -851,11 +851,15 @@ def image_prompt_agent_model():
     return MODEL
 
 
-def expand_image_prompt(prompt):
+def expand_image_prompt(prompt, spicy=False, user_id=""):
     """
     Agente de imagem: traduz o pedido do usuário para inglês e completa com
     detalhes de cena, luz, estilo e composição antes de chamar o modelo de
     imagem. Devolve (prompt_usado, reescrito).
+
+    Com spicy=True (botão 😈 do modo imagem) o agente safadinho assume o
+    system prompt: as instruções sensuais do próprio usuário, ou o padrão
+    dele quando não houver personalização.
 
     Qualquer falha no agente não impede a geração: o prompt original segue
     para o modelo de imagem.
@@ -870,10 +874,14 @@ def expand_image_prompt(prompt):
     if not API_KEY or not model:
         return original, ""
 
+    system_prompt = (
+        current_spicy_prompt(user_id) if spicy else IMAGE_PROMPT_AGENT_PROMPT
+    )
+
     body = {
         "model": model,
         "messages": [
-            {"role": "system", "content": IMAGE_PROMPT_AGENT_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": original[:MAX_PROMPT_LENGTH]},
         ],
         "stream": False,
@@ -944,8 +952,13 @@ def generate_image():
         return jsonify({"error": "Configure API_IMAGE e MODEL_IMAGE no servidor."}), 503
 
     # Agente de prompt: o texto do usuário vira um prompt em inglês,
-    # mais detalhado, antes de ir para o modelo de imagem.
-    prompt, rewritten_prompt = expand_image_prompt(prompt)
+    # mais detalhado, antes de ir para o modelo de imagem. O botão 😈 do
+    # modo imagem liga o agente safadinho nessa reescrita.
+    spicy = body.get("spicy") is True
+    user_id = "acct_%d" % user["id"]
+    prompt, rewritten_prompt = expand_image_prompt(
+        prompt, spicy=spicy, user_id=user_id
+    )
 
     payload = {
         "model": IMAGE_MODEL,
@@ -1001,6 +1014,7 @@ def generate_image():
         "prompt_agent": {
             "enabled": IMAGE_PROMPT_AGENT,
             "model": image_prompt_agent_model() if IMAGE_PROMPT_AGENT else "",
+            "spicy": spicy,
         },
         "duration_ms": round((time.perf_counter() - started) * 1000),
     })
@@ -5576,9 +5590,11 @@ def chat():
 
     memories = get_memories(user_id) if memory_enabled else []
 
-    # Botão 😈 do composer: o agente safadinho assume com system prompt
+    # Flag `spicy` do corpo: agente safadinho assume com system prompt
     # próprio em todos os caminhos de resposta (stream, bloqueante,
-    # pensamento e pesquisa profunda).
+    # pensamento e pesquisa profunda). O botão 😈 hoje só existe no modo
+    # imagem (e comanda /api/images/generate); a flag continua aceita aqui
+    # por retrocompatibilidade.
     spicy = body.get("spicy") is True
     spicy_override = current_spicy_prompt(user_id) if spicy else ""
 

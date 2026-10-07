@@ -400,18 +400,22 @@ function saveSpicyMode() {
 }
 
 function renderSpicyMode() {
-  document.body.classList.toggle("spicy", spicyMode === true);
+  /*
+    O safadinho pertence só ao modo imagem (agente de prompt de imagem):
+    o tema vermelho-sangue entra apenas quando a aba de imagens está
+    ativa — no chat normal o site segue no tom normal.
+  */
+  document.body.classList.toggle(
+    "spicy",
+    spicyMode === true && viewMode === "image"
+  );
 
-  ["spicyButton", "imageSpicyButton"].forEach(id => {
-    const button = document.getElementById(id);
+  const button = document.getElementById("imageSpicyButton");
 
-    if (!button) {
-      return;
-    }
-
+  if (button) {
     button.classList.toggle("active", spicyMode === true);
     button.setAttribute("aria-pressed", spicyMode ? "true" : "false");
-  });
+  }
 }
 
 function setSpicyMode(isOn) {
@@ -420,15 +424,11 @@ function setSpicyMode(isOn) {
   renderSpicyMode();
 }
 
-["spicyButton", "imageSpicyButton"].forEach(id => {
-  const button = document.getElementById(id);
+const imageSpicyButton = document.getElementById("imageSpicyButton");
 
-  if (!button) {
-    return;
-  }
-
-  button.addEventListener("click", () => setSpicyMode(!spicyMode));
-});
+if (imageSpicyButton) {
+  imageSpicyButton.addEventListener("click", () => setSpicyMode(!spicyMode));
+}
 
 /*
   Modo Criar imagem: o texto do composer vira o prompt
@@ -1852,7 +1852,6 @@ async function askNexa(text, deep, image, file) {
         memoryEnabled,
         customInstructions,
         deep: deep === true,
-        spicy: spicyMode === true,
         image: image || null,
         file: file || null
       }),
@@ -3715,6 +3714,7 @@ function setViewMode(mode) {
   renderChatList();
   renderWelcomeState();
   renderImageGallery();
+  renderSpicyMode();
   saveViewMode();
 
   if (viewMode === "image") {
@@ -4104,7 +4104,10 @@ imageComposer.addEventListener("submit", async function (event) {
         "Content-Type": "application/json",
         "X-Nexa-Message-Key": messageKey
       },
-      body: JSON.stringify({ prompt })
+      body: JSON.stringify({
+        prompt,
+        spicy: spicyMode === true
+      })
     });
 
     if (response.status === 401) {
@@ -4236,7 +4239,10 @@ async function submitImagePrompt(prompt) {
         "Content-Type": "application/json",
         "X-Nexa-Message-Key": messageKey
       },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({
+        prompt,
+        spicy: spicyMode === true
+      }),
       signal: abortController ? abortController.signal : undefined
     });
 

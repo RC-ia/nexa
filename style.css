@@ -3282,7 +3282,6 @@ body.spicy .composer > #imageSendButton:hover {
   background: linear-gradient(135deg, #f87171, #dc2626);
 }
 
-.composer > #spicyButton,
 .composer > #imageSpicyButton {
   transition:
     transform 0.15s ease,
@@ -3292,7 +3291,6 @@ body.spicy .composer > #imageSendButton:hover {
     box-shadow 0.6s ease;
 }
 
-.composer > #spicyButton.active,
 .composer > #imageSpicyButton.active {
   background: linear-gradient(135deg, #e5383b, #7f1d1d);
   border-color: rgba(248, 113, 113, 0.6);
