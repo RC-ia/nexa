@@ -299,8 +299,10 @@ body {
 
 /* =========================
    SIDEBAR NO DESKTOP
-   Abre empurrando o conteúdo (estrutural),
-   como o ChatGPT; no celular vira sobreposição.
+   Abre comprimindo o conteúdo (o app mantém 100% de largura e ganha
+   padding), nunca empurrando o site para o lado: com margin-left o
+   layout estourava o viewport e o que ficava à direita saía da tela.
+   No celular continua sobreposição com scrim.
 ========================= */
 
 @media (min-width: 1025px) {
@@ -309,16 +311,28 @@ body {
   }
 
   .app {
-    transition: margin-left 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: padding-left 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .app.drawer-open {
-    margin-left: 280px;
+    padding-left: 280px;
   }
 
   .app.drawer-open .drawer-scrim {
     opacity: 0;
     pointer-events: none;
+  }
+
+  /*
+    Elementos fixos centralizados na viewport voltam ao centro da
+    área que sobrou ao lado da barra (280 / 2 = 140px).
+  */
+  .app.drawer-open .pull-ball {
+    margin-left: 127px;
+  }
+
+  .app.drawer-open ~ .copy-toast {
+    margin-left: 140px;
   }
 }
 
