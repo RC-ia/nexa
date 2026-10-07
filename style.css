@@ -37,11 +37,8 @@
      então as media queries só precisam mexer neste valor. */
   --core-size: 155px;
 
-  /* Margem lateral do app: cresce com a largura da tela.
-     O app ocupa a tela inteira; só as bolhas de conversa têm
-     limite de largura, para o texto continuar legível. */
+  /* Margem lateral do app: cresce com a largura da tela. */
   --gutter: clamp(20px, 4vw, 80px);
-  --bubble-max: 1000px;
 }
 
 body.file-drag-over::after {
@@ -1502,11 +1499,11 @@ body {
   display: flex;
   flex-direction: column;
 
-  gap: 16px;
+  gap: 0;
 
-  width: min(100%, 1120px);
-  margin: 0 auto;
-  padding: 12px 18px 20px;
+  width: 100%;
+  margin: 0;
+  padding: 12px 0 20px;
 }
 
 
@@ -1515,7 +1512,7 @@ body {
 ========================= */
 
 .message {
-  max-width: min(92%, var(--bubble-max));
+  max-width: 100%;
 
   padding: 12px 16px 14px;
 
@@ -2422,7 +2419,7 @@ footer {
   }
 
   .message {
-    max-width: 94%;
+    max-width: 100%;
   }
 
   .new-chat-button {
