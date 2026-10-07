@@ -21,7 +21,7 @@
 
   <title>NEXA</title>
 
-  <link rel="stylesheet" href="style.css?v=27">
+  <link rel="stylesheet" href="style.css?v=35">
 </head>
 
 <body>
@@ -100,7 +100,16 @@
         Nova conversa
       </button>
 
-      <span class="drawer-section">
+      <button
+        type="button"
+        id="drawerImages"
+        class="drawer-new-chat"
+      >
+        <span class="drawer-icon" aria-hidden="true">▦</span>
+        Imagens
+      </button>
+
+      <span class="drawer-section" id="drawerSection">
         Chats anteriores
       </span>
 
@@ -154,7 +163,7 @@
     </aside>
 
 
-    <div class="feed">
+    <div class="feed" id="chatFeed">
 
     <section class="hero" id="hero">
 
@@ -173,6 +182,28 @@
     >
 
     </section>
+
+    </div>
+
+
+    <div class="feed" id="imageFeed" hidden>
+
+      <section class="hero" id="imageHero">
+
+        <h2>
+          O que vamos criar hoje?
+        </h2>
+
+      </section>
+
+      <section
+        class="chat"
+        id="imageChat"
+        aria-live="polite"
+        aria-label="Imagens criadas com a NEXA"
+      >
+
+      </section>
 
     </div>
 
@@ -458,6 +489,16 @@
       </button>
 
       <button
+        type="button"
+        id="spicyButton"
+        aria-label="Modo safadinho"
+        title="Modo safadinho"
+        aria-pressed="false"
+      >
+        😈
+      </button>
+
+      <button
         type="submit"
         id="sendButton"
         aria-label="Enviar"
@@ -496,6 +537,52 @@
         <svg class="suggestion-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
         <span>Pesquise na web</span>
       </button>
+
+    </div>
+
+    <form
+      class="composer"
+      id="imageComposer"
+      autocomplete="off"
+      hidden
+    >
+      <input
+        id="imagePromptInput"
+        type="text"
+        placeholder="Descreva a imagem que a NEXA deve criar..."
+        autocomplete="off"
+        aria-label="Prompt da imagem"
+      >
+
+      <button
+        type="button"
+        id="imageSpicyButton"
+        aria-label="Modo safadinho"
+        title="Modo safadinho"
+        aria-pressed="false"
+      >
+        😈
+      </button>
+
+      <button
+        type="submit"
+        id="imageSendButton"
+        aria-label="Gerar imagem"
+        title="Gerar imagem"
+      >
+        <span class="send-icon" aria-hidden="true">➤</span>
+      </button>
+    </form>
+
+    <div class="image-gallery" id="imageGallery" hidden>
+
+      <h3 class="image-gallery-title">Suas imagens</h3>
+
+      <div class="image-gallery-grid" id="imageGalleryGrid"></div>
+
+      <p class="image-gallery-empty" id="imageGalleryEmpty">
+        Nenhuma imagem criada ainda. Descreva uma imagem abaixo para começar.
+      </p>
 
     </div>
 
@@ -632,6 +719,8 @@
             <button type="button" class="settings-category agent-settings-tab" data-agent-tab="deep" role="tab">Pesquisa profunda<span>Nome e rodadas da investigação</span></button>
             <button type="button" class="settings-category agent-settings-tab" data-agent-tab="vision" role="tab">Agente visual<span>Modelo e instruções da análise de imagem</span></button>
             <button type="button" class="settings-category agent-settings-tab" data-agent-tab="intent" role="tab">Agente de tema/intenção<span>Interpretação antes da pesquisa profunda</span></button>
+            <button type="button" class="settings-category agent-settings-tab" data-agent-tab="imagePrompt" role="tab">Agente de imagem<span>Traduz e detalha o prompt antes de gerar</span></button>
+            <button type="button" class="settings-category agent-settings-tab" data-agent-tab="spicy" role="tab">Agente safadinho<span>Persona do botão 😈 no composer</span></button>
             <button type="button" class="settings-category agent-settings-tab" data-agent-tab="reminders" role="tab">Lembretes<span>Agente que executa e responde lembretes</span></button>
           </div>
         </section>
@@ -666,6 +755,21 @@
           <label class="settings-field"><span>Modelo do agente de tema</span><input type="text" id="intentModelDisplay" readonly></label>
           <label class="settings-field"><span>Instruções do agente de tema</span><textarea id="intentPromptDisplay" rows="8" readonly></textarea></label>
           <p class="settings-description">Este agente transforma a solicitação em um tema autocontido antes da pesquisa profunda.</p>
+        </section>
+
+        <section id="settingsAgentImagePrompt" class="settings-view agent-settings-page" hidden>
+          <button type="button" class="settings-back" data-agent-back>‹ Agentes</button>
+          <label class="settings-field"><span>Estado do agente</span><input type="text" id="imagePromptAgentStatus" readonly></label>
+          <label class="settings-field"><span>Modelo do agente de imagem</span><input type="text" id="imagePromptModelDisplay" readonly></label>
+          <label class="settings-field"><span>Instruções do agente de imagem</span><textarea id="imagePromptTextarea" rows="10" readonly></textarea></label>
+          <p class="settings-description">Este agente recebe o texto do usuário, traduz para inglês e acrescenta detalhes de cena, luz, estilo e composição antes de enviar ao modelo de imagem. Desligado com IMAGE_PROMPT_AGENT=false no servidor.</p>
+        </section>
+
+        <section id="settingsAgentSpicy" class="settings-view agent-settings-page" hidden>
+          <button type="button" class="settings-back" data-agent-back>‹ Agentes</button>
+          <label class="settings-field"><span>Modelo do agente safadinho</span><input type="text" id="spicyModelDisplay" readonly></label>
+          <label class="settings-field"><span>System prompt do agente safadinho</span><textarea id="spicyPromptDisplay" rows="12" readonly></textarea></label>
+          <p class="settings-description">Este agente assume quando o botão 😈 está ativo: substitui o system prompt padrão pela persona acima. O modelo e o prompt são definidos pelo servidor.</p>
         </section>
 
         <section id="settingsAgentReminders" class="settings-view agent-settings-page" hidden>
@@ -816,7 +920,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
-  <script src="script.js?v=65"></script>
+  <script src="script.js?v=75"></script>
 
 </body>
 

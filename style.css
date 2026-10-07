@@ -3040,6 +3040,225 @@ html.keyboard-open footer {
 
 
 /* =========================
+   MODO IMAGEM
+   Quando .app.image-mode, o feed do chat, o composer
+   e as sugestões do chat ficam escondidos e aparecem
+   o feed e o composer de imagens.
+========================= */
+
+.app.image-mode #chatFeed,
+.app.image-mode #composer,
+.app.image-mode #suggestions {
+  display: none !important;
+}
+
+#imageFeed[hidden],
+#imageComposer[hidden],
+#imageGallery[hidden] {
+  display: none !important;
+}
+
+/* A galeria só aparece na aba de boas-vindas do modo imagem. */
+.app:not(.welcome) #imageGallery {
+  display: none !important;
+}
+
+/* Galeria de imagens do modo imagem */
+
+.image-gallery {
+  width: calc(100% - 32px);
+  max-width: 800px;
+  margin: 32px auto 16px;
+}
+
+.image-gallery-title {
+  margin: 0 0 20px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text, #e5e5e5);
+}
+
+/*
+  Sem número fixo de colunas: com uma imagem ela ocupa a
+  linha inteira e, conforme entram mais, vão cabendo até o
+  limite do bloco.
+*/
+.image-gallery-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.image-gallery-grid:empty {
+  display: none;
+}
+
+.image-gallery-thumb {
+  aspect-ratio: 1 / 1;
+  flex: 1 1 140px;
+  max-width: 220px;
+  min-width: 120px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid var(--line, #333);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.image-gallery-thumb:hover {
+  transform: scale(1.03);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.image-gallery-empty {
+  margin: 0;
+  font-size: 0.9rem;
+  text-align: center;
+  color: var(--muted, #999);
+}
+
+.image-gallery-grid:not(:empty) + .image-gallery-empty {
+  display: none;
+}
+
+/* Prompt final reescrito pelo agente, em inglês */
+
+.image-prompt-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 640px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #333);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.image-prompt-note-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #999);
+}
+
+.image-prompt-note-text {
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--text, #e5e5e5);
+}
+
+
+/* =========================
+   MODO SAFADINHO (tom vermelho-sangue, com transição)
+   O body ganha a classe .spicy: as variáveis de acento
+   mudam para o vermelho e um véu vermelho sobe por cima
+   do fundo com fade de 0.6s.
+========================= */
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  background:
+    radial-gradient(circle at top, rgba(220, 38, 38, 0.30), transparent 28rem),
+    radial-gradient(circle at right top, rgba(127, 29, 29, 0.38), transparent 22rem),
+    linear-gradient(180deg, #2a0808 0%, #160404 32%, #0d0202 100%);
+}
+
+body.spicy::before {
+  opacity: 1;
+}
+
+body.spicy {
+  --bg: #1c0606;
+  --bg-deep: #0c0202;
+
+  --panel: rgba(32, 8, 8, 0.85);
+  --panel-light: rgba(52, 12, 12, 0.95);
+  --panel-elevated: rgba(66, 14, 14, 0.98);
+
+  --line: rgba(248, 113, 113, 0.18);
+  --line-hover: rgba(248, 113, 113, 0.32);
+  --line-strong: rgba(220, 38, 38, 0.55);
+
+  --text: #ffecec;
+  --muted: #d9a3a3;
+  --muted-strong: #ffe1e1;
+
+  --accent: #dc2626;
+  --accent-light: #f87171;
+  --accent-dark: #7f1d1d;
+  --accent-glow: rgba(220, 38, 38, 0.40);
+
+  --purple-bright: #fecaca;
+  --cyan-accent: #fca5a5;
+  --cyan-glow: rgba(220, 38, 38, 0.22);
+
+  --danger: #ef4444;
+  --danger-glow: rgba(239, 68, 68, 0.28);
+}
+
+body.spicy .app {
+  background: linear-gradient(180deg, rgba(42, 8, 8, 0.42), rgba(22, 4, 4, 0.10));
+}
+
+body.spicy .composer {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: rgba(40, 10, 10, 0.92);
+  box-shadow: 0 12px 28px rgba(127, 29, 29, 0.35);
+}
+
+body.spicy .composer:focus-within {
+  border-color: rgba(220, 38, 38, 0.6);
+  background: rgba(52, 13, 13, 0.96);
+  box-shadow: 0 16px 30px rgba(220, 38, 38, 0.22);
+}
+
+body.spicy .composer > #sendButton,
+body.spicy .composer > #imageSendButton {
+  background: linear-gradient(135deg, #e5383b, #7f1d1d);
+  border-color: transparent;
+  color: #fff;
+}
+
+body.spicy .composer > #sendButton:hover,
+body.spicy .composer > #imageSendButton:hover {
+  background: linear-gradient(135deg, #f87171, #dc2626);
+}
+
+.composer > #spicyButton,
+.composer > #imageSpicyButton {
+  transition:
+    transform 0.15s ease,
+    background 0.6s ease,
+    color 0.6s ease,
+    border-color 0.6s ease,
+    box-shadow 0.6s ease;
+}
+
+.composer > #spicyButton.active,
+.composer > #imageSpicyButton.active {
+  background: linear-gradient(135deg, #e5383b, #7f1d1d);
+  border-color: rgba(248, 113, 113, 0.6);
+  color: #fff;
+  box-shadow: 0 0 14px rgba(220, 38, 38, 0.55);
+}
+
+.image-generating {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+
+/* =========================
    ANIMAÇÕES
 ========================= */
 

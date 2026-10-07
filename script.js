@@ -55,6 +55,8 @@ const settingsViews = {
   agentDeep: document.getElementById("settingsAgentDeep"),
   agentVision: document.getElementById("settingsAgentVision"),
   agentIntent: document.getElementById("settingsAgentIntent"),
+  agentImagePrompt: document.getElementById("settingsAgentImagePrompt"),
+  agentSpicy: document.getElementById("settingsAgentSpicy"),
   agentReminders: document.getElementById("settingsAgentReminders"),
   time: document.getElementById("settingsTime"),
   listen: document.getElementById("settingsListen"),
@@ -86,6 +88,7 @@ const LIVE_VOICE_KEY = "nexa_live_voice";
 const MEMORY_ENABLED_KEY = "nexa_memory_enabled:";
 const INSTRUCTIONS_KEY = "nexa_custom_instructions:";
 const DEEP_MODE_KEY = "nexa_deep_mode:";
+const SPICY_MODE_KEY = "nexa_spicy_mode:";
 const DRAWER_KEY = "nexa_drawer";
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -363,6 +366,69 @@ function setDeepMode(isOn) {
   saveDeepMode();
   renderDeepMode();
 }
+
+/*
+  ==========================================
+  MODO SAFADINHO
+  Toggle ao lado do enviar: pinta o site de
+  vermelho-sangue (classe .spicy no body, com
+  transição no CSS) e segue junto na requisição
+  do chat como flag `spicy`.
+  ==========================================
+*/
+
+let spicyMode = false;
+
+function spicyModeStorageKey() {
+  return SPICY_MODE_KEY + (currentUser ? currentUser.id : "anonymous");
+}
+
+function loadSpicyMode() {
+  try {
+    spicyMode = localStorage.getItem(spicyModeStorageKey()) === "true";
+  } catch (error) {
+    spicyMode = false;
+  }
+}
+
+function saveSpicyMode() {
+  try {
+    localStorage.setItem(spicyModeStorageKey(), spicyMode ? "true" : "false");
+  } catch (error) {
+    console.error("Erro ao salvar o modo safadinho:", error);
+  }
+}
+
+function renderSpicyMode() {
+  document.body.classList.toggle("spicy", spicyMode === true);
+
+  ["spicyButton", "imageSpicyButton"].forEach(id => {
+    const button = document.getElementById(id);
+
+    if (!button) {
+      return;
+    }
+
+    button.classList.toggle("active", spicyMode === true);
+    button.setAttribute("aria-pressed", spicyMode ? "true" : "false");
+  });
+}
+
+function setSpicyMode(isOn) {
+  spicyMode = isOn === true;
+  saveSpicyMode();
+  renderSpicyMode();
+}
+
+["spicyButton", "imageSpicyButton"].forEach(id => {
+  const button = document.getElementById(id);
+
+  if (!button) {
+    return;
+  }
+
+  button.addEventListener("click", () => setSpicyMode(!spicyMode));
+});
 
 /*
   Modo Criar imagem: o texto do composer vira o prompt
@@ -1786,6 +1852,7 @@ async function askNexa(text, deep, image, file) {
         memoryEnabled,
         customInstructions,
         deep: deep === true,
+        spicy: spicyMode === true,
         image: image || null,
         file: file || null
       }),
@@ -2118,6 +2185,12 @@ function renderChat() {
   a saudação e as sugestões ocupam o centro.
 */
 function renderWelcomeState() {
+  if (viewMode === "image") {
+    const chat = currentImageChat();
+    app.classList.toggle("welcome", !chat || chat.items.length === 0);
+    return;
+  }
+
   app.classList.toggle("welcome", history.length === 0);
 }
 
@@ -2306,6 +2379,11 @@ function deleteChat(id) {
 */
 
 function renderChatList() {
+  if (viewMode === "image") {
+    renderImageList();
+    return;
+  }
+
   if (!drawerChats) {
     return;
   }
@@ -2759,6 +2837,8 @@ function showAgentTab(agentName) {
     deep: "agentDeep",
     vision: "agentVision",
     intent: "agentIntent",
+    imagePrompt: "agentImagePrompt",
+    spicy: "agentSpicy",
     reminders: "agentReminders",
   };
   Object.entries(pages).forEach(([name, viewName]) => {
@@ -2770,6 +2850,8 @@ function showAgentTab(agentName) {
     deep: "Pesquisa profunda",
     vision: "Agente visual",
     intent: "Agente de tema/intenção",
+    imagePrompt: "Agente de imagem",
+    spicy: "Agente safadinho",
     reminders: "Lembretes",
   }[agentName] || "Agente";
   if (agentName === "deep") {
@@ -2787,6 +2869,23 @@ async function loadAgentSettings() {
     document.getElementById("visionPromptDisplay").value = data.vision.prompt;
     document.getElementById("intentModelDisplay").value = data.intent.model;
     document.getElementById("intentPromptDisplay").value = data.intent.prompt;
+
+    const imageAgent = data.image_prompt || {};
+
+    document.getElementById("imagePromptAgentStatus").value =
+      imageAgent.enabled ? "Ativado" : "Desativado";
+    document.getElementById("imagePromptModelDisplay").value =
+      imageAgent.model || "";
+    document.getElementById("imagePromptTextarea").value =
+      imageAgent.prompt || "";
+
+    const spicyAgent = data.spicy || {};
+
+    document.getElementById("spicyModelDisplay").value =
+      spicyAgent.model || "";
+    document.getElementById("spicyPromptDisplay").value =
+      spicyAgent.prompt || "";
+
     document.getElementById("reminderModelDisplay").value = data.reminders.model;
     document.getElementById("reminderRoundsDisplay").value = data.reminders.rounds;
   } catch (error) {
@@ -3349,6 +3448,736 @@ sendButton.addEventListener("click", () => {
 });
 
 /*
+  ==========================================
+  MODO IMAGEM (PÁGINA EMBUTIDA NO INDEX)
+  Visão parecida com o modo chat: hero, feed de
+  mensagens e composer. A barra lateral passa a
+  listar as imagens anteriores.
+  ==========================================
+*/
+
+const imageFeed = document.getElementById("imageFeed");
+const imageChat = document.getElementById("imageChat");
+const imageComposer = document.getElementById("imageComposer");
+const imagePromptInput = document.getElementById("imagePromptInput");
+const imageSendButton = document.getElementById("imageSendButton");
+const imageGallery = document.getElementById("imageGallery");
+const imageGalleryGrid = document.getElementById("imageGalleryGrid");
+const imageGalleryEmpty = document.getElementById("imageGalleryEmpty");
+const drawerSection = document.getElementById("drawerSection");
+
+let viewMode = "chat";
+let imageGenerating = false;
+
+const IMAGE_CHATS_KEY = "nexa_image_chats";
+const ACTIVE_IMAGE_CHAT_KEY = "nexa_active_image_chat";
+const VIEW_MODE_KEY = "nexa_view_mode";
+
+function loadViewMode() {
+  try {
+    return localStorage.getItem(VIEW_MODE_KEY) === "image"
+      ? "image"
+      : "chat";
+  } catch {
+    return "chat";
+  }
+}
+
+function saveViewMode() {
+  try {
+    localStorage.setItem(VIEW_MODE_KEY, viewMode);
+  } catch {
+    // Armazenamento indisponível: segue sem restaurar depois.
+  }
+}
+
+let imageChats = [];
+let activeImageChatId = null;
+
+function makeImageChat() {
+  return {
+    id:
+      "img_" +
+      Date.now().toString(36) +
+      "_" +
+      Math.random()
+        .toString(36)
+        .slice(2, 7),
+    title: "Nova criação",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    items: []
+  };
+}
+
+function imageChatTitle(items) {
+  const first = (items || []).find(
+    item => item && typeof item.prompt === "string" && item.prompt.trim()
+  );
+
+  if (!first) {
+    return "Nova criação";
+  }
+
+  const single = first.prompt.replace(/\s+/g, " ").trim();
+
+  return single.length > 42 ? single.slice(0, 42) + "…" : single;
+}
+
+function cleanImageItems(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+
+  return list
+    .filter(
+      item =>
+        item &&
+        typeof item.prompt === "string" &&
+        item.prompt.trim()
+    )
+    .map(item => {
+      const imageUrl =
+        typeof item.imageUrl === "string" ? item.imageUrl : "";
+      const status =
+        item.status === "pending" || item.status === "error"
+          ? item.status
+          : imageUrl
+            ? "done"
+            : "error";
+
+      return {
+        id: typeof item.id === "string" && item.id ? item.id : makeMessageId(),
+        prompt: item.prompt,
+        finalPrompt: typeof item.finalPrompt === "string" ? item.finalPrompt : "",
+        imageUrl,
+        createdAt: Number(item.createdAt) || Date.now(),
+        status,
+        error: typeof item.error === "string" ? item.error : ""
+      };
+    });
+}
+
+function normalizeImageChat(raw) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const items = cleanImageItems(raw.items);
+
+  return {
+    id:
+      typeof raw.id === "string" && raw.id
+        ? raw.id
+        : makeImageChat().id,
+    title:
+      typeof raw.title === "string" && raw.title
+        ? raw.title
+        : imageChatTitle(items),
+    createdAt: Number(raw.createdAt) || Date.now(),
+    updatedAt: Number(raw.updatedAt) || Date.now(),
+    items
+  };
+}
+
+function findImageChat(id) {
+  if (!id) {
+    return null;
+  }
+
+  return imageChats.find(item => item.id === id) || null;
+}
+
+function currentImageChat() {
+  return findImageChat(activeImageChatId);
+}
+
+function saveImageChats() {
+  try {
+    localStorage.setItem(IMAGE_CHATS_KEY, JSON.stringify(imageChats));
+    localStorage.setItem(ACTIVE_IMAGE_CHAT_KEY, activeImageChatId || "");
+  } catch {
+    // Armazenamento indisponível: segue só em memória.
+  }
+}
+
+function loadImageChats() {
+  imageChats = [];
+  activeImageChatId = null;
+
+  try {
+    const raw = localStorage.getItem(IMAGE_CHATS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+
+    if (Array.isArray(parsed)) {
+      imageChats = parsed.map(normalizeImageChat).filter(Boolean);
+    }
+  } catch (error) {
+    console.error("Erro ao carregar chats de imagem:", error);
+    imageChats = [];
+  }
+
+  /*
+    Migração do modelo antigo (lista única de imagens + sessão):
+    junta tudo num chat só para não perder o que já foi criado.
+  */
+  if (imageChats.length === 0) {
+    try {
+      const legacyRaw = localStorage.getItem("nexa_images");
+      const legacy = legacyRaw ? JSON.parse(legacyRaw) : [];
+
+      if (Array.isArray(legacy) && legacy.length > 0) {
+        const items = cleanImageItems(legacy);
+
+        if (items.length > 0) {
+          const migrated = makeImageChat();
+          migrated.items = items
+            .slice()
+            .sort((a, b) => a.createdAt - b.createdAt);
+          migrated.title = imageChatTitle(migrated.items);
+          migrated.createdAt = migrated.items[0].createdAt;
+          migrated.updatedAt = migrated.items[migrated.items.length - 1].createdAt;
+          imageChats.push(migrated);
+        }
+
+        localStorage.removeItem("nexa_images");
+        localStorage.removeItem("nexa_image_session");
+      }
+    } catch (error) {
+      console.error("Erro ao migrar imagens antigas:", error);
+    }
+  }
+
+  if (imageChats.length === 0) {
+    const fresh = makeImageChat();
+    imageChats.push(fresh);
+  }
+
+  let saved = null;
+
+  try {
+    saved = localStorage.getItem(ACTIVE_IMAGE_CHAT_KEY) || "";
+  } catch {
+    saved = null;
+  }
+
+  activeImageChatId = findImageChat(saved) ? saved : imageChats[0].id;
+
+  /*
+    Recarregou no meio de uma geração: o fetch morreu junto,
+    então o pendente vira erro em vez de ficar "gerando" para sempre.
+  */
+  imageChats.forEach(chat => {
+    chat.items.forEach(item => {
+      if (item.status === "pending" || (!item.imageUrl && !item.error)) {
+        item.status = "error";
+        item.error = item.error || "Geração interrompida (a página foi recarregada).";
+      }
+    });
+  });
+
+  saveImageChats();
+}
+
+function ensureActiveImageChat() {
+  let chat = currentImageChat();
+
+  if (chat) {
+    return chat;
+  }
+
+  if (imageChats.length === 0) {
+    const fresh = makeImageChat();
+    imageChats.unshift(fresh);
+    activeImageChatId = fresh.id;
+    saveImageChats();
+    return fresh;
+  }
+
+  activeImageChatId = imageChats[0].id;
+  saveImageChats();
+  return imageChats[0];
+}
+
+function setViewMode(mode) {
+  viewMode = mode === "image" ? "image" : "chat";
+
+  app.classList.toggle("image-mode", viewMode === "image");
+
+  chatFeedHidden(viewMode === "image");
+  imageFeed.hidden = viewMode !== "image";
+  imageComposer.hidden = viewMode !== "image";
+  imageGallery.hidden = viewMode !== "image";
+
+  drawerSection.textContent =
+    viewMode === "image" ? "Imagens anteriores" : "Chats anteriores";
+
+  renderChatList();
+  renderWelcomeState();
+  renderImageGallery();
+  saveViewMode();
+
+  if (viewMode === "image") {
+    renderImageChat();
+  }
+
+  scrollConversationToBottom();
+}
+
+function startNewImageChat() {
+  const current = currentImageChat();
+
+  /* Já está num chat de imagem em branco: não cria outro. */
+  if (current && current.items.length === 0) {
+    closeDrawer();
+    imagePromptInput.value = "";
+    imagePromptInput.focus();
+    return;
+  }
+
+  /*
+    Se sobrou um chat em branco, usa ele em vez de empilhar outro.
+  */
+  const blank = imageChats.find(
+    chat => chat.id !== activeImageChatId && chat.items.length === 0
+  );
+
+  if (blank) {
+    openImageChat(blank.id);
+    return;
+  }
+
+  const fresh = makeImageChat();
+
+  imageChats.unshift(fresh);
+  activeImageChatId = fresh.id;
+
+  saveImageChats();
+  renderImageChat();
+  renderChatList();
+  renderWelcomeState();
+  renderImageGallery();
+  closeDrawer();
+
+  imagePromptInput.value = "";
+  imagePromptInput.focus();
+}
+
+function chatFeedHidden(isHidden) {
+  chatFeed.hidden = isHidden;
+  composer.hidden = isHidden;
+  document.getElementById("suggestions").hidden = isHidden;
+}
+
+const chatFeed = document.getElementById("chatFeed");
+
+function renderImageChat() {
+  imageChat.innerHTML = "";
+
+  /*
+    Cada chat de imagem é isolado: só os itens do chat ativo
+    aparecem no feed. Abrir outro chat troca o conteúdo,
+    nunca soma.
+  */
+  const chat = currentImageChat();
+  const items = chat
+    ? chat.items.slice().sort((a, b) => a.createdAt - b.createdAt)
+    : [];
+
+  items.forEach(item => {
+      const group = document.createElement("div");
+      group.dataset.imageId = item.id;
+
+      const userMessage = document.createElement("div");
+      userMessage.className = "message user";
+
+      const userLabel = document.createElement("span");
+      userLabel.className = "label";
+      userLabel.textContent = "VOCÊ";
+
+      const userContent = document.createElement("div");
+      userContent.className = "message-content";
+
+      const userP = document.createElement("p");
+      userP.textContent = item.prompt;
+      userContent.appendChild(userP);
+
+      userMessage.append(userLabel, userContent);
+
+      const botMessage = document.createElement("div");
+      botMessage.className = "message nexa";
+
+      const botLabel = document.createElement("span");
+      botLabel.className = "label";
+      botLabel.textContent = "NEXA";
+
+      const botContent = document.createElement("div");
+      botContent.className = "message-content";
+
+      if (item.status === "pending" || (!item.imageUrl && !item.error)) {
+        const pendingP = document.createElement("p");
+        pendingP.textContent = "Traduzindo e detalhando o prompt, depois gerando a imagem...";
+        botContent.appendChild(pendingP);
+      } else if (item.status === "error" || !item.imageUrl) {
+        const errorP = document.createElement("p");
+        errorP.textContent =
+          "Não consegui gerar a imagem" +
+          (item.error ? ": " + item.error : ". Tente de novo.");
+        botContent.appendChild(errorP);
+      } else {
+        botContent.innerHTML = md.render(
+          `![Imagem gerada a partir do prompt](${item.imageUrl})`
+        );
+      }
+
+      botMessage.append(botLabel, botContent);
+
+      /* Prompt final em inglês, como o agente reescreveu. */
+      if (item.imageUrl && item.finalPrompt && item.finalPrompt !== item.prompt) {
+        const note = document.createElement("div");
+        note.className = "image-prompt-note";
+
+        const noteLabel = document.createElement("span");
+        noteLabel.className = "image-prompt-note-label";
+        noteLabel.textContent = "Prompt usado";
+
+        const noteText = document.createElement("span");
+        noteText.className = "image-prompt-note-text";
+        noteText.textContent = item.finalPrompt;
+
+        note.append(noteLabel, noteText);
+        botMessage.appendChild(note);
+      }
+
+      group.append(userMessage, botMessage);
+      imageChat.appendChild(group);
+    });
+
+  scrollConversationToBottom();
+}
+
+function renderImageGallery() {
+  imageGalleryGrid.innerHTML = "";
+
+  /*
+    A galeria fica só na página de boas-vindo, que só aparece com o
+    chat ativo vazio: por isso ela reúne as imagens de todos os chats.
+    Clicar abre o chat dono da imagem — o feed continua isolado.
+  */
+  const entries = [];
+
+  imageChats.forEach(chat => {
+    chat.items.forEach(item => {
+      if (item && item.imageUrl) {
+        entries.push({ chatId: chat.id, item });
+      }
+    });
+  });
+
+  entries.sort((a, b) => b.item.createdAt - a.item.createdAt);
+
+  entries.forEach(({ chatId, item }) => {
+      const thumb = document.createElement("img");
+
+      thumb.className = "image-gallery-thumb";
+      thumb.src = item.imageUrl;
+      thumb.alt = item.prompt;
+      thumb.title = item.prompt;
+
+      thumb.addEventListener("click", () => {
+        openImageChat(chatId);
+        scrollToImageItem(item.id);
+      });
+
+      imageGalleryGrid.appendChild(thumb);
+    });
+
+  imageGalleryEmpty.hidden = entries.length > 0;
+}
+
+function scrollToImageItem(id) {
+  const target = imageChat.querySelector(`[data-image-id="${id}"]`);
+
+  if (target) {
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+}
+
+function renderImageList() {
+  if (!drawerChats) {
+    return;
+  }
+
+  drawerChats.innerHTML = "";
+
+  const withContent = imageChats.filter(chat => chat.items.length > 0);
+
+  if (withContent.length === 0) {
+    const empty = document.createElement("p");
+
+    empty.className = "drawer-empty";
+    empty.textContent = "Nenhuma imagem ainda.";
+
+    drawerChats.appendChild(empty);
+
+    return;
+  }
+
+  withContent
+    .slice()
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .forEach(chat => {
+      const row = document.createElement("div");
+
+      row.className =
+        "drawer-chat" +
+        (chat.id === activeImageChatId ? " is-active" : "");
+
+      row.dataset.id = chat.id;
+
+      const open = document.createElement("button");
+
+      open.type = "button";
+      open.className = "drawer-chat-open";
+
+      const title = document.createElement("span");
+
+      title.className = "drawer-chat-title";
+      title.textContent = chat.title;
+      title.title = chat.title;
+
+      const when = document.createElement("span");
+
+      when.className = "drawer-chat-when";
+      when.textContent = formatWhen(chat.updatedAt);
+
+      open.append(title, when);
+
+      open.addEventListener("click", () => openImageChat(chat.id));
+
+      const remove = document.createElement("button");
+
+      remove.type = "button";
+      remove.className = "drawer-chat-delete";
+      remove.setAttribute(
+        "aria-label",
+        "Apagar conversa de imagem: " + chat.title
+      );
+
+      remove.textContent = "✕";
+
+      remove.addEventListener("click", () => deleteImageChat(chat.id));
+
+      row.append(open, remove);
+      drawerChats.appendChild(row);
+    });
+}
+
+function openImageChat(id) {
+  if (id === activeImageChatId) {
+    closeDrawer();
+    imagePromptInput.focus();
+    return;
+  }
+
+  const target = findImageChat(id);
+
+  if (!target) {
+    return;
+  }
+
+  activeImageChatId = target.id;
+
+  saveImageChats();
+  renderImageChat();
+  renderChatList();
+  renderWelcomeState();
+  renderImageGallery();
+  closeDrawer();
+
+  imagePromptInput.value = "";
+  imagePromptInput.focus();
+  scrollConversationToBottom();
+}
+
+function deleteImageChat(id) {
+  const index = imageChats.findIndex(item => item.id === id);
+
+  if (index === -1) {
+    return;
+  }
+
+  const wasActive = imageChats[index].id === activeImageChatId;
+
+  imageChats.splice(index, 1);
+
+  if (wasActive) {
+    if (imageChats.length === 0) {
+      const fresh = makeImageChat();
+      imageChats.push(fresh);
+    }
+
+    const next = imageChats[Math.min(index, imageChats.length - 1)];
+
+    activeImageChatId = next.id;
+  }
+
+  saveImageChats();
+  renderImageList();
+  renderImageChat();
+  renderWelcomeState();
+  renderImageGallery();
+}
+
+imageComposer.addEventListener("submit", async function (event) {
+  event.preventDefault();
+
+  if (imageGenerating) {
+    return;
+  }
+
+  const prompt = imagePromptInput.value.trim();
+
+  if (!prompt) {
+    return;
+  }
+
+  imagePromptInput.value = "";
+  imageGenerating = true;
+  imageSendButton.disabled = true;
+  imageComposer.classList.add("image-generating");
+
+  /*
+    O chat e o pedido entram na tela na hora do envio — igual ao
+    modo chat — e a imagem preenche o item quando chegar.
+  */
+  const targetChat = ensureActiveImageChat();
+  const targetChatId = targetChat.id;
+  const newItemId = makeMessageId();
+
+  targetChat.items.push({
+    id: newItemId,
+    prompt,
+    finalPrompt: "",
+    imageUrl: "",
+    createdAt: Date.now(),
+    status: "pending",
+    error: ""
+  });
+
+  targetChat.title = imageChatTitle(targetChat.items);
+  targetChat.updatedAt = Date.now();
+
+  saveImageChats();
+  renderImageChat();
+  renderChatList();
+  renderWelcomeState();
+  renderImageGallery();
+
+  const justCreated = imageChat.querySelector(
+    `[data-image-id="${newItemId}"]`
+  );
+
+  if (justCreated) {
+    justCreated.scrollIntoView({ behavior: "smooth", block: "center" });
+  } else {
+    scrollConversationToBottom();
+  }
+
+  function findPendingItem() {
+    const owner = findImageChat(targetChatId);
+
+    if (!owner) {
+      return null;
+    }
+
+    return {
+      owner,
+      item: owner.items.find(entry => entry && entry.id === newItemId) || null
+    };
+  }
+
+  try {
+    const response = await fetch("/api/images/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Nexa-Message-Key": messageKey
+      },
+      body: JSON.stringify({ prompt })
+    });
+
+    if (response.status === 401) {
+      showAuth();
+      throw new Error("Sua sessão expirou. Entre de novo.");
+    }
+
+    let data = null;
+
+    try {
+      data = await response.json();
+    } catch {
+      // Resposta não era JSON.
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        (data && data.error) || `Erro na API (HTTP ${response.status}).`
+      );
+    }
+
+    const found = findPendingItem();
+
+    if (!found || !found.item) {
+      return;
+    }
+
+    found.item.status = "done";
+    found.item.error = "";
+    found.item.finalPrompt = (data && data.prompt) || "";
+    found.item.imageUrl = (data && data.image_url) || "";
+    found.owner.updatedAt = Date.now();
+
+    if (!found.item.imageUrl) {
+      found.item.status = "error";
+      found.item.error = "O servidor não devolveu uma imagem.";
+    }
+
+    saveImageChats();
+    renderImageChat();
+    renderChatList();
+    renderWelcomeState();
+    renderImageGallery();
+
+    const created = imageChat.querySelector(
+      `[data-image-id="${newItemId}"]`
+    );
+
+    if (created) {
+      created.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  } catch (error) {
+    const found = findPendingItem();
+
+    if (found && found.item) {
+      found.item.status = "error";
+      found.item.error = error?.message || "erro desconhecido";
+
+      saveImageChats();
+      renderImageChat();
+      renderChatList();
+      renderWelcomeState();
+      renderImageGallery();
+    }
+  } finally {
+    imageGenerating = false;
+    imageSendButton.disabled = false;
+    imageComposer.classList.remove("image-generating");
+    imagePromptInput.focus();
+  }
+});
+
+/*
   Sugestões da página inicial: preenchem o campo
   ou ativam o modo Criar imagem.
 */
@@ -3357,8 +4186,8 @@ document.querySelectorAll(".suggestion").forEach(function (button) {
     const kind = button.dataset.suggestion;
 
     if (kind === "image") {
-      setImageMode(true);
-      input.focus();
+      setViewMode("image");
+      imagePromptInput.focus();
       return;
     }
 
@@ -3643,8 +4472,26 @@ composer.addEventListener(
 
 drawerNewChat.addEventListener(
   "click",
-  startNewChat
+  function () {
+    if (viewMode === "image") {
+      startNewImageChat();
+      return;
+    }
+
+    startNewChat();
+  }
 );
+
+const drawerImages = document.getElementById("drawerImages");
+
+if (drawerImages) {
+  drawerImages.addEventListener("click", function () {
+    setViewMode("image");
+    closeDrawer();
+    imagePromptInput.focus();
+    imagePromptInput.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  });
+}
 
 const studioButton = document.getElementById("studioButton");
 
@@ -4113,6 +4960,7 @@ function restoreDrawerPreference() {
 
 function bootApp() {
   loadChats();
+  loadImageChats();
   renderChat();
   renderChatList();
   loadReasoning();
@@ -4121,7 +4969,17 @@ function bootApp() {
   setupAttachUI();
   renderDeepMode();
   renderImageMode();
+  renderSpicyMode();
+  restoreViewMode();
   restoreDrawerPreference();
+}
+
+/*
+  Ao abrir o site volta para a página em que a pessoa
+  estava: modo imagem ou modo chat.
+*/
+function restoreViewMode() {
+  setViewMode(loadViewMode());
 }
 
 /*
@@ -4279,6 +5137,7 @@ function enterApp(user, issuedMessageKey) {
   ACTIVE_CHAT_KEY = "nexa_active_chat" + suffix;
   loadAccountSettings(user);
   loadDeepMode();
+  loadSpicyMode();
 
   /*
     Conversas de antes do login: a primeira conta que entra

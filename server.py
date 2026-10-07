@@ -369,6 +369,31 @@ def current_system_prompt(user_id=""):
     """System prompt efetivo da conta: o salvo ou o padrão embutido."""
     return get_custom_system_prompt(user_id) or SYSTEM_PROMPT
 
+
+def spicy_prompt_path(user_id):
+    safe_id = "".join(
+        char if char.isalnum() or char in "-_" else "_" for char in str(user_id)
+    )
+    return MEMORY_DIR / ("%s.spicy.txt" % safe_id)
+
+
+def get_custom_spicy_prompt(user_id):
+    """System prompt do agente safadinho salvo pela conta (ou None)."""
+    if not user_id:
+        return None
+
+    try:
+        content = spicy_prompt_path(user_id).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+    return content or None
+
+
+def current_spicy_prompt(user_id=""):
+    """System prompt efetivo do agente safadinho: o salvo ou o padrão."""
+    return get_custom_spicy_prompt(user_id) or SPICY_AGENT_PROMPT
+
 def deep_settings_path(user_id):
     safe_id = "".join(
         char if char.isalnum() or char in "-_" else "_" for char in str(user_id)
@@ -715,6 +740,75 @@ IMAGE_WATERMARK = os.environ.get("IMAGE_WATERMARK", "false").strip().lower() in 
 }
 MAX_PROMPT_LENGTH = max(100, min(10000, int(os.environ.get("MAX_PROMPT_LENGTH", "4000"))))
 
+# Agente que reescreve o prompt do usuário antes da geração: traduz para
+# inglês e completa com detalhes visuais, de luz, estilo e composição.
+# IMAGE_PROMPT_AGENT desliga (valores falsos) e devolve o texto original.
+IMAGE_PROMPT_AGENT = os.environ.get(
+    "IMAGE_PROMPT_AGENT", "true"
+).strip().lower() not in {"0", "false", "no", "off", ""}
+IMAGE_PROMPT_AGENT_TIMEOUT = max(
+    15, int(os.environ.get("IMAGE_PROMPT_AGENT_TIMEOUT", "60"))
+)
+IMAGE_PROMPT_AGENT_MAX_TOKENS = max(
+    120, min(2000, int(os.environ.get("IMAGE_PROMPT_AGENT_MAX_TOKENS", "600")))
+)
+
+IMAGE_PROMPT_AGENT_PROMPT = (
+    "You are the image prompt agent for NEXA. You receive what a user wrote "
+    "about the image they want, in any language, and you rewrite it as a "
+    "single English prompt for a text-to-image model.\n\n"
+    "Rules:\n"
+    "- Always answer in English, even if the request is in another language.\n"
+    "- Keep the subject, the action and the intent exactly as asked. Never "
+    "change who or what is depicted, and never add text, logos or watermarks "
+    "unless the user explicitly asked for words.\n"
+    "- Enrich the prompt with concrete visual detail that fits the request: "
+    "setting and background, composition and framing, camera angle and "
+    "lens, lighting and time of day, colour palette, materials and textures, "
+    "mood, and rendering style (for example photograph, illustration, 3D "
+    "render, oil painting, anime, pixel art) when the user leaves it open.\n"
+    "- Do not invent a specific real person, brand or copyrighted character. "
+    "Describe the style instead when the user asks for something like that.\n"
+    "- Do not contradict the user. If the request is vague, choose sensible "
+    "defaults rather than asking questions.\n"
+    "- Return one dense paragraph, no headings, no lists, no quotes, no "
+    "explanation and no translation notes. 40 to 90 words."
+)
+
+
+
+SPICY_AGENT_PROMPT = (
+    "You are the spicy image prompt agent for NEXA. You receive what a user wrote "
+    "about the image they want, in any language, and you rewrite it as a single, "
+    "highly sensual English prompt for a text-to-image model.\n\n"
+    "Rules:\n"
+    "- Always answer in English, even if the request is in another language.\n"
+    "- Keep the subject, the action and the core intent exactly as asked. Never "
+    "change who or what is depicted, and never add text, logos or watermarks "
+    "unless the user explicitly asked for words.\n"
+    "- Amplify the sensual and erotic charge: describe bodies with intimate detail "
+    "(skin texture, curves, wetness, tension, breath, soft light on skin, "
+    "parted lips, half-closed eyes, subtle or explicit exposure according to the request), "
+    "add charged atmosphere (dim red light, silk sheets, sweat, smoke, candlelight, "
+    "rain on windows, low-angle intimate framing), and make the mood deliberately "
+    "provocative, seductive and charged without turning it into pure pornography "
+    "unless the user asked for hardcore.\n"
+    "- Enrich with concrete visual detail that fits a sensual request: setting, "
+    "composition, camera angle (often close-up, low angle, over-the-shoulder, "
+    "intimate POV), lighting (moody, cinematic, soft key light on skin, rim light), "
+    "colour palette (deep reds, warm skin tones, blacks, golds), materials and "
+    "textures (silk, wet skin, lace, leather, droplets), mood, and rendering style "
+    "(photorealistic, cinematic, soft erotic illustration, etc.) when the user leaves it open.\n"
+    "- Do not invent a specific real person, brand or copyrighted character. "
+    "Describe the style instead when the user asks for something like that.\n"
+    "- Do not contradict the user. If the request is vague, lean into the most "
+    "sensual and charged interpretation that still respects the original idea.\n"
+    "- Return one dense, flowing paragraph, no headings, no lists, no quotes, "
+    "no explanation and no translation notes. 50 to 110 words. Make it deliciously "
+    "detailed and erotic."
+)
+
+
 
 def _image_configured():
     return bool(IMAGE_API_KEY and IMAGE_MODEL)
@@ -750,6 +844,60 @@ def _image_save(encoded_image):
     filename = f"{uuid.uuid4().hex}.{extension or 'png'}"
     (IMAGE_OUTPUT_DIR / filename).write_bytes(image_bytes)
     return filename
+
+
+def image_prompt_agent_model():
+    """Modelo do agente de imagem: o modelo base padrão."""
+    return MODEL
+
+
+def expand_image_prompt(prompt):
+    """
+    Agente de imagem: traduz o pedido do usuário para inglês e completa com
+    detalhes de cena, luz, estilo e composição antes de chamar o modelo de
+    imagem. Devolve (prompt_usado, reescrito).
+
+    Qualquer falha no agente não impede a geração: o prompt original segue
+    para o modelo de imagem.
+    """
+    original = str(prompt or "").strip()
+
+    if not IMAGE_PROMPT_AGENT or not original:
+        return original, ""
+
+    model = image_prompt_agent_model()
+
+    if not API_KEY or not model:
+        return original, ""
+
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": IMAGE_PROMPT_AGENT_PROMPT},
+            {"role": "user", "content": original[:MAX_PROMPT_LENGTH]},
+        ],
+        "stream": False,
+        "max_tokens": IMAGE_PROMPT_AGENT_MAX_TOKENS,
+    }
+
+    try:
+        response = requests.post(
+            API_BASE + "/chat/completions",
+            headers=auth_headers(),
+            json=body,
+            timeout=(CONNECT_TIMEOUT, IMAGE_PROMPT_AGENT_TIMEOUT),
+        )
+        if response.status_code != 200:
+            raise RuntimeError("HTTP %d" % response.status_code)
+        rewritten = " ".join((extract_text(response.json()) or "").split())
+    except (requests.RequestException, RuntimeError, ValueError) as error:
+        print("[NEXA-IMAGEM-PROMPT] agente indisponível; usando o texto original: %s" % error)
+        return original, ""
+
+    if not rewritten:
+        return original, ""
+
+    return rewritten[:MAX_PROMPT_LENGTH], rewritten
 
 
 @app.get("/api/images/status")
@@ -794,6 +942,10 @@ def generate_image():
         return jsonify({"error": f"O texto deve ter no máximo {MAX_PROMPT_LENGTH} caracteres."}), 400
     if not _image_configured():
         return jsonify({"error": "Configure API_IMAGE e MODEL_IMAGE no servidor."}), 503
+
+    # Agente de prompt: o texto do usuário vira um prompt em inglês,
+    # mais detalhado, antes de ir para o modelo de imagem.
+    prompt, rewritten_prompt = expand_image_prompt(prompt)
 
     payload = {
         "model": IMAGE_MODEL,
@@ -845,6 +997,11 @@ def generate_image():
         "provider": "Novita AI",
         "image_url": f"/generated/{filename}",
         "model": IMAGE_MODEL,
+        "prompt": rewritten_prompt or prompt,
+        "prompt_agent": {
+            "enabled": IMAGE_PROMPT_AGENT,
+            "model": image_prompt_agent_model() if IMAGE_PROMPT_AGENT else "",
+        },
         "duration_ms": round((time.perf_counter() - started) * 1000),
     })
 
@@ -3040,12 +3197,13 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None,
 
 def request_body(stream, messages, memories, reasoning, custom_instructions="",
                  memory_enabled=True, user_id="", deep_report="",
-                 thinking_report=""):
+                 thinking_report="", system_prompt_override=""):
     model = model_for_request(reasoning, messages)
     body = {
         "model": model,
         "messages": build_messages(
             messages, memories, custom_instructions, user_id, deep_report,
+            system_prompt_override=system_prompt_override,
             model_name=model, reasoning_level=reasoning,
             thinking_report=thinking_report,
         ),
@@ -4136,7 +4294,7 @@ def parse_data_line(raw):
 def finish_stream_with_tools(user_id, messages, memories, reasoning,
                              custom_instructions, assistant_text, calls,
                              memory_enabled=True, thinking_report="",
-                             deep_report=""):
+                             deep_report="", system_prompt_override=""):
     """
     O modelo pediu ferramenta. Executamos, devolvemos os resultados no papel
     "tool" e pedimos a continuação da resposta.
@@ -4201,6 +4359,7 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
                     memory_enabled, user_id,
                     deep_report=deep_report,
                     thinking_report=thinking_report,
+                    system_prompt_override=system_prompt_override,
                 ),
                 timeout=(10, 60),
             )
@@ -4278,7 +4437,8 @@ def probe_stream(lines):
 def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                        user_id, memory_enabled=True, messages=None,
                        memories=None, reasoning=None, custom_instructions="",
-                       thinking_report="", deep_report=""):
+                       thinking_report="", deep_report="",
+                       system_prompt_override=""):
     """
     Traduz o stream do modelo nos eventos SSE da NEXA. Fica em função
     separada para a pesquisa profunda reaproveitar: lá o relatório entra
@@ -4356,6 +4516,7 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                             memory_enabled,
                             thinking_report,
                             deep_report,
+                            system_prompt_override,
                         )
                     except Exception as error:  # noqa: BLE001
                         print("[NEXA] falha inesperada nas ferramentas:", error)
@@ -4392,7 +4553,8 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
 
 def make_stream_response(lines, user_id, user_message, memory_enabled=True,
                          messages=None, memories=None, reasoning=None,
-                         custom_instructions="", thinking_report=""):
+                         custom_instructions="", thinking_report="",
+                         system_prompt_override=""):
     probe = probe_stream(lines)
 
     if probe is None:
@@ -4407,6 +4569,7 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
                 user_id, memory_enabled, messages, memories, reasoning,
                 custom_instructions,
                 thinking_report,
+                system_prompt_override=system_prompt_override,
             )
         ),
         headers=sse_headers(),
@@ -4414,7 +4577,7 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
 
 def make_deep_response(user_id, user_message, messages, memories, reasoning,
                        custom_instructions="", memory_enabled=True,
-                       thinking_report=""):
+                       thinking_report="", system_prompt_override=""):
     """
     Pesquisa profunda pedida pelo botão "+" do composer: a pergunta vai
     direto para o pesquisador (agente separado, sem o contexto da
@@ -4576,6 +4739,7 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
                     True, messages, memories, reasoning, custom_instructions,
                     memory_enabled, user_id, report,
                     thinking_report=final_thinking_report,
+                    system_prompt_override=system_prompt_override,
                 ),
                 stream=True,
                 timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
@@ -4619,6 +4783,7 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
             custom_instructions,
             final_thinking_report,
             report,
+            system_prompt_override,
         )
 
     return Response(stream_with_context(generate()), headers=sse_headers())
@@ -4627,6 +4792,7 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
 def make_thinking_response(
     user_id, user_message, messages, memories, reasoning,
     custom_instructions="", memory_enabled=True,
+    system_prompt_override="",
 ):
     """Executa o agente de pensamento em segundo plano e transmite progresso."""
     def generate():
@@ -4678,6 +4844,7 @@ def make_thinking_response(
                 json=request_body(
                     True, messages, memories, reasoning, custom_instructions,
                     memory_enabled, user_id, thinking_report=report,
+                    system_prompt_override=system_prompt_override,
                 ),
                 stream=True,
                 timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
@@ -4705,6 +4872,7 @@ def make_thinking_response(
             lines, reasoning_chunks, first_text, tool_calls, user_id,
             memory_enabled, messages, memories, reasoning,
             custom_instructions, report,
+            system_prompt_override=system_prompt_override,
         )
 
     return Response(stream_with_context(generate()), headers=sse_headers())
@@ -4713,6 +4881,7 @@ def make_thinking_response(
 def make_blocking_response(
     user_id, user_message, messages, memories, reasoning,
     custom_instructions="", memory_enabled=True, thinking_report="",
+    system_prompt_override="",
 ):
     try:
         response = requests.post(
@@ -4721,6 +4890,7 @@ def make_blocking_response(
             json=request_body(
                 False, messages, memories, reasoning, custom_instructions,
                 memory_enabled, user_id, thinking_report=thinking_report,
+                system_prompt_override=system_prompt_override,
             ),
             timeout=(10, 60),
         )
@@ -4762,6 +4932,7 @@ def make_blocking_response(
             user_id, messages, memories, reasoning,
             custom_instructions, text, calls, memory_enabled,
             thinking_report,
+            system_prompt_override=system_prompt_override,
         )
         follow_up = follow_up or ""
 
@@ -5405,18 +5576,26 @@ def chat():
 
     memories = get_memories(user_id) if memory_enabled else []
 
+    # Botão 😈 do composer: o agente safadinho assume com system prompt
+    # próprio em todos os caminhos de resposta (stream, bloqueante,
+    # pensamento e pesquisa profunda).
+    spicy = body.get("spicy") is True
+    spicy_override = current_spicy_prompt(user_id) if spicy else ""
+
     # Botão "+" do composer: manda a pergunta direto para o pesquisador e
     # devolve o relatório para o modelo normal escrever a resposta.
     if body.get("deep") is True and user_message:
         return make_deep_response(
             user_id, user_message, messages, memories, reasoning,
             custom_instructions, memory_enabled,
+            system_prompt_override=spicy_override,
         )
 
     if reasoning in THINKING_AGENT_ROUNDS and reasoning != "none":
         return make_thinking_response(
             user_id, user_message, messages, memories, reasoning,
             custom_instructions, memory_enabled,
+            system_prompt_override=spicy_override,
         )
 
     thinking_report = ""
@@ -5427,6 +5606,7 @@ def chat():
             json=request_body(
                 True, messages, memories, reasoning, custom_instructions,
                 memory_enabled, user_id, thinking_report=thinking_report,
+                system_prompt_override=spicy_override,
             ),
             stream=True,
             timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
@@ -5450,6 +5630,7 @@ def chat():
             reasoning,
             custom_instructions,
             thinking_report,
+            system_prompt_override=spicy_override,
         )
 
         if streamed is not None:
@@ -5464,6 +5645,7 @@ def chat():
     return make_blocking_response(
         user_id, user_message, messages, memories, reasoning,
         custom_instructions, memory_enabled, thinking_report,
+        system_prompt_override=spicy_override,
     )
 
 
@@ -5640,6 +5822,15 @@ def read_agent_settings():
         "intent": {
             "model": model_for_reasoning("none"),
             "prompt": DEEP_INTENT_PROMPT,
+        },
+        "image_prompt": {
+            "model": image_prompt_agent_model(),
+            "prompt": IMAGE_PROMPT_AGENT_PROMPT,
+            "enabled": IMAGE_PROMPT_AGENT,
+        },
+        "spicy": {
+            "model": MODEL,
+            "prompt": current_spicy_prompt("acct_%d" % user["id"]),
         },
         "reminders": {
             "model": model_for_reasoning("none"),
