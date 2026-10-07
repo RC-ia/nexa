@@ -5379,6 +5379,31 @@ def studio_file():
     return jsonify({"caminho": caminho, "conteudo": content})
 
 
+@app.delete("/api/studio/file")
+def studio_file_delete():
+    user = current_user()
+
+    if user is None:
+        return jsonify({"error": "Faça login para excluir arquivos."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    caminho = request.args.get("caminho", "")
+    path = studio_path("acct_%d" % user["id"], caminho)
+
+    if path is None or not path.is_file():
+        return jsonify({"error": "Arquivo não encontrado."}), 404
+
+    try:
+        path.unlink()
+    except OSError as error:
+        return jsonify({"error": "Não foi possível excluir: %s" % error}), 500
+
+    return jsonify({"ok": True, "caminho": caminho})
+
+
 @app.get("/api/studio/raw")
 def studio_raw():
     user = current_user()

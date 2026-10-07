@@ -459,7 +459,7 @@ tokens de saída (`STUDIO_READ_LIMIT`, `STUDIO_WRITE_LIMIT`,
 `STUDIO_LIST_LIMIT`, `STUDIO_TOOL_ROUNDS` e `STUDIO_MAX_OUTPUT_TOKENS`).
 
 A interface está em `/studio.html` e o servidor oferece `GET /api/studio/files`,
-`GET /api/studio/file`, `GET /api/studio/raw` e `POST /api/studio/chat`.
+`GET /api/studio/file`, `DELETE /api/studio/file`, `GET /api/studio/raw` e `POST /api/studio/chat`.
 
 ## Reforço de raciocínio
 

@@ -16,6 +16,7 @@ const viewerTabs = document.getElementById("viewerTabs");
 const viewerPanels = document.getElementById("viewerPanels");
 const viewerEmpty = document.getElementById("viewerEmpty");
 const btnStop = document.getElementById("btnStop");
+const newChatButton = document.getElementById("newChat");
 
 const STORAGE_PREFIX = "nexa_studio:";
 let HISTORY_KEY = "";
@@ -31,6 +32,7 @@ let messageKey = "";
 let history = [];
 let busy = false;
 let abortController = null;
+let sendSeq = 0;
 let openTabs = new Map();
 let activeTabPath = "";
 let treeOpenPaths = new Set();
@@ -170,6 +172,7 @@ async function sendMessage(text) {
   }
 
   busy = true;
+  const mySeq = ++sendSeq;
   abortController = new AbortController();
   input.value = "";
   setStatus("Pensando…", true);
@@ -270,6 +273,12 @@ async function sendMessage(text) {
     bubble.innerHTML = renderMarkdown(fullText);
   }
 
+  // A conversa pode ter sido reiniciada no meio da geração; nesse caso o
+  // histórico já foi limpo e o status já foi zerado — não escreve por cima.
+  if (mySeq !== sendSeq) {
+    return;
+  }
+
   if (!fullText.trim()) {
     article.remove();
   } else {
@@ -289,6 +298,18 @@ function stopGeneration() {
 }
 
 btnStop.addEventListener("click", stopGeneration);
+
+newChatButton.addEventListener("click", () => {
+  sendSeq += 1;
+  if (busy) {
+    stopGeneration();
+  }
+  history = [];
+  chat.innerHTML = "";
+  saveHistory();
+  setStatus("Pronto", false);
+  input.focus();
+});
 
 composer.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -420,6 +441,43 @@ async function refreshFiles() {
   } catch (error) { }
 }
 
+async function deleteFile(path, name) {
+  if (!window.confirm('Excluir "' + name + '"? Essa ação não pode ser desfeita.')) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/studio/file?caminho=" + encodeURIComponent(path), {
+      method: "DELETE",
+      headers: { "X-Nexa-Message-Key": messageKey },
+    });
+
+    if (response.status === 401) {
+      localStorage.removeItem(KEY_PREFIX + accountUsername);
+      location.replace("/");
+      return;
+    }
+
+    if (!response.ok) {
+      let reason = "Não foi possível excluir o arquivo.";
+      try {
+        const data = await response.json();
+        reason = data.error || reason;
+      } catch (error) { }
+      window.alert(reason);
+      return;
+    }
+
+    if (openTabs.has(path)) {
+      closeTab(path);
+    }
+
+    await refreshFiles();
+  } catch (error) {
+    window.alert("Sem conexão com o Estúdio.");
+  }
+}
+
 function buildTreeStructure(files) {
   const root = { name: "", path: "", type: "folder", children: {}, meta: null };
 
@@ -513,14 +571,30 @@ function renderFileTree() {
         </svg>
         <span class="studio-file-name">${escapeHtml(node.name)}</span>
         <span class="studio-file-meta">${sizeStr}${modStr ? " · " + modStr : ""}</span>
+        <button type="button" class="studio-file-delete" title="Excluir arquivo" aria-label="Excluir ${escapeHtml(node.name)}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            <line x1="10" y1="11" x2="10" y2="17"></line>
+            <line x1="14" y1="11" x2="14" y2="17"></line>
+          </svg>
+        </button>
       `;
 
       div.addEventListener("click", () => openTab(node.path));
       div.addEventListener("keydown", (e) => {
+        if (e.target !== div) {
+          return;
+        }
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           openTab(node.path);
         }
+      });
+
+      div.querySelector(".studio-file-delete").addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteFile(node.path, node.name);
       });
 
       if (currentFilter && !node.name.toLowerCase().includes(currentFilter) &&
