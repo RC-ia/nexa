@@ -435,6 +435,15 @@ body {
   cursor: not-allowed;
 }
 
+/*
+  Respiro de 2px entre os botões do topo da gaveta:
+  Nova conversa, Chat e Imagens.
+*/
+#drawerChat,
+#drawerImages {
+  margin-top: 2px;
+}
+
 
 .drawer-section {
   margin: 20px 0 8px;

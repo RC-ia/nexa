@@ -21,7 +21,7 @@
 
   <title>NEXA</title>
 
-  <link rel="stylesheet" href="style.css?v=38">
+  <link rel="stylesheet" href="style.css?v=39">
 </head>
 
 <body>
@@ -719,7 +719,7 @@
             <button type="button" class="settings-category agent-settings-tab" data-agent-tab="vision" role="tab">Agente visual<span>Modelo e instruções da análise de imagem</span></button>
             <button type="button" class="settings-category agent-settings-tab" data-agent-tab="intent" role="tab">Agente de tema/intenção<span>Interpretação antes da pesquisa profunda</span></button>
             <button type="button" class="settings-category agent-settings-tab" data-agent-tab="imagePrompt" role="tab">Agente de imagem<span>Traduz e detalha o prompt antes de gerar</span></button>
-            <button type="button" class="settings-category agent-settings-tab" data-agent-tab="spicy" role="tab">Agente safadinho<span>Persona do botão 😈 no composer</span></button>
+            <button type="button" class="settings-category agent-settings-tab" data-agent-tab="spicy" role="tab">Agente safadinho<span>Versão sensual do agente de imagem</span></button>
             <button type="button" class="settings-category agent-settings-tab" data-agent-tab="reminders" role="tab">Lembretes<span>Agente que executa e responde lembretes</span></button>
           </div>
         </section>
@@ -761,14 +761,14 @@
           <label class="settings-field"><span>Estado do agente</span><input type="text" id="imagePromptAgentStatus" readonly></label>
           <label class="settings-field"><span>Modelo do agente de imagem</span><input type="text" id="imagePromptModelDisplay" readonly></label>
           <label class="settings-field"><span>Instruções do agente de imagem</span><textarea id="imagePromptTextarea" rows="10" readonly></textarea></label>
-          <p class="settings-description">Este agente recebe o texto do usuário, traduz para inglês e acrescenta detalhes de cena, luz, estilo e composição antes de enviar ao modelo de imagem. Desligado com IMAGE_PROMPT_AGENT=false no servidor.</p>
+          <p class="settings-description">Este agente recebe o texto do usuário, traduz para inglês e acrescenta detalhes de cena, luz, estilo e composição antes de enviar ao modelo de imagem. Desligado com IMAGE_PROMPT_AGENT=false no servidor. Com o botão 😈 ativo, o agente safadinho entra no lugar dele.</p>
         </section>
 
         <section id="settingsAgentSpicy" class="settings-view agent-settings-page" hidden>
           <button type="button" class="settings-back" data-agent-back>‹ Agentes</button>
           <label class="settings-field"><span>Modelo do agente safadinho</span><input type="text" id="spicyModelDisplay" readonly></label>
           <label class="settings-field"><span>System prompt do agente safadinho</span><textarea id="spicyPromptDisplay" rows="12" readonly></textarea></label>
-          <p class="settings-description">Este agente assume quando o botão 😈 está ativo: substitui o system prompt padrão pela persona acima. O modelo e o prompt são definidos pelo servidor.</p>
+          <p class="settings-description">Este agente assume quando o botão 😈 do modo imagem está ativo: no lugar das instruções do agente de imagem, ele reescreve o pedido como um prompt sensual em inglês antes de gerar. O modelo e o prompt são definidos pelo servidor.</p>
         </section>
 
         <section id="settingsAgentReminders" class="settings-view agent-settings-page" hidden>
