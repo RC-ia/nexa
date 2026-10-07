@@ -403,6 +403,8 @@ O chat aceita:
 - imagens;
 - arquivos de texto, código e configuração.
 
+A primeira mensagem também pode gerar automaticamente o título da conversa por meio de `POST /api/chat/title`; se essa geração falhar, o backend usa um fallback baseado na própria mensagem.
+
 Arquivos de texto/código são limitados a 2 MiB e a extensões conhecidas, como
 `.txt`, `.md`, `.json`, `.html`, `.css`, `.js`, `.ts`, `.py`, `.java`,
 `.cpp`, `.c`, `.go`, `.rs`, `.php`, `.sql`, `.yaml` e `.toml`.
@@ -530,7 +532,7 @@ A gaveta lateral abre **Imagens**, que possui:
 - campo de prompt;
 - modo 😈 opcional;
 - galeria local das imagens da sessão;
-- armazenamento dos arquivos produzidos em `generated/` no servidor.
+- armazenamento dos arquivos produzidos em `generated/` no servidor e galeria mantida no navegador.
 
 A rota de geração é:
 
