@@ -1903,6 +1903,40 @@ body {
 
 
 /* =========================
+   ÍCONES DE BOTÃO CENTRALIZADOS
+   Os glifos de texto (☰ ✕ ➤ ◉ ☎ 😈 …) ficam fora do centro quando
+   seguem a baseline do botão. Cada ícone vira caixa própria, centrada
+   no meio exato, e os botões que só têm glifo fecham a linha.
+========================= */
+
+button > span[aria-hidden="true"]:not(.reasoning-meter),
+.drawer-icon,
+.send-icon,
+.reasoning-icon,
+.reasoning-caret,
+.thinking-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  line-height: 1;
+}
+
+.composer > button,
+.drawer-close,
+.drawer-chat-delete,
+.image-preview button {
+  line-height: 1;
+}
+
+.image-preview button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+
+/* =========================
    RACIOCÍNIO (FORÇA)
 ========================= */
 
