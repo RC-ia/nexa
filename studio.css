@@ -493,6 +493,91 @@
   outline-offset: 2px;
 }
 
+/*
+  Conversas salvas: só aparece enquanto o chat ativo está vazio — é a
+  tela de boas-vindas do Estúdio, e some da "aba" no primeiro prompt.
+*/
+.studio-chat-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 2px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--studio-border) transparent;
+}
+
+.studio-chat-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.studio-chat-list::-webkit-scrollbar-thumb {
+  background: var(--studio-border);
+  border-radius: 3px;
+}
+
+.studio-chat-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.studio-chat-list-label {
+  padding: 6px 8px 2px;
+  color: var(--studio-accent-light);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.studio-chat-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--studio-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text, #f2eef7);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.studio-chat-list-item:hover {
+  background: var(--studio-accent-dim);
+  border-color: var(--studio-accent);
+}
+
+.studio-chat-list-item:focus-visible {
+  outline: 2px solid var(--studio-accent);
+  outline-offset: 2px;
+}
+
+.studio-chat-list-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-chat-list-when {
+  flex-shrink: 0;
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+.studio-chat-list-hint {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  opacity: 0.55;
+}
+
 .studio-chat-resize {
   position: absolute;
   top: 10px;

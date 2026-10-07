@@ -931,6 +931,32 @@ def generated_image(filename):
     return send_from_directory(IMAGE_OUTPUT_DIR, filename, max_age=86400)
 
 
+@app.delete("/generated/<path:filename>")
+def delete_generated_image(filename):
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para apagar imagens."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    # Só o nome base dentro da pasta de saída: nada escapa por traversal.
+    name = os.path.basename(filename.replace("\\", "/"))
+    target = IMAGE_OUTPUT_DIR / name
+
+    if not target.is_file():
+        # Apagar é idempotente: já sumiu, sucesso.
+        return jsonify({"ok": True, "apagado": False})
+
+    try:
+        target.unlink()
+    except OSError as error:
+        return jsonify({"error": "Não foi possível apagar: %s" % error}), 500
+
+    return jsonify({"ok": True, "apagado": True, "caminho": name})
+
+
 @app.post("/api/images/generate")
 def generate_image():
     user = current_user()

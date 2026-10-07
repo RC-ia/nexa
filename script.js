@@ -2303,6 +2303,42 @@ function openChat(id) {
   input.focus();
 }
 
+/*
+  Imagens geradas ficam em /generated/<arquivo> e cada geração cria um
+  arquivo único (uuid): quando o chat que citou a imagem é apagado, o
+  arquivo some junto. A galeria é derivada dos chats, então acompanha.
+*/
+function collectGeneratedImages(texts) {
+  const names = new Set();
+  const pattern = /\/generated\/([^)\s"'#?]+)/g;
+
+  (texts || []).forEach(text => {
+    const value = String(text == null ? "" : text);
+    let match;
+
+    while ((match = pattern.exec(value))) {
+      let name = match[1];
+      try {
+        name = decodeURIComponent(name);
+      } catch (error) {
+        // Sequência de escape inválida: usa o nome como está.
+      }
+      names.add(name);
+    }
+  });
+
+  return Array.from(names);
+}
+
+function deleteGeneratedImages(texts) {
+  collectGeneratedImages(texts).forEach(name => {
+    api(
+      "DELETE",
+      "/generated/" + encodeURIComponent(name)
+    ).catch(function () {});
+  });
+}
+
 function deleteChat(id) {
   const index = chats.findIndex(
     item => item.id === id
@@ -2312,7 +2348,8 @@ function deleteChat(id) {
     return;
   }
 
-  const wasActive = chats[index].id === activeChatId;
+  const removed = chats[index];
+  const wasActive = removed.id === activeChatId;
 
   chats.splice(index, 1);
 
@@ -2346,6 +2383,10 @@ function deleteChat(id) {
     "DELETE",
     "/api/chats/" + encodeURIComponent(id)
   ).catch(function () {});
+
+  deleteGeneratedImages(
+    (removed.messages || []).map(message => message && message.content)
+  );
 
   saveChats();
   renderChatList();
@@ -3988,7 +4029,8 @@ function deleteImageChat(id) {
     return;
   }
 
-  const wasActive = imageChats[index].id === activeImageChatId;
+  const removed = imageChats[index];
+  const wasActive = removed.id === activeImageChatId;
 
   imageChats.splice(index, 1);
 
@@ -4002,6 +4044,10 @@ function deleteImageChat(id) {
 
     activeImageChatId = next.id;
   }
+
+  deleteGeneratedImages(
+    (removed.items || []).map(item => item && item.imageUrl)
+  );
 
   saveImageChats();
   renderImageList();
@@ -4752,6 +4798,16 @@ document.getElementById("clearChats").addEventListener("click", async function (
     window.alert("Não deu para apagar no servidor: " + error.message);
     return;
   }
+
+  const texts = [];
+  chats.forEach(chat => {
+    (chat.messages || []).forEach(message => {
+      if (message) {
+        texts.push(message.content);
+      }
+    });
+  });
+  deleteGeneratedImages(texts);
 
   chats = [];
   history.length = 0;

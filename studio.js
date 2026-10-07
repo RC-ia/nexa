@@ -17,9 +17,12 @@ const viewerPanels = document.getElementById("viewerPanels");
 const viewerEmpty = document.getElementById("viewerEmpty");
 const btnStop = document.getElementById("btnStop");
 const newChatButton = document.getElementById("newChat");
+const chatList = document.getElementById("chatList");
 
 const STORAGE_PREFIX = "nexa_studio:";
 let HISTORY_KEY = "";
+let CHATS_KEY = "";
+let ACTIVE_CHAT_KEY = "";
 const HISTORY_LIMIT = 40;
 const KEY_PREFIX = "nexa_message_key:";
 const FILES_WIDTH_KEY = "nexa_studio_files_width";
@@ -30,6 +33,8 @@ let TREE_OPEN_KEY = "";
 let accountUsername = "";
 let messageKey = "";
 let history = [];
+let studioChats = [];
+let activeChatId = "";
 let busy = false;
 let abortController = null;
 let sendSeq = 0;
@@ -64,6 +69,8 @@ function escapeHtml(text) {
 function configureAccountStorage(accountId) {
   const prefix = STORAGE_PREFIX + encodeURIComponent(accountId) + ":";
   HISTORY_KEY = prefix + "history";
+  CHATS_KEY = prefix + "chats";
+  ACTIVE_CHAT_KEY = prefix + "active";
   TABS_KEY = prefix + "tabs";
   TREE_OPEN_KEY = prefix + "tree_open";
 }
@@ -136,24 +143,253 @@ function describeTool(event) {
   return event.detail ? label + " " + event.detail : label;
 }
 
+/*
+  Conversas do Estúdio: cada chat fica salvo em localStorage por conta.
+  Só o chat ativo vive em `history`; ao trocar, o anterior é gravado de
+  volta antes de carregar o próximo.
+*/
+function makeStudioChat(messages) {
+  return {
+    id:
+      "sc_" +
+      Date.now().toString(36) +
+      "_" +
+      Math.random().toString(36).slice(2, 8),
+    title: "Nova conversa",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    messages: Array.isArray(messages) ? messages : []
+  };
+}
+
+function findStudioChat(id) {
+  return studioChats.find(item => item.id === id) || null;
+}
+
+function deriveChatTitle(messages) {
+  const first = (messages || []).find(
+    item => item && item.role === "user" && String(item.content || "").trim()
+  );
+
+  if (!first) {
+    return "Conversa antiga";
+  }
+
+  const text = String(first.content).trim().replace(/\s+/g, " ");
+
+  return text.length > 48 ? text.slice(0, 48).trim() + "…" : text;
+}
+
+function formatWhen(ms) {
+  const when = new Date(ms);
+  const now = new Date();
+  const sameDay =
+    when.getFullYear() === now.getFullYear() &&
+    when.getMonth() === now.getMonth() &&
+    when.getDate() === now.getDate();
+
+  if (sameDay) {
+    return when.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
+  return when.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit"
+  });
+}
+
+/*
+  Chat vazio = tela de boas-vindas do Estúdio: as conversas salvas
+  aparecem no próprio painel para o usuário retomar uma delas. No
+  primeiro prompt a lista some da "aba" (a tela vazia) e a conversa
+  assume o espaço.
+*/
+function renderSavedChats() {
+  const empty = history.length === 0;
+
+  chatList.hidden = !empty;
+  chat.hidden = empty;
+  chatList.innerHTML = "";
+
+  if (!empty) {
+    return;
+  }
+
+  const saved = studioChats
+    .filter(item => item.id !== activeChatId && item.messages.length > 0)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+
+  if (saved.length === 0) {
+    const hint = document.createElement("p");
+
+    hint.className = "studio-chat-list-hint";
+    hint.textContent = "Nenhuma conversa salva ainda.";
+    chatList.appendChild(hint);
+    return;
+  }
+
+  const label = document.createElement("span");
+
+  label.className = "studio-chat-list-label";
+  label.textContent = "Conversas salvas";
+  chatList.appendChild(label);
+
+  saved.forEach(item => {
+    const row = document.createElement("button");
+
+    row.type = "button";
+    row.className = "studio-chat-list-item";
+    row.title = item.title;
+
+    const title = document.createElement("span");
+
+    title.className = "studio-chat-list-title";
+    title.textContent = item.title;
+
+    const when = document.createElement("span");
+
+    when.className = "studio-chat-list-when";
+    when.textContent = formatWhen(item.updatedAt);
+
+    row.append(title, when);
+    row.addEventListener("click", () => switchStudioChat(item.id));
+    chatList.appendChild(row);
+  });
+}
+
+function switchStudioChat(id) {
+  const target = findStudioChat(id);
+
+  if (!target || id === activeChatId) {
+    return;
+  }
+
+  sendSeq += 1;
+
+  if (busy) {
+    stopGeneration();
+  }
+
+  const current = findStudioChat(activeChatId);
+
+  if (current) {
+    current.messages = history;
+  }
+
+  activeChatId = id;
+  history = target.messages;
+  chat.innerHTML = "";
+  saveStudioChats();
+
+  for (const message of history) {
+    addMessage(
+      message.role === "user" ? "user" : "assistant",
+      String(message.content || "")
+    );
+  }
+
+  renderSavedChats();
+  setStatus("Pronto", false);
+  input.focus();
+}
+
 function trimHistory() {
   if (history.length > HISTORY_LIMIT) {
     history = history.slice(-HISTORY_LIMIT);
   }
 }
 
-function saveHistory() {
+function saveStudioChats() {
   try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    localStorage.setItem(CHATS_KEY, JSON.stringify(studioChats));
+    localStorage.setItem(ACTIVE_CHAT_KEY, activeChatId || "");
   } catch (error) { }
 }
 
+function saveHistory() {
+  const current = findStudioChat(activeChatId);
+
+  if (current) {
+    current.messages = history;
+    current.updatedAt = Date.now();
+  }
+
+  saveStudioChats();
+}
+
 function loadHistory() {
+  studioChats = [];
+
   try {
-    const stored = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
-    history = Array.isArray(stored) ? stored.slice(-HISTORY_LIMIT) : [];
+    const stored = JSON.parse(localStorage.getItem(CHATS_KEY) || "[]");
+
+    if (Array.isArray(stored)) {
+      studioChats = stored.filter(
+        item =>
+          item &&
+          typeof item.id === "string" &&
+          Array.isArray(item.messages)
+      );
+    }
   } catch (error) {
-    history = [];
+    studioChats = [];
+  }
+
+  /*
+    A conversa única de antes da lista de chats vira o primeiro chat
+    salvo: ninguém perde o histórico ao atualizar.
+  */
+  if (studioChats.length === 0) {
+    let legacy = [];
+
+    try {
+      legacy = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    } catch (error) {
+      legacy = [];
+    }
+
+    if (Array.isArray(legacy) && legacy.length > 0) {
+      const migrated = makeStudioChat(legacy);
+
+      migrated.title = deriveChatTitle(legacy);
+      studioChats.push(migrated);
+    }
+  }
+
+  if (studioChats.length === 0) {
+    studioChats.push(makeStudioChat());
+  }
+
+  studioChats.forEach(item => {
+    if (!item.title) {
+      item.title = deriveChatTitle(item.messages);
+    }
+    if (typeof item.updatedAt !== "number") {
+      item.updatedAt = Date.now();
+    }
+    if (typeof item.createdAt !== "number") {
+      item.createdAt = item.updatedAt;
+    }
+  });
+
+  activeChatId = localStorage.getItem(ACTIVE_CHAT_KEY) || "";
+  let current = findStudioChat(activeChatId);
+
+  if (!current) {
+    current = studioChats
+      .slice()
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    activeChatId = current.id;
+  }
+
+  history = current.messages;
+
+  if (history.length > HISTORY_LIMIT) {
+    history = history.slice(-HISTORY_LIMIT);
+    current.messages = history;
   }
 
   for (const message of history) {
@@ -162,6 +398,9 @@ function loadHistory() {
       String(message.content || "")
     );
   }
+
+  saveStudioChats();
+  renderSavedChats();
 }
 
 async function sendMessage(text) {
@@ -177,9 +416,26 @@ async function sendMessage(text) {
   input.value = "";
   setStatus("Pensando…", true);
 
+  const firstPrompt = history.length === 0;
+
   addMessage("user", clean);
   history.push({ role: "user", content: clean });
   trimHistory();
+
+  /*
+    Primeiro prompt: o chat ganha título e a lista de conversas salvas
+    some da tela vazia — a conversa assume o painel.
+  */
+  if (firstPrompt) {
+    const current = findStudioChat(activeChatId);
+
+    if (current) {
+      current.title = deriveChatTitle(history);
+    }
+  }
+
+  saveHistory();
+  renderSavedChats();
 
   const historyBefore = history.slice(0, -1);
   const { article, bubble } = addMessage("assistant", "");
@@ -304,9 +560,33 @@ newChatButton.addEventListener("click", () => {
   if (busy) {
     stopGeneration();
   }
-  history = [];
+
+  const current = findStudioChat(activeChatId);
+
+  if (current) {
+    current.messages = history;
+  }
+
+  /*
+    Em chat vazio não há o que reiniciar: só garante a lista visível.
+    Com conteúdo, muda para um chat vazio (reaproveita um existente,
+    se houver) sem apagar a conversa atual.
+  */
+  if (history.length > 0) {
+    let target = studioChats.find(item => item.messages.length === 0);
+
+    if (!target) {
+      target = makeStudioChat();
+      studioChats.push(target);
+    }
+
+    activeChatId = target.id;
+    history = target.messages;
+  }
+
   chat.innerHTML = "";
-  saveHistory();
+  saveStudioChats();
+  renderSavedChats();
   setStatus("Pronto", false);
   input.focus();
 });
@@ -762,6 +1042,7 @@ function closeTab(path) {
       activeTabPath = "";
       viewerEmpty.hidden = false;
       viewerTabs.hidden = true;
+      viewerPanels.innerHTML = "";
     }
   }
 
@@ -810,8 +1091,16 @@ function updateViewerContent(path) {
   const content = openTabs.get(path) || "";
   const codeEl = panel.querySelector("code");
   codeEl.textContent = content;
+
   if (window.hljs) {
-    window.hljs.highlightElement(codeEl);
+    // A 1a chamada marca o elemento com data-highlighted="yes"; o reset acima
+    // apaga os tokens mas não o atributo, e a partir daí o hljs ignora a
+    // chamada — o texto ficava cru e cinza ao reselecionar o arquivo.
+    codeEl.removeAttribute("data-highlighted");
+
+    try {
+      window.hljs.highlightElement(codeEl);
+    } catch (error) { }
   }
 }
 
