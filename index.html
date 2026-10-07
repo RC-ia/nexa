@@ -21,7 +21,7 @@
 
   <title>NEXA</title>
 
-  <link rel="stylesheet" href="style.css?v=41">
+  <link rel="stylesheet" href="style.css?v=43">
 </head>
 
 <body>
@@ -232,6 +232,90 @@
         <button type="button" id="filePreviewRemove" aria-label="Remover arquivo">×</button>
       </div>
 
+      <div class="attach-wrap" id="attachWrap">
+        <button
+          type="button"
+          id="attachButton"
+          class="attach-button"
+          aria-label="Mais opções"
+          aria-haspopup="menu"
+          aria-expanded="false"
+          aria-pressed="false"
+          title="Mais opções"
+        >
+          <span aria-hidden="true">+</span>
+        </button>
+
+        <div
+          class="reasoning-dropdown attach-menu"
+          id="attachMenu"
+          role="menu"
+        >
+          <button
+            type="button"
+            class="reasoning-item"
+            id="attachGen"
+            role="menuitemcheckbox"
+            aria-checked="false"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Criar imagem</span>
+              <span class="reasoning-item-hint">A NEXA gera a imagem a partir do texto</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            class="reasoning-item"
+            id="attachImage"
+            role="menuitem"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Imagem</span>
+              <span class="reasoning-item-hint">Analisar uma imagem</span>
+            </span>
+          </button>
+          <input id="imageInput" type="file" accept="image/*" hidden>
+          <input id="fileInput" type="file" hidden>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            role="menuitem"
+            id="attachFile"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Arquivo</span>
+              <span class="reasoning-item-hint">Ler documentos e textos</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            role="menuitem"
+            disabled
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Vídeo</span>
+              <span class="reasoning-item-hint">Em breve</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="reasoning-item"
+            id="attachDeep"
+            role="menuitemcheckbox"
+            aria-checked="false"
+          >
+            <span class="reasoning-item-main">
+              <span class="reasoning-item-name">Pesquisa profunda</span>
+              <span class="reasoning-item-hint">Manda a pergunta direto para o pesquisador da NEXA; demora mais</span>
+            </span>
+          </button>
+        </div>
+      </div>
+
       <input
         id="messageInput"
         type="text"
@@ -389,90 +473,6 @@
             </span>
             <span class="reasoning-meter" aria-hidden="true">
               <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-            </span>
-          </button>
-        </div>
-      </div>
-
-      <div class="attach-wrap" id="attachWrap">
-        <button
-          type="button"
-          id="attachButton"
-          class="attach-button"
-          aria-label="Mais opções"
-          aria-haspopup="menu"
-          aria-expanded="false"
-          aria-pressed="false"
-          title="Mais opções"
-        >
-          <span aria-hidden="true">+</span>
-        </button>
-
-        <div
-          class="reasoning-dropdown attach-menu"
-          id="attachMenu"
-          role="menu"
-        >
-          <button
-            type="button"
-            class="reasoning-item"
-            id="attachGen"
-            role="menuitemcheckbox"
-            aria-checked="false"
-          >
-            <span class="reasoning-item-main">
-              <span class="reasoning-item-name">Criar imagem</span>
-              <span class="reasoning-item-hint">A NEXA gera a imagem a partir do texto</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            class="reasoning-item"
-            id="attachImage"
-            role="menuitem"
-          >
-            <span class="reasoning-item-main">
-              <span class="reasoning-item-name">Imagem</span>
-              <span class="reasoning-item-hint">Analisar uma imagem</span>
-            </span>
-          </button>
-          <input id="imageInput" type="file" accept="image/*" hidden>
-          <input id="fileInput" type="file" hidden>
-
-          <button
-            type="button"
-            class="reasoning-item"
-            role="menuitem"
-            id="attachFile"
-          >
-            <span class="reasoning-item-main">
-              <span class="reasoning-item-name">Arquivo</span>
-              <span class="reasoning-item-hint">Ler documentos e textos</span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            class="reasoning-item"
-            role="menuitem"
-            disabled
-          >
-            <span class="reasoning-item-main">
-              <span class="reasoning-item-name">Vídeo</span>
-              <span class="reasoning-item-hint">Em breve</span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            class="reasoning-item"
-            id="attachDeep"
-            role="menuitemcheckbox"
-            aria-checked="false"
-          >
-            <span class="reasoning-item-main">
-              <span class="reasoning-item-name">Pesquisa profunda</span>
-              <span class="reasoning-item-hint">Manda a pergunta direto para o pesquisador da NEXA; demora mais</span>
             </span>
           </button>
         </div>

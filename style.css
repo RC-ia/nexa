@@ -441,6 +441,14 @@ body {
   margin-top: 2px;
 }
 
+/*
+  No modo chat o botão "Chat" é o próprio modo atual: ele fica
+  invisível na gaveta e só aparece quando a pessoa está no modo imagem.
+*/
+.app:not(.image-mode) #drawerChat {
+  display: none;
+}
+
 
 .drawer-section {
   margin: 20px 0 8px;
@@ -2328,8 +2336,8 @@ button > span[aria-hidden="true"]:not(.reasoning-meter),
 
 /* O menu abre alinhado à direita para não vazar da tela. */
 .attach-menu {
-  left: auto;
-  right: 0;
+  left: 0;
+  right: auto;
 }
 
 .attach-menu .reasoning-item:disabled {
