@@ -2765,7 +2765,8 @@ html.keyboard-open footer {
 
   color: var(--text);
 
-  font-size: 13px;
+  /* 13px + 50% */
+  font-size: 19.5px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
