@@ -2229,24 +2229,20 @@ async function showPersonalizedGreeting() {
     ? `Oi, ${username}! Lembro das suas anotações: ${memorySnippet}. Quer retomar esse assunto ou começar algo novo?`
     : `Oi, ${username}! Que bom te ver por aqui. Por onde começamos?`;
 
-  if (history.length === 0) {
-    const heading = document.querySelector(".hero h2");
-    if (heading) {
-      heading.textContent = greeting;
-    }
+  /*
+    O título dinâmico pertence só à tela de boas-vindas. Quando a
+    página é atualizada com a conversa já aberta, ele não pode vazar
+    para dentro do chat como se fosse uma mensagem da NEXA.
+  */
+  if (history.length !== 0) {
     return;
   }
 
-  const message = document.createElement("div");
-  message.className = "message nexa personalized-greeting";
-  const label = document.createElement("span");
-  label.className = "label";
-  label.textContent = "NEXA";
-  const content = document.createElement("p");
-  content.textContent = greeting;
-  message.append(label, content);
-  chat.appendChild(message);
-  scrollConversationToBottom();
+  const heading = document.querySelector(".hero h2");
+
+  if (heading) {
+    heading.textContent = greeting;
+  }
 }
 
 function startNewChat() {
