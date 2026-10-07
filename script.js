@@ -4493,6 +4493,20 @@ if (drawerImages) {
   });
 }
 
+/*
+  Botao "Chat": volta para o modo conversa normal.
+*/
+const drawerChat = document.getElementById("drawerChat");
+
+if (drawerChat) {
+  drawerChat.addEventListener("click", function () {
+    setViewMode("chat");
+    closeDrawer();
+    input.focus();
+    scrollConversationToBottom();
+  });
+}
+
 const studioButton = document.getElementById("studioButton");
 
 if (studioButton) {
