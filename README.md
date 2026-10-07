@@ -99,12 +99,11 @@ python server.py
 ```
 
 A aplicação sobe em `http://localhost:8000`. O gerador de imagens fica no
-**modo Imagens** da gaveta (botão **Imagens** ou a sugestão "Crie uma
-imagem ou figurinha") e usa a API da Novita AI configurada por
-`API_IMAGE`, `MODEL_IMAGE` e `IMAGE_API_URL` no `.env`; ele salva as
-imagens em `generated/` e não exige um segundo servidor Flask. Imagens
-Markdown de URLs externas nas respostas normais são mostradas como texto,
-não carregadas automaticamente.
+**modo Imagens** da gaveta (botão **Imagens**) e usa a API da Novita AI
+configurada por `API_IMAGE`, `MODEL_IMAGE` e `IMAGE_API_URL` no `.env`; ele
+salva as imagens em `generated/` e não exige um segundo servidor Flask.
+Imagens Markdown de URLs externas nas respostas normais são mostradas como
+texto, não carregadas automaticamente.
 
 ### Opção C — Processo desanexado/daemon (sobrevive ao fechar o terminal)
 

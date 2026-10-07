@@ -4177,18 +4177,12 @@ imageComposer.addEventListener("submit", async function (event) {
 });
 
 /*
-  Sugestões da página inicial: preenchem o campo
-  ou ativam o modo Criar imagem.
+  Sugestões da página inicial: só preenchem o campo
+  de texto da conversa.
 */
 document.querySelectorAll(".suggestion").forEach(function (button) {
   button.addEventListener("click", function () {
     const kind = button.dataset.suggestion;
-
-    if (kind === "image") {
-      setViewMode("image");
-      imagePromptInput.focus();
-      return;
-    }
 
     if (kind) {
       input.value = kind;
