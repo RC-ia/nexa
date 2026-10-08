@@ -107,14 +107,20 @@ Como funciona:
   Senha: mínimo 8 caracteres, guardada só como hash (scrypt).
 - A sessão é um cookie `HttpOnly` (`SameSite=Lax`, `Secure` quando o acesso é
   por HTTPS, como no túnel do Cloudflare) e dura `SESSION_DAYS` (padrão 30).
-  Trocar a senha ou apagar um usuário derruba as sessões dele.
+  Trocar a senha ou apagar um usuário derruba as sessões dele. Apagar a
+  conta também remove do servidor o que era dela: memória, conversas,
+  prompts, ajustes, lembretes, push, espaço do Estúdio e as imagens citadas
+  nas conversas dela (função `purge_account_data` em `auth.py`).
 - No login, o servidor emite uma credencial aleatória de 64 caracteres,
   válida por 24 horas. O navegador a envia automaticamente nas mensagens;
   ao expirar, é necessário entrar novamente com a senha da conta. O servidor
   confere o horário apenas quando recebe uma requisição protegida.
 - A memória de longo prazo é ligada à conta. As conversas do `localStorage`
   ficam separadas por usuário; as de antes do login vão para a primeira conta
-  que entrar naquele navegador.
+  que entrar naquele navegador. A galeria de imagens segue a mesma regra
+  (`nexa_image_chats:<id>`) — antes ela era uma chave única para o
+  navegador, e toda conta via a galeria da anterior; a chave antiga é
+  migrada para a primeira conta que entrar e depois some.
 - O login tem limite de tentativas por IP/usuário.
 - Contas ficam em `auth.db` (fora do git). Para começar do zero, apague o arquivo.
 
@@ -144,6 +150,10 @@ A aplicação sobe em `http://localhost:8000`. O gerador de imagens fica no
 **modo Imagens** da gaveta (botão **Imagens**) e usa a API da Novita AI
 configurada por `API_IMAGE`, `MODEL_IMAGE` e `IMAGE_API_URL` no `.env`; ele
 salva as imagens em `generated/` e não exige um segundo servidor Flask.
+A **lista** da galeria é por conta (`nexa_image_chats:<id>` no
+`localStorage`); os **arquivos** em `generated/` ainda não têm dono gravado
+no nome, e qualquer conta logada que tenha o nome abre — a pasta por conta
+é a próxima etapa.
 Imagens Markdown de URLs externas nas respostas normais são mostradas como
 texto, não carregadas automaticamente.
 

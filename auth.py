@@ -9,15 +9,18 @@ cookie e painel admin para criar/remover usuários. Não há cadastro aberto.
 """
 
 import hashlib
+import json
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import threading
 import time
 from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
+from urllib.parse import unquote
 
 from flask import Blueprint, jsonify, request
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -423,6 +426,98 @@ def logout():
 
 
 # =========================
+# DADOS DA CONTA (ao apagar)
+# =========================
+
+_GENERATED_RE = re.compile(r"/generated/([^)\s\"'#?]+)")
+
+
+def _base_name(name):
+    """Só o nome base dentro da pasta: nada escapa por traversal."""
+    return os.path.basename(str(name).replace("\\", "/"))
+
+
+def _images_in_chats(path):
+    """Imagens citadas nas conversas sincronizadas da conta (mesmo corte do
+    cliente, em js/chats.js: collectGeneratedImages)."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+    names = set()
+
+    def walk(value):
+        if isinstance(value, str):
+            for match in _GENERATED_RE.finditer(value):
+                name = _base_name(unquote(match.group(1)))
+                if name:
+                    names.add(name)
+        elif isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(data)
+    return sorted(names)
+
+
+def purge_account_data(user_id):
+    """
+    Apaga do servidor tudo que é da conta: memória, conversas, prompts,
+    ajustes, lembretes, push, espaço do Estúdio e as imagens que as
+    conversas dela citam.
+
+    Todos os módulos derivam o caminho por conta de `acct_<id>`, então o
+    mesmo prefixo localiza os arquivos — nenhum arquivo de outra conta é
+    tocado. As imagens em si não têm dono gravado no nome (ainda), por
+    isso a lista saída das conversas da conta.
+    """
+    try:
+        from nexa.config import MEMORY_DIR
+        from nexa.images import IMAGE_OUTPUT_DIR
+        from nexa.studio import STUDIO_DIR
+    except Exception as err:  # ambiente sem o pacote nexa (ferramentas avulsas)
+        print("[NEXA-auth] não consegui localizar os dados da conta:", err, flush=True)
+        return []
+
+    account = "acct_%d" % user_id
+    removed = []
+
+    def drop_file(path):
+        try:
+            if path.is_file():
+                path.unlink()
+                removed.append(path.name)
+        except OSError as err:
+            print("[NEXA-auth] não foi possível apagar %s: %s" % (path, err), flush=True)
+
+    # 1) imagens citadas nas conversas, antes de apagar as conversas
+    if IMAGE_OUTPUT_DIR.is_dir():
+        for name in _images_in_chats(MEMORY_DIR / ("%s.chats.json" % account)):
+            drop_file(IMAGE_OUTPUT_DIR / name)
+
+    # 2) arquivos da conta (memória, conversas, prompts, ajustes, lembretes, push)
+    for folder in (MEMORY_DIR, STUDIO_DIR):
+        if folder.is_dir():
+            for path in folder.glob(account + ".*"):
+                drop_file(path)
+
+    # 3) pasta do Estúdio da conta
+    studio_root = STUDIO_DIR / account
+    if studio_root.is_dir():
+        try:
+            shutil.rmtree(studio_root)
+            removed.append(account + "/")
+        except OSError as err:
+            print("[NEXA-auth] não foi possível apagar %s: %s" % (studio_root, err), flush=True)
+
+    return removed
+
+
+# =========================
 # PAINEL ADMIN
 # =========================
 
@@ -511,7 +606,19 @@ def admin_delete(admin, user_id):
 
         conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
 
-    return jsonify({"ok": True})
+    # Conta fora do banco: some também com o que ela deixou no servidor
+    # (memória, conversas, prompts, ajustes, lembretes, push, Estúdio e as
+    # imagens citadas nas conversas dela).
+    removed = purge_account_data(user_id)
+
+    if removed:
+        print(
+            "[NEXA-auth] conta %s apagada; %d arquivo(s) de dados removidos."
+            % (user_id, len(removed)),
+            flush=True,
+        )
+
+    return jsonify({"ok": True, "dadosApagados": len(removed)})
 
 
 # =========================
