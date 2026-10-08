@@ -40,6 +40,12 @@ SEARCH_RETRY_DELAY = float(os.environ.get("SEARCH_RETRY_DELAY", "4"))
 SEARCH_MAX_ATTEMPTS = int(os.environ.get("SEARCH_MAX_ATTEMPTS", "12"))
 
 
+# Quantos prefixos (P1, P2...) ficam no cache por conta. Buscas novas
+# empilham prefixos depois dos existentes; quando passa disso, os mais
+# antigos são podados.
+SEARCH_CACHE_MAX_PREFIXES = int(os.environ.get("SEARCH_CACHE_MAX_PREFIXES", "60"))
+
+
 SEARCH_UNAVAILABLE_MESSAGE = (
     "A busca não respondeu dentro do tempo limite. Avise o usuário que a "
     "pesquisa na web não respondeu a tempo e pergunte se ele quer que você "
@@ -237,14 +243,17 @@ def search_once(term, limit, deadline):
 def run_web_search(term, limit=SEARCH_RESULT_LIMIT, patience=None, progress=None):
     """
     Busca no DuckDuckGo insistindo até conseguir, dentro de SEARCH_PATIENCE
-    segundos (2 minutos por padrão). Se nada voltar nesse tempo, devolve a
-    mensagem genérica de ferramenta fora do ar.
+    segundos (2 minutos por padrão) ou de SEARCH_MAX_ATTEMPTS tentativas —
+    o que vier primeiro. Se nada voltar, devolve a mensagem genérica de
+    ferramenta fora do ar. As esperas entre tentativas crescem em backoff
+    exponencial (4s, 6s, 9s... com teto de 15s) para não martelar o
+    buscador enquanto ele está limitando o IP.
 
-    patience=0 desliga o limite de tempo: se o buscador não responder
-    (rede, limite de requisições, HTTP ruim), insiste para sempre até ele
-    responder. Resposta vazia conta como resposta — aí devolve sem
-    resultados para o agente tentar outro termo. A pesquisa profunda usa
-    esse modo.
+    patience=0 é o modo sem orçamento de tempo: não há deadline, mas o
+    limite de tentativas continua valendo — a busca nunca mais fica
+    presa para sempre. Resposta vazia conta como resposta — aí devolve
+    sem resultados para o agente tentar outro termo. A pesquisa profunda
+    usa esse modo com um orçamento próprio.
 
     progress, quando informado, recebe uma nota a cada punhado de
     tentativas falhas — é o que mantém a cadeia de pensamento viva
@@ -278,38 +287,15 @@ def run_web_search(term, limit=SEARCH_RESULT_LIMIT, patience=None, progress=None
             )
             return results, ""
 
-        if unlimited:
-            if reason == "vazio":
-                print(
-                    "[NEXA-PESQUISA] %r respondeu sem resultados "
-                    "(modo sem limite de tempo)." % term
-                )
-                return [], "A pesquisa não retornou nada útil."
-
-            if progress and (attempt == 1 or attempt % 5 == 0):
-                progress(
-                    "«%s»: %s (tentativa %d). Continuo tentando."
-                    % (term, search_reason_label(reason), attempt)
-                )
-
+        if reason == "vazio" and unlimited:
             print(
-                "[NEXA-PESQUISA] %r falhou (%s); nova tentativa em %.1fs "
-                "(sem limite de tempo)."
-                % (term, reason, SEARCH_RETRY_DELAY)
+                "[NEXA-PESQUISA] %r respondeu sem resultados "
+                "(modo sem orçamento de tempo)." % term
             )
-            time.sleep(SEARCH_RETRY_DELAY)
-            continue
+            return [], "A pesquisa não retornou nada útil."
 
-        remaining = deadline - time.monotonic()
-
-        if remaining <= 0:
-            print(
-                "[NEXA-PESQUISA] %r sem resultado apos %d tentativa(s) em %ds "
-                "(ultima: %s). Devolvendo aviso de ferramenta fora do ar."
-                % (term, attempt, patience, reason)
-            )
-            return [], SEARCH_UNAVAILABLE_MESSAGE
-
+        # Limite de tentativas vale nos dois modos: é o freio que impede a
+        # busca de ficar presa para sempre quando o buscador caiu.
         if attempt >= SEARCH_MAX_ATTEMPTS:
             print(
                 "[NEXA-PESQUISA] %r parou no limite de %d tentativa(s) "
@@ -318,13 +304,39 @@ def run_web_search(term, limit=SEARCH_RESULT_LIMIT, patience=None, progress=None
             )
             return [], SEARCH_UNAVAILABLE_MESSAGE
 
-        # Espera curta antes de tentar de novo, sem estourar o orçamento.
-        delay = min(SEARCH_RETRY_DELAY, max(0.5, remaining))
-        print(
-            "[NEXA-PESQUISA] %r falhou (%s); nova tentativa em %.1fs "
-            "(restam %.0fs no orçamento)."
-            % (term, reason, delay, remaining)
-        )
+        remaining = None if unlimited else deadline - time.monotonic()
+
+        if remaining is not None and remaining <= 0:
+            print(
+                "[NEXA-PESQUISA] %r sem resultado apos %d tentativa(s) em %ds "
+                "(ultima: %s). Devolvendo aviso de ferramenta fora do ar."
+                % (term, attempt, patience, reason)
+            )
+            return [], SEARCH_UNAVAILABLE_MESSAGE
+
+        if progress and (attempt == 1 or attempt % 5 == 0):
+            progress(
+                "«%s»: %s (tentativa %d). Continuo tentando."
+                % (term, search_reason_label(reason), attempt)
+            )
+
+        # Backoff exponencial com teto (4s, 6s, 9s, 13,5s, 15s...), sem
+        # estourar o orçamento de tempo quando ele existe.
+        delay = min(SEARCH_RETRY_DELAY * (1.5 ** (attempt - 1)), 15.0)
+
+        if remaining is not None:
+            delay = min(delay, max(0.5, remaining))
+            print(
+                "[NEXA-PESQUISA] %r falhou (%s); nova tentativa em %.1fs "
+                "(restam %.0fs no orçamento)."
+                % (term, reason, delay, remaining)
+            )
+        else:
+            print(
+                "[NEXA-PESQUISA] %r falhou (%s); nova tentativa em %.1fs "
+                "(tentativa %d/%d)."
+                % (term, reason, delay, attempt, SEARCH_MAX_ATTEMPTS)
+            )
 
         time.sleep(delay)
 
@@ -392,26 +404,50 @@ def parse_search_results(page, limit):
 def format_search_results(term, results, user_id=None):
     """
     Formata resultados com prefixos P1, P2... para o modelo referenciar.
-    Se user_id for passado, guarda o mapeamento no cache para a ferramenta
+    Se user_id for passado, acumula o mapeamento no cache para a ferramenta
     visitar_pagina resolver depois.
+
+    O cache é acumulativo: cada busca empilha seus resultados DEPOIS dos
+    da anterior (uma busca devolve P1..P5, a seguinte P6..P10...). Antes o
+    cache era sobrescrito a cada busca e os prefixos antigos morriam —
+    visitar_pagina quebrava quando o modelo voltava a um resultado de duas
+    buscas atrás, e buscas paralelas se pisoteavam.
     """
+    if user_id and results:
+        with _search_cache_lock:
+            stored = _last_search_cache.get(user_id)
+            if not isinstance(stored, list):
+                stored = []
+            base = len(stored)
+            stored.extend(item["url"] for item in results)
+            if len(stored) > SEARCH_CACHE_MAX_PREFIXES:
+                del stored[:-SEARCH_CACHE_MAX_PREFIXES]
+            _last_search_cache[user_id] = stored
+    else:
+        base = 0
+
     lines = ['Resultados da busca por "%s":' % term, ""]
 
-    prefix_map = {}
     for position, item in enumerate(results, start=1):
-        prefix = "P%d" % position
-        prefix_map[prefix] = item["url"]
+        prefix = "P%d" % (base + position)
         lines.append("%s. %s" % (prefix, item["titulo"]))
         lines.append("   %s" % item["url"])
 
         if item["trecho"]:
             lines.append("   %s" % item["trecho"])
 
-    if user_id and prefix_map:
-        with _search_cache_lock:
-            _last_search_cache[user_id] = prefix_map
-
     return "\n".join(lines)
+
+
+def _resolve_cached_url(url_list, prefix):
+    """Resolve um prefixo P<n> contra a lista acumulada de URLs do cache."""
+    match = re.fullmatch(r"[Pp]\s*(\d+)", str(prefix).strip())
+    if not match:
+        return None
+    index = int(match.group(1)) - 1
+    if 0 <= index < len(url_list):
+        return url_list[index]
+    return None
 
 
 def fetch_pages(user_id, prefixes):
@@ -423,16 +459,18 @@ def fetch_pages(user_id, prefixes):
         return "Nenhuma página indicada."
 
     with _search_cache_lock:
-        prefix_map = _last_search_cache.get(user_id, {})
+        url_list = list(_last_search_cache.get(user_id) or [])
 
-    if not prefix_map:
+    if not url_list:
         return "Nenhuma busca anterior encontrada. Use pesquisar primeiro."
 
     lines = []
     for prefix in prefixes:
-        url = prefix_map.get(prefix)
+        url = _resolve_cached_url(url_list, prefix)
         if not url:
-            lines.append("%s: prefixo não encontrado na última busca." % prefix)
+            lines.append(
+                "%s: prefixo não encontrado (ou já podado do cache)." % prefix
+            )
             continue
 
         try:

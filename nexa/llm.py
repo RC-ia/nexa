@@ -22,7 +22,13 @@ from .prompts import current_system_prompt
 from .config import MODEL
 import json
 import re
+import time
+import random
+import hashlib
 from .config import API_KEY
+from .config import LLM_MAX_ATTEMPTS
+from .config import LLM_RETRY_BASE_DELAY
+from .config import LLM_RETRY_MAX_DELAY
 
 
 def auth_headers():
@@ -30,6 +36,78 @@ def auth_headers():
         "Content-Type": "application/json",
         "Authorization": "Bearer " + API_KEY,
     }
+
+
+# Erros do provedor que fazem sentido tentar de novo: limite de taxa,
+# falha momentânea do servidor ou do proxy na frente da API.
+RETRYABLE_STATUS = frozenset((429, 500, 502, 503, 504, 524))
+
+
+def _retry_delay(attempt, response=None):
+    """Espera antes da próxima tentativa: Retry-After quando o provedor
+    informa, senão backoff exponencial com jitter (1,5s, 3s, 6s...)."""
+    if response is not None:
+        retry_after = (getattr(response, "headers", None) or {}).get("Retry-After")
+        if retry_after:
+            try:
+                return min(float(retry_after), 20.0)
+            except (TypeError, ValueError):
+                pass
+    delay = min(LLM_RETRY_BASE_DELAY * (2 ** (attempt - 1)), LLM_RETRY_MAX_DELAY)
+    return delay + random.uniform(0, 0.5)
+
+
+def call_model(payload, timeout=(10, 60), attempts=None):
+    """
+    POST /chat/completions com retry para erros transitórios (429/5xx e
+    falha de rede). Só para chamadas bloqueantes: stream não tem retry
+    seguro, porque os primeiros bytes podem já ter sido consumidos.
+
+    Em caso de falha de rede definitiva, levanta a exceção (os callers já
+    tratam requests.RequestException). Se o provedor seguir respondendo
+    erro, devolve a última resposta para o caller tratar como hoje.
+    """
+    tries = LLM_MAX_ATTEMPTS if not attempts or attempts < 1 else attempts
+
+    for attempt in range(1, tries + 1):
+        try:
+            response = requests.post(
+                API_BASE + "/chat/completions",
+                headers=auth_headers(),
+                json=payload,
+                timeout=timeout,
+            )
+        except requests.RequestException as error:
+            if attempt >= tries:
+                print(
+                    "[NEXA] chamada ao modelo falhou após %d tentativa(s): %s"
+                    % (attempt, error)
+                )
+                raise
+
+            delay = _retry_delay(attempt)
+            print(
+                "[NEXA] erro transitório (%s); tentando de novo em %.1fs "
+                "(tentativa %d/%d)."
+                % (type(error).__name__, delay, attempt, tries)
+            )
+            time.sleep(delay)
+            continue
+
+        if response.status_code in RETRYABLE_STATUS and attempt < tries:
+            delay = _retry_delay(attempt, response)
+            print(
+                "[NEXA] HTTP %d transitório; tentando de novo em %.1fs "
+                "(tentativa %d/%d)."
+                % (response.status_code, delay, attempt, tries)
+            )
+            response.close()
+            time.sleep(delay)
+            continue
+
+        return response
+
+    return response
 
 
 def extract_text(data):
@@ -398,7 +476,29 @@ def tool_call_name(call):
 
 
 def tool_call_id(call):
-    return call.get("id") or "call_salvar_memoria"
+    """
+    Id da chamada de ferramenta. Quando o provedor não manda id, o antigo
+    fallback fixo ("call_salvar_memoria") fazia duas chamadas diferentes
+    na mesma rodada colidirem — a API rejeitava a rodada inteira. Agora o
+    fallback deriva de nome + argumentos: estável (o mesmo call visto em
+    dois lugares resolve para o mesmo id) e único entre chamadas distintas.
+    """
+    call_id = call.get("id")
+    if call_id:
+        return call_id
+
+    function = call.get("function") or {}
+    name = call.get("name") or function.get("name") or "ferramenta"
+    raw = function.get("arguments") or call.get("arguments") or ""
+
+    if not isinstance(raw, str):
+        raw = json.dumps(raw, ensure_ascii=False, sort_keys=True)
+
+    digest = hashlib.md5(
+        ("%s|%s" % (name, raw)).encode("utf-8", "ignore")
+    ).hexdigest()[:12]
+
+    return "call_%s_%s" % (name, digest)
 
 
 def merge_tool_call(target, piece):
@@ -560,13 +660,13 @@ def build_messages(messages, memories, custom_instructions="", user_id="",
             })
             continue
 
-        # Turno de assistant que só traz tool_calls: o conteúdo é nulo e
-        # precisa preservar as chamadas, senão o modelo não reconhece a
-        # resposta da ferramenta que vem logo depois.
+        # Turno de assistant que só traz tool_calls: preserva também o texto
+        # do turno (formato canônico da API), senão o modelo esquece o que
+        # disse antes de pedir a ferramenta nas rodadas seguintes do loop.
         if role in ("assistant", "model") and message.get("tool_calls"):
             contents.append({
                 "role": "assistant",
-                "content": None,
+                "content": message.get("content") or None,
                 "tool_calls": message["tool_calls"],
             })
             continue
@@ -687,10 +787,8 @@ def generate_chat_title(user_message):
     )
 
     try:
-        response = requests.post(
-            API_BASE + "/chat/completions",
-            headers=auth_headers(),
-            json={
+        response = call_model(
+            {
                 "model": MODEL,
                 "messages": [
                     {

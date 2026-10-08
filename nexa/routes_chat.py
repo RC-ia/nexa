@@ -14,6 +14,7 @@ from .prompts import current_spicy_prompt
 from .memory import get_memories
 import requests
 from .agents import analyze_image_for_text_model
+from .agents import degrade_images
 from .llm import message_has_image
 from .config import MAX_FILE_BYTES
 from .config import ALLOWED_FILE_EXTENSIONS
@@ -191,8 +192,13 @@ def chat():
         try:
             messages = analyze_image_for_text_model(messages, reasoning)
         except (requests.RequestException, RuntimeError) as error:
-            print("[NEXA-VISÃO] falha ao analisar imagem:", error)
-            return jsonify({"error": "Não foi possível analisar a imagem."}), 502
+            # Degradar em vez de 502: o modelo normal responde pelo texto
+            # e avisa que a imagem não pôde ser analisada.
+            print(
+                "[NEXA-VISÃO] falha ao analisar imagem (%s); seguindo sem "
+                "a imagem." % error
+            )
+            messages = degrade_images(messages)
 
     memories = get_memories(user_id) if memory_enabled else []
 

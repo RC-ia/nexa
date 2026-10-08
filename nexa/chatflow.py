@@ -25,6 +25,7 @@ from .llm import finalize_inline_buffer
 from .llm import split_reasoning_from_content
 from .llm import stream_content_field
 from .llm import merge_tool_call
+from .llm import call_model
 from .llm import extract_reasoning
 from .llm import parse_data_line
 from .llm import InlineThoughtBuffer
@@ -60,6 +61,8 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
     searched = False
     current_calls = calls
     current_text = assistant_text or ""
+    extra_turns = []    # transcrição acumulada entre rodadas
+    pending_text = ""   # continuação escrita pelo modelo, ainda não exibida
 
     for _ in range(MAX_TOOL_ROUNDS):
         results, memory_now, search_now = run_tools(
@@ -73,71 +76,121 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
         memory_saved = memory_saved or memory_now
         searched = searched or search_now
 
-        follow_up = list(messages) + [
-            {"role": "assistant", "content": current_text},
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": tool_call_id(call),
-                        "type": "function",
-                        "function": {
-                            "name": tool_call_name(call),
-                            "arguments": json.dumps(
-                                parse_tool_arguments(call),
-                                ensure_ascii=False,
-                            ),
-                        },
-                    }
-                    for call in current_calls
-                ],
-            },
-        ] + [
+        # Transcrição acumulada: cada rodada entra no histórico junto da
+        # anterior, em vez de recomeçar do zero. Sem isso o modelo perde os
+        # resultados das rodadas passadas, repete buscas e se contradiz.
+        extra_turns.append({
+            "role": "assistant",
+            "content": current_text or None,
+            "tool_calls": [
+                {
+                    "id": tool_call_id(call),
+                    "type": "function",
+                    "function": {
+                        "name": tool_call_name(call),
+                        "arguments": json.dumps(
+                            parse_tool_arguments(call),
+                            ensure_ascii=False,
+                        ),
+                    },
+                }
+                for call in current_calls
+            ],
+        })
+        extra_turns.extend([
             {
                 "role": "tool",
                 "tool_call_id": call_id,
                 "content": content,
             }
             for call_id, content in results.items()
-        ]
+        ])
+
+        follow_up = list(messages) + extra_turns
 
         try:
-            response = requests.post(
-                API_BASE + "/chat/completions",
-                headers=auth_headers(),
-                json=request_body(
+            response = call_model(
+                request_body(
                     False, follow_up, memories, reasoning, custom_instructions,
                     memory_enabled, user_id,
                     deep_report=deep_report,
                     thinking_report=thinking_report,
                     system_prompt_override=system_prompt_override,
                 ),
-                timeout=(10, 60),
+                timeout=(10, 120),
             )
         except requests.RequestException as error:
             print("[NEXA] falha ao continuar após ferramenta:", error)
-            return None, memory_saved, searched
+            return (pending_text or None), memory_saved, searched
 
         if response.status_code != 200:
             log_upstream_error(response)
-            return None, memory_saved, searched
+            return (pending_text or None), memory_saved, searched
 
         try:
             payload = response.json()
         except ValueError:
-            return None, memory_saved, searched
+            return (pending_text or None), memory_saved, searched
 
         current_text = extract_text(payload)
         current_calls = extract_tool_calls(payload)
 
         if not current_calls:
+            # Texto final: junta as continuações intermediárias para nada
+            # que o modelo escreveu no caminho se perder.
+            text = (
+                (pending_text + "\n\n" + current_text)
+                if pending_text else current_text
+            )
             # Sem texto nem nova ferramenta, não há o que exibir: devolvemos
             # vazio em vez de uma frase genérica que vaza ao usuário.
-            return current_text, memory_saved, searched
+            return (text or None), memory_saved, searched
 
-    print("[NEXA] limite de rodadas de ferramenta atingido.")
-    return current_text, memory_saved, searched
+        if current_text:
+            pending_text = (
+                (pending_text + "\n\n" + current_text)
+                if pending_text else current_text
+            )
+
+    # Saiu do loop com ferramenta pendente (limite de rodadas ou ferramenta
+    # sem resultado): em vez de devolver o texto pela metade (ou nada),
+    # força o fechamento em texto com a transcrição acumulada.
+    if current_calls:
+        forced_turns = list(messages) + extra_turns + [{
+            "role": "user",
+            "content": (
+                "Limite de ferramentas atingido. Use apenas os resultados "
+                "já obtidos acima e escreva agora a resposta final para o "
+                "usuário, em texto, sem chamar nenhuma ferramenta."
+            ),
+        }]
+        forced_body = request_body(
+            False, forced_turns, memories, reasoning, custom_instructions,
+            memory_enabled, user_id,
+            deep_report=deep_report,
+            thinking_report=thinking_report,
+            system_prompt_override=system_prompt_override,
+        )
+        # Sem "tools" no corpo, o modelo não tem como pedir outra rodada.
+        forced_body.pop("tools", None)
+        forced_body.pop("tool_choice", None)
+
+        try:
+            response = call_model(forced_body, timeout=(10, 120))
+            if response.status_code == 200:
+                forced_text = (extract_text(response.json()) or "").strip()
+                if forced_text:
+                    pending_text = (
+                        (pending_text + "\n\n" + forced_text)
+                        if pending_text else forced_text
+                    )
+            else:
+                log_upstream_error(response)
+        except requests.RequestException as error:
+            print("[NEXA] falha no fechamento forçado:", error)
+
+    print("[NEXA] loop de ferramentas encerrado.")
+    return (pending_text or None), memory_saved, searched
 
 
 def probe_stream(lines):
@@ -716,15 +769,13 @@ def make_blocking_response(
     system_prompt_override="",
 ):
     try:
-        response = requests.post(
-            API_BASE + "/chat/completions",
-            headers=auth_headers(),
-            json=request_body(
+        response = call_model(
+            request_body(
                 False, messages, memories, reasoning, custom_instructions,
                 memory_enabled, user_id, thinking_report=thinking_report,
                 system_prompt_override=system_prompt_override,
             ),
-            timeout=(10, 60),
+            timeout=(10, 120),
         )
 
     except requests.RequestException as error:

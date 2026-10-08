@@ -77,7 +77,22 @@ ALLOWED_FILE_EXTENSIONS = {
 }
 
 
-MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "1024"))
+# Respostas completas: o padrão antigo (1024) cortava respostas e
+# relatórios no meio. Não há cobrança por token neste setup, então o
+# limite existe só como trava de segurança.
+MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "4096"))
+
+
+# Retry de erros transitórios do provedor (429/500/502/503/504/524):
+# quantas tentativas e como a espera cresce entre elas (backoff
+# exponencial com jitter, teto em LLM_RETRY_MAX_DELAY).
+LLM_MAX_ATTEMPTS = max(1, int(os.environ.get("LLM_MAX_ATTEMPTS", "3")))
+
+
+LLM_RETRY_BASE_DELAY = max(0.1, float(os.environ.get("LLM_RETRY_BASE_DELAY", "1.5")))
+
+
+LLM_RETRY_MAX_DELAY = max(0.1, float(os.environ.get("LLM_RETRY_MAX_DELAY", "8.0")))
 
 
 MAX_TOOL_ROUNDS = int(os.environ.get("MAX_TOOL_ROUNDS", "4"))
@@ -98,7 +113,7 @@ REASONING_ALIASES = {"xhigh": "ultra", "min": "minimum", "max": "maximum"}
 
 
 THINKING_AGENT_MAX_TOKENS = int(
-    os.environ.get("THINKING_AGENT_MAX_TOKENS", "1200")
+    os.environ.get("THINKING_AGENT_MAX_TOKENS", "2000")
 )
 
 
@@ -246,10 +261,13 @@ VISIT_TOOL = {
     "function": {
         "name": "visitar_pagina",
         "description": (
-            "Abre uma ou mais páginas dos resultados da última busca (use os "
+            "Abre uma ou mais páginas dos resultados das buscas (use os "
             "prefixos P1, P2... devolvidos pela ferramenta pesquisar) e "
             "devolve o texto principal de cada uma. Chame quando o resumo não "
-            "for suficiente e você precisar ler o conteúdo completo."
+            "for suficiente e você precisar ler o conteúdo completo. Os "
+            "prefixos continuam válidos entre buscas: P1..P5 da primeira "
+            "busca seguem acessíveis mesmo depois de buscas novas (que "
+            "seguem a numeração, P6, P7...)."
         ),
         "parameters": {
             "type": "object",

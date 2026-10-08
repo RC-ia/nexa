@@ -1,4 +1,6 @@
 """Lembretes: criação, agendamento, agentes de execução e disparo."""
+from concurrent.futures import ThreadPoolExecutor
+
 from .push import send_push_notification
 from .tools import run_tools
 from .llm import parse_tool_arguments
@@ -14,7 +16,7 @@ from .config import SEARCH_TOOL
 from .config import STREAM_TIMEOUT
 from .config import CONNECT_TIMEOUT
 from .llm import model_for_reasoning
-from .llm import auth_headers
+from .llm import call_model
 from .config import API_BASE
 import requests
 from .config import API_KEY
@@ -479,10 +481,8 @@ def run_reminder_agent(tarefa, when_text):
         return ""
 
     try:
-        response = requests.post(
-            API_BASE + "/chat/completions",
-            headers=auth_headers(),
-            json={
+        response = call_model(
+            {
                 "model": model_for_reasoning("none"),
                 "messages": [
                     {"role": "system", "content": REMINDER_AGENT_PROMPT},
@@ -543,10 +543,8 @@ def run_reminder_action(user_id, instrucao, when_text):
             "max_tokens": MAX_OUTPUT_TOKENS,
         }
         try:
-            response = requests.post(
-                API_BASE + "/chat/completions",
-                headers=auth_headers(),
-                json=body,
+            response = call_model(
+                body,
                 timeout=(CONNECT_TIMEOUT, DEEP_RESEARCH_TIMEOUT),
             )
         except requests.RequestException as error:
@@ -605,7 +603,7 @@ def run_reminder_action(user_id, instrucao, when_text):
 
 
 def process_reminder_file(path):
-    """Dispara os lembretes vencidos de um arquivo de conta."""
+    """Dispara os lembretes vencidos de um arquivo de conta (síncrono)."""
     now_epoch = time.time()
     user_id = path.name[: -len(REMINDER_FILE_SUFFIX)]
 
@@ -619,69 +617,128 @@ def process_reminder_file(path):
         ]
 
     for reminder_id in due_ids:
-        with REMINDERS_LOCK:
-            data = load_reminder_data(path)
-            reminder = next(
-                (item for item in data["reminders"] if item.get("id") == reminder_id),
-                None,
-            )
-        if reminder is None:
-            continue
+        if reminder_id:
+            _fire_reminder(path, user_id, reminder_id)
 
-        tarefa = reminder.get("tarefa") or ""
-        instrucao = reminder.get("instrucao") or ""
-        when_text = format_epoch(user_id, reminder.get("next_at") or now_epoch)
 
-        if instrucao:
-            message = (
-                run_reminder_action(user_id, instrucao, when_text)
-                or tarefa
-                or "Lembrete da NEXA."
-            )
+def _fire_reminder(path, user_id, reminder_id):
+    """Dispara um lembrete vencido: roda o agente, enfileira a mensagem e
+    reagenda (ou remove) o lembrete. Pode rodar fora da thread do scheduler
+    (pool de disparos) sem segurar o tick dos lembretes."""
+    with REMINDERS_LOCK:
+        data = load_reminder_data(path)
+        reminder = next(
+            (item for item in data["reminders"] if item.get("id") == reminder_id),
+            None,
+        )
+    if reminder is None:
+        return
+
+    tarefa = reminder.get("tarefa") or ""
+    instrucao = reminder.get("instrucao") or ""
+    when_text = format_epoch(user_id, reminder.get("next_at") or time.time())
+
+    if instrucao:
+        message = (
+            run_reminder_action(user_id, instrucao, when_text)
+            or tarefa
+            or "Lembrete da NEXA."
+        )
+    else:
+        message = run_reminder_agent(tarefa, when_text) or tarefa or "Lembrete da NEXA."
+
+    with REMINDERS_LOCK:
+        data = load_reminder_data(path)
+        current = next(
+            (item for item in data["reminders"] if item.get("id") == reminder_id),
+            None,
+        )
+        if current is None:
+            return
+
+        data["seq"] += 1
+        data["pending"].append(
+            {"at": int(time.time()), "message": message, "seq": data["seq"]}
+        )
+        data["pending"] = data["pending"][-PENDING_LIMIT:]
+
+        if current.get("tipo") == "unico":
+            data["reminders"] = [
+                item for item in data["reminders"]
+                if item.get("id") != reminder_id
+            ]
         else:
-            message = run_reminder_agent(tarefa, when_text) or tarefa or "Lembrete da NEXA."
-
-        with REMINDERS_LOCK:
-            data = load_reminder_data(path)
-            current = next(
-                (item for item in data["reminders"] if item.get("id") == reminder_id),
-                None,
-            )
-            if current is None:
-                continue
-
-            data["seq"] += 1
-            data["pending"].append(
-                {"at": int(time.time()), "message": message, "seq": data["seq"]}
-            )
-            data["pending"] = data["pending"][-PENDING_LIMIT:]
-
-            if current.get("tipo") == "unico":
+            next_at = compute_next_fire(current, int(time.time()), user_id)
+            if next_at is None:
                 data["reminders"] = [
                     item for item in data["reminders"]
                     if item.get("id") != reminder_id
                 ]
             else:
-                next_at = compute_next_fire(current, int(time.time()), user_id)
-                if next_at is None:
-                    data["reminders"] = [
-                        item for item in data["reminders"]
-                        if item.get("id") != reminder_id
-                    ]
-                else:
-                    current["next_at"] = next_at
+                current["next_at"] = next_at
 
-            save_reminder_data(path, data)
+        save_reminder_data(path, data)
 
-        print("[NEXA-LEMBRETE] disparado: %s" % message[:120])
-        send_push_notification(user_id, "Lembrete da NEXA", message)
+    print("[NEXA-LEMBRETE] disparado: %s" % message[:120])
+    send_push_notification(user_id, "Lembrete da NEXA", message)
+
+
+# Pool de disparos: uma ação de lembrete pode levar minutos (busca na web
+# + agente). Rodando fora do tick, o ciclo de 30s continua pontual mesmo
+# com disparos demorados em andamento.
+_ACTION_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="nexa-lembretes")
+
+_INFLIGHT_LOCK = threading.Lock()
+
+_INFLIGHT = set()
+
+
+def _fire_reminder_async(path, user_id, reminder_id):
+    """Enfileira o disparo de um lembrete no pool, sem duplicar: a chave
+    (conta, lembrete) marca o que já está em andamento, então o próximo
+    tick não reagenda o mesmo lembrete enquanto o agente ainda trabalha."""
+    key = (user_id, reminder_id)
+
+    with _INFLIGHT_LOCK:
+        if key in _INFLIGHT:
+            return
+        _INFLIGHT.add(key)
+
+    def job():
+        try:
+            _fire_reminder(path, user_id, reminder_id)
+        except Exception as error:  # noqa: BLE001
+            print(
+                "[NEXA-LEMBRETE] erro ao disparar %s: %s" % (reminder_id, error)
+            )
+        finally:
+            with _INFLIGHT_LOCK:
+                _INFLIGHT.discard(key)
+
+    _ACTION_EXECUTOR.submit(job)
 
 
 def tick_reminders():
-    """Uma passada do scheduler: verifica todas as contas."""
+    """Uma passada do scheduler: enfileira os disparos vencidos no pool."""
+    now_epoch = time.time()
+
     for path in MEMORY_DIR.glob("*" + REMINDER_FILE_SUFFIX):
         try:
-            process_reminder_file(path)
+            user_id = path.name[: -len(REMINDER_FILE_SUFFIX)]
+
+            with REMINDERS_LOCK:
+                data = load_reminder_data(path)
+                due_ids = [
+                    item.get("id")
+                    for item in data["reminders"]
+                    if isinstance(item.get("next_at"), (int, float))
+                    and item["next_at"] <= now_epoch
+                ]
+
+            for reminder_id in due_ids:
+                if reminder_id:
+                    _fire_reminder_async(path, user_id, reminder_id)
+
         except Exception as error:
             print("[NEXA-LEMBRETE] erro ao processar %s: %s" % (path.name, error))
 

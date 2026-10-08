@@ -8,6 +8,7 @@ from .settings import get_deep_settings
 from .llm import model_for_reasoning
 from .config import MAX_HISTORY_MESSAGES
 from .llm import extract_tool_calls
+from .llm import call_model
 from .config import DEEP_INTENT_PROMPT
 from .config import DEEP_RESEARCH_PROMPT
 from .config import DEEP_RESEARCH_TIMEOUT
@@ -36,8 +37,6 @@ from .config import STREAM_TIMEOUT
 from .config import CONNECT_TIMEOUT
 from .config import MAX_OUTPUT_TOKENS
 from .config import VISION_MODEL
-from .llm import auth_headers
-from .config import API_BASE
 import requests
 from .config import VISION_AGENT_PROMPT
 
@@ -60,10 +59,8 @@ def analyze_image_for_text_model(messages, reasoning):
 
         visual_content = [{"type": "text", "text": VISION_AGENT_PROMPT}]
         visual_content.extend(image_parts)
-        response = requests.post(
-            API_BASE + "/chat/completions",
-            headers=auth_headers(),
-            json={
+        response = call_model(
+            {
                 "model": VISION_MODEL,
                 "messages": [{"role": "user", "content": visual_content}],
                 "stream": False,
@@ -98,6 +95,46 @@ def analyze_image_for_text_model(messages, reasoning):
         break
 
     return enriched
+
+
+def degrade_images(messages):
+    """
+    Fallback quando o agente visual falha: troca cada imagem por um aviso
+    textual e deixa a resposta seguir (com o modelo normal), em vez de
+    derrubar o pedido inteiro com erro. O aviso instrui o modelo a contar
+    a falha ao usuário sem fingir que viu a imagem.
+    """
+    degraded = [dict(message) for message in messages]
+
+    for index, message in enumerate(degraded):
+        content = message.get("content")
+        if message.get("role") != "user" or not isinstance(content, list):
+            continue
+
+        has_image = any(
+            isinstance(part, dict) and part.get("type") == "image_url"
+            for part in content
+        )
+        if not has_image:
+            continue
+
+        text = " ".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        ).strip()
+
+        degraded[index] = {
+            "role": "user",
+            "content": (
+                "%s\n\n[Aviso interno: a imagem anexada não pôde ser "
+                "processada agora. Avise o usuário disso em uma frase e "
+                "responda pelo texto; não finja que viu a imagem nem "
+                "invente o que ela mostrava.]" % text
+            ).strip(),
+        }
+
+    return degraded
 
 
 def thinking_output_status(text):
@@ -268,10 +305,8 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None,
             )
 
         try:
-            response = requests.post(
-                API_BASE + "/chat/completions",
-                headers=auth_headers(),
-                json=body,
+            response = call_model(
+                body,
                 timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
             )
             if response.status_code != 200:
@@ -400,10 +435,8 @@ def interpret_deep_intent(user_id, user_message, messages, reasoning=None,
         progress("Interpretando a pergunta com o contexto recente.")
 
     try:
-        response = requests.post(
-            API_BASE + "/chat/completions",
-            headers=auth_headers(),
-            json=body,
+        response = call_model(
+            body,
             timeout=(CONNECT_TIMEOUT, min(DEEP_RESEARCH_TIMEOUT, 60)),
         )
         if response.status_code != 200:
@@ -465,10 +498,8 @@ def run_deep_research(user_id, topic, progress=None, reasoning=None):
             body["tools"] = [SEARCH_TOOL, VISIT_TOOL, TIME_TOOL]
             body["tool_choice"] = "auto"
 
-        response = requests.post(
-            API_BASE + "/chat/completions",
-            headers=auth_headers(),
-            json=body,
+        response = call_model(
+            body,
             timeout=(CONNECT_TIMEOUT, DEEP_RESEARCH_TIMEOUT),
         )
 
@@ -533,7 +564,10 @@ def run_deep_research(user_id, topic, progress=None, reasoning=None):
                     % (term, round_number)
                 )
                 note("Buscando na web: «%s»" % term)
-                found, error = run_web_search(term, patience=0, progress=note)
+                # Orçamento próprio de 90s por termo: antes era patience=0
+                # (insistência sem fim), o que prendia a rodada quando o
+                # buscador caía.
+                found, error = run_web_search(term, patience=90, progress=note)
 
                 if found:
                     note(
