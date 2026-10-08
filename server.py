@@ -2227,6 +2227,19 @@ def extract_reasoning(data):
     return ""
 
 
+def _could_start_marker(text):
+    """Devolve True se o texto pode ser o início de algum marcador
+    de pensamento (<think>, <|channel|>, etc.). Usado para decidir
+    se o buffer pode ser liberado como plain_text sem esperar mais
+    chunks."""
+
+    if not text:
+        return False
+
+    # Todos os marcadores começam com "<" (tag XML-style).
+    return text[0] == "<"
+
+
 def extract_inline_thought(text):
     """Extrai o conteúdo entre o primeiro par de marcadores de
     raciocínio inline do texto (<think>…</think>,
@@ -2329,6 +2342,14 @@ class InlineThoughtBuffer:
             if len(self._buffer) > max_open:
                 plain_text = self._buffer[:-max_open]
                 self._buffer = self._buffer[-max_open:]
+                return "", plain_text
+            # Para buffers menores que max_open, não podemos garantir
+            # que o conteúdo não é o início de um marcador. Mas se o
+            # buffer for maior que 0 e o primeiro caractere não puder
+            # ser o início de nenhum padrão, libera como plain_text.
+            if len(self._buffer) > 0 and not _could_start_marker(self._buffer):
+                plain_text = self._buffer
+                self._buffer = ""
                 return "", plain_text
             return "", ""
 
@@ -4461,14 +4482,21 @@ def finish_studio_with_tools(user_id, messages, reasoning, assistant_text, calls
     return current_text, notes
 
 def stream_studio_events(lines, reasoning_chunks, first_text, tool_calls,
-                         user_id, messages, reasoning):
+                         user_id, messages, reasoning, inline_buffer=None):
     """
     Stream do Estúdio em SSE. As ferramentas mexem só em arquivos locais
     (rápidas): rodam direto, sem o heartbeat usado no chat.
+
+    O inline_buffer (opcional) é o mesmo buffer populado pelo
+    probe_stream: continuamos acumulando dele para não perder o
+    contexto de <think> / <|channel>thought quando o probe terminou
+    sem ter visto o delimitador de fim.
     """
+    if inline_buffer is None:
+        inline_buffer = InlineThoughtBuffer()
+
     def generate():
         full_text = ""
-        inline_buffer = InlineThoughtBuffer()
 
         try:
             for thinking in reasoning_chunks:
@@ -4507,13 +4535,18 @@ def stream_studio_events(lines, reasoning_chunks, first_text, tool_calls,
                         yield sse({"type": "text", "text": plain_text})
                     continue
 
-                text = extract_text(data)
+                # Não há content neste chunk. Só vale chamar extract_text
+                # se o buffer não está esperando o resto de um bloco
+                # de pensamento (caso contrário, o texto que chegar
+                # depois pode vazar como plain_text antes do </think>).
+                if not inline_buffer._inside:
+                    text = extract_text(data)
 
-                if not text:
-                    continue
+                    if not text:
+                        continue
 
-                full_text += text
-                yield sse({"type": "text", "text": text})
+                    full_text += text
+                    yield sse({"type": "text", "text": text})
 
             # Libera o que sobrou no buffer no fim do stream.
             tail_reasoning, tail_text = finalize_inline_buffer(inline_buffer)
@@ -4690,8 +4723,14 @@ def probe_stream(lines):
 
     Num modelo com pensamento, o raciocínio chega antes do texto: a
     sondagem guarda esses pedaços para não perder o raciocínio quando o
-    stream principal começar. Devolve (reasoning_chunks, first_text,
-    tool_calls) ou None quando o stream acaba sem nada útil.
+    stream principal começar. Devolve uma tupla
+    (reasoning_chunks, first_text, tool_calls, inline_buffer) ou None
+    quando o stream acaba sem nada útil.
+
+    O inline_buffer devolvido mantém o estado acumulado (incluindo
+    possíveis pedaços parciais de <think> / <|channel>thought) para
+    que o stream_chat_events continue de onde a sondagem parou sem
+    perder o contexto do pensamento inline.
     """
     reasoning_chunks = []
     first_text = None
@@ -4730,10 +4769,15 @@ def probe_stream(lines):
                 # parcial. Continua sondando.
                 continue
 
-            text = extract_text(data)
-            if text:
-                first_text = text
-                break
+            # Não há content neste chunk. Só vale chamar extract_text
+            # se o buffer não está esperando o resto de um bloco de
+            # pensamento (caso contrário, o texto que chegar depois
+            # pode vazar como plain_text antes do </think>).
+            if not inline_buffer._inside and not inline_buffer._buffer:
+                text = extract_text(data)
+                if text:
+                    first_text = text
+                    break
 
         # Libera o que ficou acumulado no buffer (caso o raciocínio
         # inline seja o único conteúdo do modelo).
@@ -4754,7 +4798,7 @@ def probe_stream(lines):
     if first_text is None and not tool_calls and not reasoning_chunks:
         return None
 
-    return reasoning_chunks, first_text, tool_calls
+    return reasoning_chunks, first_text, tool_calls, inline_buffer
 
 
 def stream_content_field(data):
@@ -4774,18 +4818,26 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                        user_id, memory_enabled=True, messages=None,
                        memories=None, reasoning=None, custom_instructions="",
                        thinking_report="", deep_report="",
-                       system_prompt_override=""):
+                       inline_buffer=None, system_prompt_override=""):
     """
     Traduz o stream do modelo nos eventos SSE da NEXA. Fica em função
     separada para a pesquisa profunda reaproveitar: lá o relatório entra
     no request_body e o stream segue o mesmo caminho.
+
+    O inline_buffer (opcional) é o mesmo buffer populado pelo
+    probe_stream: continuamos acumulando dele para não perder o
+    contexto de <think> / <|channel>thought quando o probe terminou
+    sem ter visto o delimitador de fim. Se não for passado, um novo
+    buffer vazio é criado.
     """
+    if inline_buffer is None:
+        inline_buffer = InlineThoughtBuffer()
+
     def generate():
         full_text = ""
         reason = None
         memory_updated = False
         searched = False
-        inline_buffer = InlineThoughtBuffer()
 
         try:
             if thinking_report:
@@ -4833,13 +4885,18 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                         yield sse({"type": "text", "text": plain_text})
                     continue
 
-                text = extract_text(data)
+                # Não há content neste chunk. Só vale chamar extract_text
+                # se o buffer não está esperando o resto de um bloco
+                # de pensamento (caso contrário, o texto que chegar
+                # depois pode vazar como plain_text antes do </think>).
+                if not inline_buffer._inside:
+                    text = extract_text(data)
 
-                if not text:
-                    continue
+                    if not text:
+                        continue
 
-                full_text += text
-                yield sse({"type": "text", "text": text})
+                    full_text += text
+                    yield sse({"type": "text", "text": text})
 
             # Libera o que sobrou no buffer no fim do stream.
             tail_reasoning, tail_text = finalize_inline_buffer(inline_buffer)
@@ -4920,7 +4977,7 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
     if probe is None:
         return None
 
-    reasoning_chunks, first_text, tool_calls = probe
+    reasoning_chunks, first_text, tool_calls, inline_buffer = probe
 
     return Response(
         stream_with_context(
@@ -4929,6 +4986,7 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
                 user_id, memory_enabled, messages, memories, reasoning,
                 custom_instructions,
                 thinking_report,
+                inline_buffer=inline_buffer,
                 system_prompt_override=system_prompt_override,
             )
         ),
@@ -5135,7 +5193,7 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
             })
             return
 
-        reasoning_chunks, first_text, tool_calls = probe
+        reasoning_chunks, first_text, tool_calls, inline_buffer = probe
 
         yield from stream_chat_events(
             lines, reasoning_chunks, first_text, tool_calls, user_id,
@@ -5143,7 +5201,8 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
             custom_instructions,
             final_thinking_report,
             report,
-            system_prompt_override,
+            inline_buffer=inline_buffer,
+            system_prompt_override=system_prompt_override,
         )
 
     return Response(stream_with_context(generate()), headers=sse_headers())
@@ -5227,11 +5286,12 @@ def make_thinking_response(
             yield sse({"type": "error", "error": "O modelo não devolveu resposta."})
             return
 
-        reasoning_chunks, first_text, tool_calls = probe
+        reasoning_chunks, first_text, tool_calls, inline_buffer = probe
         yield from stream_chat_events(
             lines, reasoning_chunks, first_text, tool_calls, user_id,
             memory_enabled, messages, memories, reasoning,
             custom_instructions, report,
+            inline_buffer=inline_buffer,
             system_prompt_override=system_prompt_override,
         )
 
@@ -5643,13 +5703,14 @@ def studio_chat():
         upstream.close()
         return jsonify({"error": "O modelo do Estúdio não devolveu resposta."}), 502
 
-    reasoning_chunks, first_text, tool_calls = probe
+    reasoning_chunks, first_text, tool_calls, inline_buffer = probe
 
     return Response(
         stream_with_context(
             stream_studio_events(
                 lines, reasoning_chunks, first_text, tool_calls,
                 user_id, messages, reasoning,
+                inline_buffer=inline_buffer,
             )
         ),
         headers=sse_headers(),
