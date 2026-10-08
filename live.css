@@ -1,0 +1,317 @@
+:root {
+  --live-cyan: #86e5d1;
+  --live-coral: #ff8b7e;
+  --live-surface: rgba(13, 9, 19, 0.88);
+}
+
+.live-body {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100vh;
+  min-height: 100svh;
+  background:
+    radial-gradient(ellipse at 50% 42%, rgba(19, 92, 82, 0.2), transparent 36rem),
+    radial-gradient(ellipse at 14% 90%, rgba(76, 29, 149, 0.18), transparent 32rem),
+    var(--bg);
+}
+
+.live-page {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  margin: 0;
+  padding: 24px clamp(24px, 5vw, 72px) 28px;
+}
+
+.live-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+}
+
+.live-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.live-back span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+
+  /*
+    O ‹ é texto, então ele encosta na linha de base. Como a fonte tem
+    ascendente 27px e descendente 6px, o place-items: center recentra
+    a caixa de conteúdo e deixa o ícone 3,9px abaixo do centro óptico
+    da caixa. Esse padding recentra o conteúdo mais para cima e devolve
+    o glifo ao centro visual (desvio medido: 0,06px), sem mudar o
+    tamanho da caixa (box-sizing: border-box).
+  */
+  padding-bottom: 9.2px;
+
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--live-cyan);
+  font-size: 25px;
+  line-height: 1;
+}
+
+.live-model-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.live-main {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 20px;
+  width: 100%;
+  margin: 0;
+  padding: 24px 0;
+}
+
+.live-visual {
+  --core-size: 196px;
+
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 196px;
+  height: 196px;
+  margin: 0 auto 2px;
+  isolation: isolate;
+}
+
+.live-visual[data-state="connecting"] .core,
+.live-visual[data-state="listening"] .core {
+  animation-duration: 2.2s;
+}
+
+.live-visual[data-state="speaking"] {
+  --accent: #ff8b7e;
+  --accent-light: #ffd4bd;
+}
+
+.live-visual[data-state="speaking"] .core-energy {
+  animation-duration: 0.85s;
+}
+
+.live-visual[data-state="error"] {
+  --accent: #dc6675;
+  --accent-light: #ffc4c4;
+}
+
+
+/* =========================
+   BOLA ROXA
+   O esqueleto .core (aura, anéis, partículas) está sem estilo, então
+   a bola é a única forma visível dentro do .live-visual. Ela fica
+   calma em repouso e reage enquanto o Gemini fala: o live.js marca
+   visual.dataset.state = "speaking" quando o áudio do modelo começa
+   (e volta para "listening" quando ele termina).
+========================= */
+
+.live-orb {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+
+  width: calc(var(--core-size) * 0.74);
+  height: calc(var(--core-size) * 0.74);
+
+  border-radius: 50%;
+
+  background:
+    radial-gradient(
+      circle at 34% 28%,
+      #f6ecff 0%,
+      #d8b4fe 16%,
+      #a855f7 44%,
+      #7c3aed 70%,
+      #4c1d95 88%,
+      #2e1065 100%
+    );
+
+  box-shadow:
+    inset 0 -16px 30px rgba(30, 7, 60, 0.55),
+    inset 0 10px 22px rgba(255, 255, 255, 0.15),
+    0 16px 48px rgba(109, 40, 217, 0.38);
+
+  /* Repouso: apagada e respirando devagar. */
+  opacity: 0.45;
+  filter: saturate(0.72);
+  transform: scale(0.9);
+  transition: opacity 0.4s ease, filter 0.4s ease;
+
+  animation: liveOrbCalm 5s ease-in-out infinite;
+}
+
+/* Falando: acende, pulsa no compasso do áudio e emite ondas. */
+.live-visual[data-state="speaking"] .live-orb {
+  opacity: 1;
+  filter: none;
+
+  animation: liveOrbSpeak 0.85s ease-in-out infinite;
+}
+
+.live-orb::before,
+.live-orb::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+
+  border: 2px solid rgba(196, 132, 252, 0.75);
+  border-radius: 50%;
+
+  opacity: 0;
+}
+
+.live-visual[data-state="speaking"] .live-orb::before,
+.live-visual[data-state="speaking"] .live-orb::after {
+  animation: liveOrbRing 1.4s ease-out infinite;
+}
+
+.live-visual[data-state="speaking"] .live-orb::before {
+  animation-delay: -0.7s;
+}
+
+@keyframes liveOrbCalm {
+  0%,
+  100% {
+    transform: scale(0.9);
+  }
+
+  50% {
+    transform: scale(0.94);
+  }
+}
+
+@keyframes liveOrbSpeak {
+  0%,
+  100% {
+    transform: scale(0.94);
+    box-shadow:
+      inset 0 -16px 30px rgba(30, 7, 60, 0.55),
+      inset 0 10px 22px rgba(255, 255, 255, 0.15),
+      0 16px 48px rgba(109, 40, 217, 0.42);
+  }
+
+  50% {
+    transform: scale(1.08);
+    box-shadow:
+      inset 0 -16px 30px rgba(30, 7, 60, 0.45),
+      inset 0 10px 22px rgba(255, 255, 255, 0.22),
+      0 22px 74px rgba(147, 51, 234, 0.78);
+  }
+}
+
+@keyframes liveOrbRing {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+.live-heading {
+  text-align: center;
+}
+
+.live-heading h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 23px;
+}
+
+.live-heading p {
+  min-height: 20px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.live-controls {
+  display: flex;
+  justify-content: center;
+  min-height: 48px;
+}
+
+.live-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-width: 184px;
+  min-height: 48px;
+  padding: 0 20px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #07130f;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.16s ease, filter 0.16s ease;
+}
+
+.live-controls button:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.live-controls button:focus-visible,
+.live-back:focus-visible {
+  outline: 2px solid var(--live-cyan);
+  outline-offset: 3px;
+}
+
+.live-controls button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.live-start {
+  background: var(--live-cyan);
+}
+
+.live-end {
+  background: var(--live-coral);
+}
+
+.live-controls button[hidden] {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .live-page {
+    padding: 16px 18px 22px;
+  }
+
+  .live-main {
+    gap: 16px;
+  }
+
+  .live-visual {
+    --core-size: 168px;
+    width: 168px;
+    height: 168px;
+  }
+
+  .live-heading h1 {
+    font-size: 21px;
+  }
+}
+
+

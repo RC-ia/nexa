@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#07050b">
+  <title>Chamada Gemini Live | NEXA</title>
+  <link rel="stylesheet" href="style.css?v=23">
+  <link rel="stylesheet" href="live.css?v=8">
+</head>
+<body class="live-body">
+  <main class="live-page">
+    <header class="live-topbar">
+      <a class="live-back" href="/" aria-label="Voltar para a conversa">
+        <span aria-hidden="true">‹</span>
+        <strong>NEXA</strong>
+      </a>
+      <span class="live-model-label">GEMINI LIVE</span>
+    </header>
+
+    <section class="live-main" aria-labelledby="liveTitle">
+      <div class="live-visual" id="liveVisual" data-state="idle" aria-hidden="true">
+        <div class="live-orb"></div>
+        <div class="core">
+          <div class="core-aura"></div>
+          <div class="core-glow"></div>
+
+          <div class="core-ring ring-one"></div>
+          <div class="core-ring ring-two"></div>
+          <div class="core-ring ring-three"></div>
+
+          <div class="particle particle-one"></div>
+          <div class="particle particle-two"></div>
+          <div class="particle particle-three"></div>
+          <div class="particle particle-four"></div>
+          <div class="particle particle-five"></div>
+          <div class="particle particle-six"></div>
+          <div class="particle particle-seven"></div>
+          <div class="particle particle-eight"></div>
+
+          <div class="core-energy"></div>
+          <div class="core-dot"></div>
+        </div>
+      </div>
+
+      <div class="live-heading">
+        <h1 id="liveTitle">Chamada de voz</h1>
+        <p id="liveStatus" role="status" aria-live="polite">Verificando sessão…</p>
+      </div>
+
+      <div class="live-controls">
+        <button type="button" id="liveStart" class="live-start" disabled>
+          <span aria-hidden="true">☎</span>
+          Iniciar chamada
+        </button>
+        <button type="button" id="liveEnd" class="live-end" hidden>
+          <span aria-hidden="true">■</span>
+          Encerrar chamada
+        </button>
+      </div>
+    </section>
+  </main>
+  <script src="live.js?v=11"></script>
+</body>
+</html>
