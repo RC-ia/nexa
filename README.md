@@ -82,9 +82,24 @@ aparece para admins). Lá dá para listar, criar (com opção de ser admin),
 trocar a senha e apagar usuários.
 
 **Primeiro acesso:** ao subir o servidor pela primeira vez sem nenhum admin,
-ele cria a conta `admin` (ou o `ADMIN_USER` do `.env`). Se `ADMIN_PASSWORD`
-estiver no `.env`, essa é a senha; se não, o servidor gera uma senha e
-**mostra no console uma única vez**. Depois de entrar, troque-a no painel.
+ele cria a conta `admin` (ou o `ADMIN_USER` do `.env`) com a senha
+`ADMIN_PASSWORD` do `.env` — sem ela o servidor não sobe (erro no console:
+"Defina ADMIN_PASSWORD no .env antes do primeiro start"). Depois de entrar,
+troque-a no painel.
+
+**Recuperar a senha do admin:** trocar `ADMIN_PASSWORD` no `.env` só vale
+na **criação da primeira conta**. Com um admin já existente no `auth.db`, o
+valor do `.env` é ignorado (o servidor avisa isso no console ao subir). Para
+trocar a senha a qualquer momento, deixe no `.env` a senha desejada e rode:
+
+```bash
+python reset_admin.py
+```
+
+Ele atualiza a senha de `ADMIN_USER` para o valor de `ADMIN_PASSWORD` e
+derruba as sessões abertas dessa conta. Alternativa: pare o servidor, apague
+o `auth.db` (o banco de **login** — não confundir com o `nexa.db`, que guarda
+a memória) e reinicie; a conta será recriada com o `.env` atual.
 
 Como funciona:
 

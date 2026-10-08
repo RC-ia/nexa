@@ -109,6 +109,14 @@ def init_auth_db():
         ).fetchone()
 
         if has_admin:
+            # O .env só cria o admin na PRIMEIRA vez. Depois, trocar
+            # ADMIN_PASSWORD no .env não muda a senha do banco - quem
+            # define a senha agora é o Painel admin ou reset_admin.py.
+            print(
+                "[NEXA-auth] Admin já existe; ADMIN_PASSWORD do .env não "
+                "é aplicado. Para trocar a senha: python reset_admin.py",
+                flush=True,
+            )
             return
 
         password = ADMIN_PASSWORD
