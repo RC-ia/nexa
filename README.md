@@ -6,6 +6,33 @@ máquina e ser exposta com o túnel do Cloudflare (`cloudflared`).
 
 Estrutura:
 
+- `server.py` — entrypoint fino; a implementação vive no pacote `nexa/` (`python server.py` continua igual)
+- `nexa/` — servidor Flask modularizado (refatorado a partir do antigo `server.py` monolítico):
+  - `app.py` — app Flask, headers de segurança, registro de rotas e `main()`
+  - `config.py` — variáveis de ambiente, limites, prompts padrão e schemas das ferramentas
+  - `routes_chat.py` — `/api/chat` e `/api/chat/title`
+  - `chatflow.py` — montagem das respostas: streaming SSE, loop de ferramentas, pesquisa profunda, pensamento e fallback bloqueante
+  - `llm.py` — cliente do provedor: headers, corpo, extração de raciocínio/tool calls, primitivas de SSE
+  - `agents.py` — agentes de visão, pensamento, intenção/tema e pesquisa profunda
+  - `tools.py` — executor das ferramentas (`pesquisar`, `visitar_pagina`, `salvar_memoria`, `criar_lembrete`...)
+  - `websearch.py` — busca DuckDuckGo/Bing, leitura de páginas e cache de resultados
+  - `reminders.py` — lembretes: criação, agendamento, agentes e disparo
+  - `memory.py` — memória consolidada por conta (Markdown)
+  - `prompts.py` — system prompt e prompt "safadinho" personalizados por conta
+  - `settings.py`, `usertime.py`, `chatsync.py`, `push.py` — pesquisa profunda por conta, fuso horário, sync de conversas e push FCM
+  - `images.py`, `studio.py`, `live.py` — gerador de imagens, Estúdio e chamada Gemini Live
+  - `webhelpers.py`, `routes_settings.py` — rotas básicas/helpers e rotas de configurações
+- `auth.py` — login, sessões e painel admin
+- `run.py` — supervisor: roda o servidor e aplica auto-update via git
+- `launcher.py` — sobe/derruba o supervisor desanexado (daemon)
+- `server_manager.py` — status e controle do servidor para o Painel admin
+- `index.html`, `style.css` + `js/` — frontend do chat em ES modules (refatorado a partir do antigo `script.js` único): `boot.js` é o entrypoint; `state.js` concentra o estado mutável; `dom.js` o cache de elementos; os demais dividem o app por área (chats, stream, images, settings, reminders, native, auth, gestures, drawer, preferences, attachments, messages, markdown, constants)
+- `live.html`, `live.css`, `live.js` — página da chamada Gemini Live
+- `requirements.txt` — dependências Python
+- `.env.example` — modelo de configuração
+- `memoria/` — um arquivo `.md` por conta com a memória consolidada (criado automaticamente)
+- `auth.db` — contas, cadastros pendentes e sessões (criado automaticamente, **não versionar**)
+
 - `server.py` — servidor Flask (serve o site + `/api/chat` com streaming SSE + `/api/images/generate` do gerador de imagens)
 - `auth.py` — login, sessões e painel admin
 - `run.py` — supervisor: roda o servidor e aplica auto-update via git
