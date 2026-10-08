@@ -2147,31 +2147,67 @@ def extract_text(data):
     content = delta.get("content")
 
     if isinstance(content, str):
-        return strip_diffusiongemma_thought(content)
+        return strip_inline_thought(content)
 
     message = choice.get("message") or {}
     content = message.get("content")
 
     if isinstance(content, str):
-        return strip_diffusiongemma_thought(content)
+        return strip_inline_thought(content)
 
     return ""
 
 
-def strip_diffusiongemma_thought(text):
-    """Remove blocos <|channel>thought ... <channel|> do texto final."""
-    if not text or "<|channel>thought" not in text:
+# Marcadores de pensamento que alguns modelos emitem quando o provedor não
+# expõe um campo de raciocínio separado (reasoning_content). O raciocínio
+# aparece dentro do "content" entre esses pares de tokens. As strings são
+# literais (não regex) para que o find() e o re.escape() concordem no
+# tamanho.
+INLINE_THOUGHT_PATTERNS = (
+    # diffusiongemma (formato documentado).
+    ("<|channel|>thought", "<channel|>"),
+    # diffusiongemma (formato observado sem o "thought").
+    ("<|channel|>", "<channel|>"),
+    # DeepSeek R1, Qwen QwQ, Kimi e variantes quando o provedor
+    # não devolve o campo separado de raciocínio.
+    ("<think>", "</think>"),
+    # Algumas variantes usam reflexão / raciocínio como rótulo.
+    ("<reflection>", "</reflection>"),
+    ("<reasoning>", "</reasoning>"),
+)
+
+
+def strip_inline_thought(text):
+    """Remove blocos de pensamento inline (<think>, <|channel>thought etc.)
+    do texto final que vai para o chat. O texto do pensamento continua
+    acessível via extract_inline_thought."""
+    if not text:
         return text
-    # Remove tudo entre <|channel>thought e <channel|> inclusive
-    import re
-    return re.sub(r"<\|channel\|>thought.*?<channel\|>", "", text, flags=re.DOTALL).strip()
+
+    cleaned = text
+
+    for start_pattern, _end_pattern in INLINE_THOUGHT_PATTERNS:
+        if start_pattern in cleaned:
+            # Remove o bloco mais o marcador final; mantém o que vem
+            # antes/depois para o usuário.
+            cleaned = re.sub(
+                r"%s.*?%s" % (re.escape(start_pattern), re.escape(_end_pattern)),
+                "",
+                cleaned,
+                flags=re.DOTALL,
+            )
+
+    return cleaned.strip()
 
 
 def extract_reasoning(data):
     """
     O raciocínio chega em campos diferentes dependendo do modelo/router
     (reasoning_content é o mais comum em APIs compatíveis com OpenAI).
-    diffusiongemma emite no conteúdo com tokens <|channel>thought.
+
+    Raciocínio inline no content (diffusiongemma, <think>, etc.) é
+    tratado pelo InlineThoughtBuffer para tolerar marcadores divididos
+    entre chunks de streaming.
     """
 
     choices = data.get("choices") or []
@@ -2188,31 +2224,226 @@ def extract_reasoning(data):
             if isinstance(value, str):
                 return value
 
-        # diffusiongemma: raciocínio vem no content com <|channel>thought
-        content = holder.get("content")
-        if isinstance(content, str):
-            thought = extract_diffusiongemma_thought(content)
-            if thought:
-                return thought
+    return ""
+
+
+def extract_inline_thought(text):
+    """Extrai o conteúdo entre o primeiro par de marcadores de
+    raciocínio inline do texto (<think>…</think>,
+    <|channel>thought…<channel|>, etc.). Usado por respostas
+    bloqueantes e pelo buffer de streaming para detectar o início
+    do bloco de pensamento."""
+    if not text:
+        return ""
+
+    for start_pattern, end_pattern in INLINE_THOUGHT_PATTERNS:
+        start = text.find(start_pattern)
+        if start < 0:
+            continue
+
+        # Início do raciocínio é logo depois do marcador de abertura.
+        thought_start = start + len(start_pattern)
+        end = text.find(end_pattern, thought_start)
+
+        # Marcador de fim ainda não chegou (chunks parciais no streaming);
+        # nesse caso devolve o que temos até agora, sem o marcador de fim,
+        # para que o caller continue alimentando o buffer.
+        if end < 0:
+            return text[thought_start:].lstrip()
+
+        # Pega o trecho entre os marcadores; strip só nas pontas para
+        # preservar a formatação interna do raciocínio.
+        return text[thought_start:end].strip()
 
     return ""
 
 
-def extract_diffusiongemma_thought(text):
-    """Extrai bloco de pensamento do formato <|channel>thought ... <channel|> ou <|channel> ... <channel|>."""
-    if not text or "<|channel>" not in text:
-        return ""
-    try:
-        # Tenta primeiro o formato documentado: <|channel>thought ... <channel|>
-        if "<|channel>thought" in text:
-            start = text.index("<|channel>thought") + len("<|channel>thought")
-        else:
-            # Formato observado: <|channel> ... <channel|>
-            start = text.index("<|channel>") + len("<|channel>")
-        end = text.index("<channel|>", start)
-        return text[start:end].strip()
-    except ValueError:
-        return ""
+class InlineThoughtBuffer:
+    """Acumula pedaços de conteúdo em streaming para detectar raciocínio
+    inline (<think>, <|channel>thought) mesmo quando os marcadores de
+    abertura/fechamento ficam divididos entre chunks.
+
+    Devolve (reasoning, plain_text) a cada chamada: o raciocínio pronto
+    para emitir como evento "reasoning" e o texto limpo para enviar ao
+    usuário. O plain_text inclui o conteúdo depois do bloco de
+    pensamento, se o marcador de fim já chegou."""
+
+    def __init__(self):
+        self._buffer = ""
+        self._inside = False
+        self._open_pattern = ""
+        self._close_pattern = ""
+        self._reasoning_seen = 0
+
+    def feed(self, chunk):
+        """Recebe um chunk de conteúdo e devolve (reasoning, plain_text).
+        O reasoning pode vir vazio quando o bloco de pensamento ainda não
+        fechou. O plain_text vem apenas com o que está depois do bloco de
+        pensamento (ou tudo o que chegou se nenhum marcador foi visto).
+
+        O buffer interno guarda o estado entre as chamadas para tolerar
+        marcadores divididos em vários chunks. Enquanto o bloco de
+        pensamento não fechar, a parte "nova" do conteúdo desde a última
+        chamada é devolvida como reasoning."""
+
+        if not chunk:
+            return "", ""
+
+        if not self._inside:
+            # Procurando o marcador de abertura no buffer acumulado.
+            self._buffer += chunk
+            return self._scan_for_open_marker()
+
+        # Já estamos dentro de um bloco de pensamento; acumula o chunk
+        # e procura o marcador de fim.
+        self._buffer += chunk
+        return self._emit_progress()
+
+    def _scan_for_open_marker(self):
+        """Procura o marcador de abertura no buffer. Se encontrar,
+        separa o que veio antes como plain_text, abre o bloco e
+        processa. Se não encontrar, libera o que exceder o limite de
+        buffer (4 KB) para não acumular texto normal indefinidamente."""
+
+        open_index = -1
+        open_pattern = ""
+        for pattern, close in INLINE_THOUGHT_PATTERNS:
+            idx = self._buffer.find(pattern)
+            if idx >= 0 and (open_index < 0 or idx < open_index):
+                open_index = idx
+                open_pattern = pattern
+                self._close_pattern = close
+
+        if open_index < 0:
+            # Nenhum marcador visto ainda. Libera tudo para o usuário
+            # se o buffer for grande o suficiente para garantir que
+            # não há marcador pendente de chunk anterior.
+            if len(self._buffer) > 4096:
+                plain_text = self._buffer
+                self._buffer = ""
+                return "", plain_text
+            # Se o buffer for maior que o maior padrão de abertura,
+            # podemos liberar o prefixo com segurança (nenhum padrão
+            # de pensamento começa no meio do buffer).
+            max_open = max(len(p) for p, _ in INLINE_THOUGHT_PATTERNS)
+            if len(self._buffer) > max_open:
+                plain_text = self._buffer[:-max_open]
+                self._buffer = self._buffer[-max_open:]
+                return "", plain_text
+            return "", ""
+
+        # Marcador de abertura encontrado. Libera o que vem antes
+        # como texto normal.
+        plain_text = self._buffer[:open_index]
+        self._buffer = self._buffer[open_index + len(open_pattern):]
+        self._inside = True
+        self._open_pattern = open_pattern
+        self._reasoning_seen = 0
+
+        return self._emit_progress(leading_plain=plain_text)
+
+    def _drain_buffer(self):
+        """Libera todo o conteúdo do buffer como plain_text, sem
+        procurar marcadores. Usado para processar o texto que sobrou
+        depois de um bloco de pensamento (já que sabemos que não há
+        mais raciocínio pendente nesse mesmo chunk)."""
+        plain_text = self._buffer
+        self._buffer = ""
+        return "", plain_text
+
+    def _emit_progress(self, leading_plain=""):
+        """Procura o marcador de fim no buffer. Devolve (new_reasoning,
+        plain_text). A nova parte do raciocínio (desde a última chamada)
+        é emitida; o resto do buffer é mantido para a próxima chamada.
+        leading_plain é concatenado ao plain_text retornado."""
+
+        end_index = self._buffer.find(self._close_pattern)
+
+        if end_index < 0:
+            # Bloco de pensamento ainda aberto. Emite só o que apareceu
+            # de novo desde a última chamada, mas mantém no buffer um
+            # sufixo de até (close_size - 1) caracteres para não emitir
+            # uma possível parte inicial do delimitador. Se o buffer
+            # for menor que close_size, o sufixo cabe inteiro no buffer
+            # e o conteúdo é emitido normalmente.
+            close_size = len(self._close_pattern)
+            hold = min(close_size - 1, len(self._buffer))
+            safe_cut = max(self._reasoning_seen, len(self._buffer) - hold)
+            new_reasoning = self._buffer[self._reasoning_seen:safe_cut]
+            self._reasoning_seen = safe_cut
+            return new_reasoning, leading_plain
+
+        # Bloco fechou. Emite a parte nova entre o ponto visto e o
+        # marcador de fim, e processa o que vier depois do marcador
+        # como conteúdo normal (pode ter mais texto ou mais marcadores
+        # inline em casos raros).
+        new_reasoning = self._buffer[self._reasoning_seen:end_index]
+        remainder = self._buffer[end_index + len(self._close_pattern):]
+        self._buffer = ""
+        self._inside = False
+        self._open_pattern = ""
+        self._close_pattern = ""
+        self._reasoning_seen = 0
+
+        plain_text = leading_plain
+        if remainder:
+            # O remainder é o texto que veio depois do marcador de
+            # fim do pensamento. Pode ter mais marcadores inline
+            # (raro, mas possível). Processa via _scan_for_open_marker
+            # e libera o que não virar raciocínio (só se não estiver
+            # dentro de um novo bloco de pensamento).
+            self._buffer = remainder
+            extra_reasoning, extra_plain = self._scan_for_open_marker()
+            new_reasoning += extra_reasoning
+            if self._buffer and not self._inside:
+                _, leftover = self._drain_buffer()
+                extra_plain += leftover
+            plain_text += extra_plain
+
+        return new_reasoning, plain_text
+
+    def flush(self):
+        """No fim do streaming, libera qualquer texto pendente no
+        buffer. Se ainda estiver dentro de um bloco de pensamento sem
+        fechamento, devolve o que tiver como raciocínio."""
+        if not self._buffer:
+            return "", ""
+
+        # Só emite a parte do buffer que ainda não foi vista para
+        # evitar duplicar conteúdo já enviado em chamadas anteriores.
+        tail = self._buffer[self._reasoning_seen:]
+        self._buffer = ""
+        if self._inside:
+            # Marcador de fim ausente; trata o que sobrou como raciocínio
+            # para não perder a parte final do pensamento.
+            return tail, ""
+
+        # Fora de um bloco de pensamento: o que ficou é texto normal
+        # (pode ser o resto da resposta ou um marcador de abertura que
+        # ficou sem fechamento).
+        return "", tail
+
+
+def split_reasoning_from_content(content, buffer):
+    """
+    Recebe o campo "content" de um chunk (delta ou message) e devolve
+    (reasoning, plain_text). Usa reasoning para extrair o raciocínio
+    inline quando o modelo emite <think> / <|channel>thought no próprio
+    conteúdo; plain_text é o que sobra para enviar ao usuário.
+
+    O buffer acumula conteúdo entre chunks para detectar marcadores
+    divididos em vários pedaços.
+    """
+    if not isinstance(content, str):
+        return "", ""
+
+    reasoning, plain_text = buffer.feed(content)
+    return reasoning, plain_text
+
+
+def finalize_inline_buffer(buffer):
+    """Esvazia o buffer de pensamento inline ao final do streaming."""
+    return buffer.flush()
 
 
 def finish_reason(data):
@@ -4237,6 +4468,7 @@ def stream_studio_events(lines, reasoning_chunks, first_text, tool_calls,
     """
     def generate():
         full_text = ""
+        inline_buffer = InlineThoughtBuffer()
 
         try:
             for thinking in reasoning_chunks:
@@ -4260,6 +4492,21 @@ def stream_studio_events(lines, reasoning_chunks, first_text, tool_calls,
                 for piece in extract_tool_calls(data):
                     merge_tool_call(tool_calls, piece)
 
+                # Detecta raciocínio inline (<think>, <|channel>thought)
+                # no content, acumulando entre chunks para tolerar
+                # marcadores divididos pelo streaming.
+                content = stream_content_field(data)
+                if content:
+                    inline_reasoning, plain_text = split_reasoning_from_content(
+                        content, inline_buffer
+                    )
+                    if inline_reasoning:
+                        yield sse({"type": "reasoning", "text": inline_reasoning})
+                    if plain_text:
+                        full_text += plain_text
+                        yield sse({"type": "text", "text": plain_text})
+                    continue
+
                 text = extract_text(data)
 
                 if not text:
@@ -4267,6 +4514,14 @@ def stream_studio_events(lines, reasoning_chunks, first_text, tool_calls,
 
                 full_text += text
                 yield sse({"type": "text", "text": text})
+
+            # Libera o que sobrou no buffer no fim do stream.
+            tail_reasoning, tail_text = finalize_inline_buffer(inline_buffer)
+            if tail_reasoning:
+                yield sse({"type": "reasoning", "text": tail_reasoning})
+            if tail_text:
+                full_text += tail_text
+                yield sse({"type": "text", "text": tail_text})
 
             if tool_calls:
                 follow_up, notes = finish_studio_with_tools(
@@ -4441,6 +4696,7 @@ def probe_stream(lines):
     reasoning_chunks = []
     first_text = None
     tool_calls = []
+    inline_buffer = InlineThoughtBuffer()
 
     try:
         for raw in lines:
@@ -4457,11 +4713,36 @@ def probe_stream(lines):
             for piece in extract_tool_calls(data):
                 merge_tool_call(tool_calls, piece)
 
-            text = extract_text(data)
+            # Extrai também raciocínio inline (<think> / <|channel>thought)
+            # do content, alimentando o buffer para não perder marcadores
+            # que venham divididos entre chunks.
+            content = stream_content_field(data)
+            if content:
+                inline_reasoning, plain_text = split_reasoning_from_content(
+                    content, inline_buffer
+                )
+                if inline_reasoning:
+                    reasoning_chunks.append(inline_reasoning)
+                if plain_text:
+                    first_text = plain_text
+                    break
+                # Sem plain_text ainda: pode ser um chunk com <think>
+                # parcial. Continua sondando.
+                continue
 
+            text = extract_text(data)
             if text:
                 first_text = text
                 break
+
+        # Libera o que ficou acumulado no buffer (caso o raciocínio
+        # inline seja o único conteúdo do modelo).
+        if first_text is None and not tool_calls:
+            tail_reasoning, tail_text = finalize_inline_buffer(inline_buffer)
+            if tail_reasoning:
+                reasoning_chunks.append(tail_reasoning)
+            if tail_text:
+                first_text = tail_text
 
     except requests.RequestException as error:
         print(
@@ -4470,10 +4751,24 @@ def probe_stream(lines):
         )
         return None
 
-    if first_text is None and not tool_calls:
+    if first_text is None and not tool_calls and not reasoning_chunks:
         return None
 
     return reasoning_chunks, first_text, tool_calls
+
+
+def stream_content_field(data):
+    """Devolve o campo "content" (delta ou message) como string, ou
+    string vazia se ausente."""
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+    choice = choices[0] or {}
+    for holder in (choice.get("delta") or {}, choice.get("message") or {}):
+        content = holder.get("content")
+        if isinstance(content, str):
+            return content
+    return ""
 
 def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                        user_id, memory_enabled=True, messages=None,
@@ -4490,6 +4785,7 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
         reason = None
         memory_updated = False
         searched = False
+        inline_buffer = InlineThoughtBuffer()
 
         try:
             if thinking_report:
@@ -4522,6 +4818,21 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                 for piece in extract_tool_calls(data):
                     merge_tool_call(tool_calls, piece)
 
+                # Detecta raciocínio inline (<think>, <|channel>thought)
+                # no content, acumulando entre chunks para tolerar
+                # marcadores divididos pelo streaming.
+                content = stream_content_field(data)
+                if content:
+                    inline_reasoning, plain_text = split_reasoning_from_content(
+                        content, inline_buffer
+                    )
+                    if inline_reasoning:
+                        yield sse({"type": "reasoning", "text": inline_reasoning})
+                    if plain_text:
+                        full_text += plain_text
+                        yield sse({"type": "text", "text": plain_text})
+                    continue
+
                 text = extract_text(data)
 
                 if not text:
@@ -4529,6 +4840,14 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
 
                 full_text += text
                 yield sse({"type": "text", "text": text})
+
+            # Libera o que sobrou no buffer no fim do stream.
+            tail_reasoning, tail_text = finalize_inline_buffer(inline_buffer)
+            if tail_reasoning:
+                yield sse({"type": "reasoning", "text": tail_reasoning})
+            if tail_text:
+                full_text += tail_text
+                yield sse({"type": "text", "text": tail_text})
 
             if reason == "length":
                 print(

@@ -513,10 +513,15 @@ depois de recarregar a página.
 
 O raciocínio só aparece se o modelo realmente o enviar: o backend lê
 `reasoning_content` (o campo mais comum), `reasoning` ou `thinking` — tanto
-no streaming quanto na resposta bloqueante. Modelos que não expõem
-raciocínio deixam o painel com a mensagem "O modelo não expôs o raciocínio
-desta resposta". Nesses casos, selecionar um nível no seletor de reforço
-também pode não ter efeito.
+no streaming quanto na resposta bloqueante. Quando o provedor não expõe
+esses campos, o servidor também reconhece o raciocínio inline dentro do
+próprio `content` em modelos como DeepSeek R1, Qwen QwQ, Kimi e
+diffusiongemma, nos formatos `<think>…`, `<|channel>thought…<channel|>`, e
+variantes com `<reflection>` e `<reasoning>`. Os marcadores são detectados
+mesmo quando vêm divididos entre vários chunks de streaming. Modelos que
+não expõem raciocínio deixam o painel com a mensagem "O modelo não expôs
+o raciocínio desta resposta". Nesses casos, selecionar um nível no seletor
+de reforço também pode não ter efeito.
 
 ## Timeout e HTTP 524
 
