@@ -106,10 +106,22 @@ export const REMINDERS_CHAT_ID = "lembretes-da-nexa";
 export const REMINDERS_CHAT_TITLE = "Lembretes";
 
 
-export const IMAGE_CHATS_KEY = "nexa_image_chats";
+/*
+  Galeria de imagens por conta: mesma ideia das conversas (nexa_chats:<id>),
+  só que antes era uma chave única para o navegador — aí toda conta que
+  entrava via a galeria da anterior. As chaves antigas ficam aqui só para a
+  migração: o primeiro login herda o que existia e apaga a chave comum.
+*/
+export const IMAGE_CHATS_KEY_PREFIX = "nexa_image_chats:";
 
 
-export const ACTIVE_IMAGE_CHAT_KEY = "nexa_active_image_chat";
+export const ACTIVE_IMAGE_CHAT_KEY_PREFIX = "nexa_active_image_chat:";
+
+
+export const LEGACY_IMAGE_CHATS_KEY = "nexa_image_chats";
+
+
+export const LEGACY_ACTIVE_IMAGE_CHAT_KEY = "nexa_active_image_chat";
 
 
 export const VIEW_MODE_KEY = "nexa_view_mode";

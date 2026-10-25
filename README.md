@@ -63,7 +63,8 @@ API_GEMA=sua-chave-gemini-aqui
 ```
 
 Opcionais (já têm padrão): `API_BASE`, `MODEL`, `VISION_MODEL`, `PORT`,
-`MAX_OUTPUT_TOKENS`, `MEMORY_DIR`, `STUDIO_DIR`, `STREAM_TIMEOUT`,
+`HOST`, `TRUSTED_PROXY_IPS`, `MAX_OUTPUT_TOKENS`, `MEMORY_DIR`,
+`STUDIO_DIR`, `STREAM_TIMEOUT`,
 `THINKING_MINIMUM_ROUNDS`, `THINKING_LOW_ROUNDS`,
 `THINKING_MEDIUM_ROUNDS`, `THINKING_HIGH_ROUNDS`,
 `THINKING_VERY_HIGH_ROUNDS`, `THINKING_MAXIMUM_ROUNDS`,
@@ -136,9 +137,12 @@ e `DELETE /api/admin/users/<id>`.
 python run.py
 ```
 
-O `run.py` inicia o servidor e fica verificando o repositório git a cada
-`UPDATE_INTERVAL` segundos (padrão 180). Se houver commits novos, faz
-`git pull --ff-only` e reinicia o servidor automaticamente.
+O `run.py` inicia o servidor e, **com o auto-update ligado**
+(`AUTO_UPDATE=1` no `.env`; desligado por padrão), fica verificando o
+repositório git a cada `UPDATE_INTERVAL` segundos (padrão 180). Se houver
+commits novos, faz `git pull --ff-only` e reinicia o servidor
+automaticamente. Como isso é execução de código por design, só ligue com
+um remoto privado e confiável.
 
 ### Opção B — Servidor direto (sem auto-update)
 
@@ -146,14 +150,17 @@ O `run.py` inicia o servidor e fica verificando o repositório git a cada
 python server.py
 ```
 
-A aplicação sobe em `http://localhost:8000`. O gerador de imagens fica no
-**modo Imagens** da gaveta (botão **Imagens**) e usa a API da Novita AI
-configurada por `API_IMAGE`, `MODEL_IMAGE` e `IMAGE_API_URL` no `.env`; ele
-salva as imagens em `generated/` e não exige um segundo servidor Flask.
+A aplicação sobe em `http://localhost:8000` (o `HOST` no `.env` define a
+interface; o padrão `127.0.0.1` atende o túnel cloudflared). O gerador de
+imagens fica no **modo Imagens** da gaveta (botão **Imagens**) e usa a API
+da Novita AI configurada por `API_IMAGE`, `MODEL_IMAGE` e `IMAGE_API_URL`
+no `.env`; ele salva as imagens em `generated/acct_<id>/`, uma pasta por
+conta, e não exige um segundo servidor Flask.
 A **lista** da galeria é por conta (`nexa_image_chats:<id>` no
-`localStorage`); os **arquivos** em `generated/` ainda não têm dono gravado
-no nome, e qualquer conta logada que tenha o nome abre — a pasta por conta
-é a próxima etapa.
+`localStorage`) e os **arquivos** agora também: cada conta só abre e apaga
+o que está na própria pasta. Imagens antigas, salvas direto em `generated/`
+antes dessa mudança, continuam acessíveis a qualquer conta logada que tenha
+o nome (limitação antiga, mantida por compatibilidade).
 Imagens Markdown de URLs externas nas respostas normais são mostradas como
 texto, não carregadas automaticamente.
 
@@ -201,13 +208,16 @@ python launcher.py restart
 
 ## Atualização automática (git)
 
-O `run.py` verifica o repositório a cada `UPDATE_INTERVAL` segundos (padrão
-180). Se houver commits novos no remoto, ele roda `git pull --ff-only` e
-reinicia o servidor automaticamente.
+Com `AUTO_UPDATE=1`, o `run.py` verifica o repositório a cada
+`UPDATE_INTERVAL` segundos (padrão 180). Se houver commits novos no remoto,
+ele roda `git pull --ff-only` e reinicia o servidor automaticamente. O
+padrão é **desligado** (`AUTO_UPDATE=0`): o que chega no remoto é aplicado
+e executado sozinho, então só ligue apontando para um remoto privado e
+confiável.
 
 Configurações no `.env`:
 
-- `AUTO_UPDATE=1` — liga/desliga (`0` desliga).
+- `AUTO_UPDATE=0` — liga/desliga (`1` liga).
 - `UPDATE_INTERVAL=180` — intervalo das checagens, em segundos (mínimo 30).
 - `GIT_REMOTE=origin` — remoto usado.
 - `GIT_BRANCH=` — branch; vazio usa o upstream da branch atual.
@@ -487,6 +497,27 @@ Como funciona:
 
 Rotas: `GET /api/chats`, `PUT /api/chats/<id>`, `DELETE /api/chats/<id>` e
 `DELETE /api/chats`.
+
+## Segurança
+
+Resumo das proteções pensadas no servidor:
+
+- O servidor escuta em `127.0.0.1` por padrão (`HOST` no `.env`); o túnel
+  cloudflared acessa pelo localhost. Só requisições vindas dos IPs de
+  `TRUSTED_PROXY_IPS` (padrão `127.0.0.1,::1`) podem informar
+  `CF-Connecting-IP` e `X-Forwarded-Proto`; fora daí valem o IP real da
+  conexão — o rate limit do login não pode ser burlado com header forjado.
+- O login só aceita corpo JSON (formulário cross-site não inicia sessão).
+- Rotas que mudam estado exigem a credencial de mensagem
+  (`X-Nexa-Message-Key`, além do cookie `SameSite=Lax`).
+- A ferramenta `visitar_pagina` só busca http/https em hosts públicos e
+  valida cada redirecionamento (evita SSRF para a rede interna).
+- Imagens geradas ficam por conta em `generated/acct_<id>/`; cada conta só
+  abre e apaga as próprias.
+- As bibliotecas de frontend vêm de CDN com `integrity` (SRI); o
+  `script-src` da CSP não permite script inline.
+- O auto-update via git é opt-in (`AUTO_UPDATE=1`) e deve apontar para um
+  remoto confiável.
 
 ## Versão
 

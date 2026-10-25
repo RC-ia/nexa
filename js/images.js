@@ -5,7 +5,7 @@
 import { clearAttachment } from "./attachments.js";
 import { showAuth } from "./auth.js";
 import { deleteGeneratedImages, findChat, formatWhen, makeMessageId, renderChatList, renderWelcomeState, saveChats, scheduleChatsPush } from "./chats.js";
-import { ACTIVE_IMAGE_CHAT_KEY, IMAGE_CHATS_KEY, VIEW_MODE_KEY } from "./constants.js";
+import { ACTIVE_IMAGE_CHAT_KEY_PREFIX, IMAGE_CHATS_KEY_PREFIX, LEGACY_ACTIVE_IMAGE_CHAT_KEY, LEGACY_IMAGE_CHATS_KEY, VIEW_MODE_KEY } from "./constants.js";
 import { app, chatFeed, composer, drawerChat, drawerChats, drawerImages, drawerSection, imageChat } from "./dom.js";
 import { imageComposer, imageFeed, imageGallery, imageGalleryEmpty, imageGalleryGrid, imagePromptInput, imageSendButton, input } from "./dom.js";
 import { scrollConversationToBottom } from "./dom.js";
@@ -15,7 +15,7 @@ import { addMessage, hideTyping, showTyping } from "./messages.js";
 import { renderSpicyMode } from "./preferences.js";
 import { saveMemory } from "./settings.js";
 import { abortController, activeChatId, activeImageChatId, assignActiveImageChatId, assignImageChats, assignImageGenerating, assignViewMode, history } from "./state.js";
-import { imageChats, imageGenerating, messageKey, spicyMode, viewMode } from "./state.js";
+import { currentUser, imageChats, imageGenerating, messageKey, spicyMode, viewMode } from "./state.js";
 import { generateChatTitle, setGenerating } from "./stream.js";
 
 export function loadViewMode() {
@@ -142,10 +142,25 @@ export function currentImageChat() {
 }
 
 
+/*
+  Chaves da galeria por conta: cada usuário guarda a própria lista de
+  imagens, separada pelas chaves "nexa_image_chats:<id>" e
+  "nexa_active_image_chat:<id>" — igual às conversas de texto.
+*/
+function imageChatsStorageKey() {
+  return IMAGE_CHATS_KEY_PREFIX + (currentUser ? currentUser.id : "");
+}
+
+
+function activeImageChatStorageKey() {
+  return ACTIVE_IMAGE_CHAT_KEY_PREFIX + (currentUser ? currentUser.id : "");
+}
+
+
 export function saveImageChats() {
   try {
-    localStorage.setItem(IMAGE_CHATS_KEY, JSON.stringify(imageChats));
-    localStorage.setItem(ACTIVE_IMAGE_CHAT_KEY, activeImageChatId || "");
+    localStorage.setItem(imageChatsStorageKey(), JSON.stringify(imageChats));
+    localStorage.setItem(activeImageChatStorageKey(), activeImageChatId || "");
   } catch {
     // Armazenamento indisponível: segue só em memória.
   }
@@ -156,8 +171,45 @@ export function loadImageChats() {
   assignImageChats([]);
   assignActiveImageChatId(null);
 
+  let raw = null;
+
   try {
-    const raw = localStorage.getItem(IMAGE_CHATS_KEY);
+    raw = localStorage.getItem(imageChatsStorageKey());
+  } catch {
+    // Armazenamento indisponível: começa sem galeria salva.
+  }
+
+  /*
+    Migração da chave antiga, única para o navegador inteiro
+    (nexa_image_chats): a primeira conta que abrir a galeria herda o que
+    existia antes — igual às conversas antigas — e a chave comum é apagada
+    para a próxima conta não herdar de novo.
+  */
+  if (raw === null) {
+    try {
+      const legacyRaw = localStorage.getItem(LEGACY_IMAGE_CHATS_KEY);
+
+      if (legacyRaw !== null) {
+        localStorage.setItem(imageChatsStorageKey(), legacyRaw);
+
+        const legacyActive = localStorage.getItem(
+          LEGACY_ACTIVE_IMAGE_CHAT_KEY
+        );
+
+        if (legacyActive) {
+          localStorage.setItem(activeImageChatStorageKey(), legacyActive);
+        }
+
+        localStorage.removeItem(LEGACY_IMAGE_CHATS_KEY);
+        localStorage.removeItem(LEGACY_ACTIVE_IMAGE_CHAT_KEY);
+        raw = legacyRaw;
+      }
+    } catch {
+      // Sem localStorage: cada conta começa do zero.
+    }
+  }
+
+  try {
     const parsed = raw ? JSON.parse(raw) : [];
 
     if (Array.isArray(parsed)) {
@@ -207,7 +259,7 @@ export function loadImageChats() {
   let saved = null;
 
   try {
-    saved = localStorage.getItem(ACTIVE_IMAGE_CHAT_KEY) || "";
+    saved = localStorage.getItem(activeImageChatStorageKey()) || "";
   } catch {
     saved = null;
   }

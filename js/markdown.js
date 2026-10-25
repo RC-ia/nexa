@@ -48,6 +48,9 @@ if (md) {
   document.head.appendChild(link);
   const script = document.createElement("script");
   script.src = "https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.9.0/highlight.min.js";
+  script.integrity =
+    "sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp";
+  script.crossOrigin = "anonymous";
   script.onload = () => window.hljs.highlightAll();
   document.head.appendChild(script);
 })();

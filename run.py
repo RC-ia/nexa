@@ -10,8 +10,10 @@ BASE_DIR = Path(__file__).resolve().parent
 
 load_dotenv(BASE_DIR / ".env")
 
-AUTO_UPDATE = os.environ.get("AUTO_UPDATE", "1").strip().lower() not in (
-    "0", "false", "no", "off", ""
+# Auto-update é opt-in: aplicar o que chega no remoto é execução de código
+# por design — ligue (AUTO_UPDATE=1) só com um remoto git confiável.
+AUTO_UPDATE = os.environ.get("AUTO_UPDATE", "0").strip().lower() in (
+    "1", "true", "yes", "on",
 )
 UPDATE_INTERVAL = max(30, int(os.environ.get("UPDATE_INTERVAL", "180")))
 GIT_REMOTE = os.environ.get("GIT_REMOTE", "origin").strip() or "origin"
@@ -129,6 +131,11 @@ def main():
 
     if AUTO_UPDATE:
         log("auto-update ligado (checando a cada %ds)." % UPDATE_INTERVAL)
+        log(
+            "AVISO: código novo de %r será aplicado e executado "
+            "automaticamente — mantenha o remoto privado e confiável."
+            % GIT_REMOTE
+        )
     else:
         log("auto-update desligado (AUTO_UPDATE=0).")
 

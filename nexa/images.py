@@ -19,6 +19,7 @@ import uuid
 import binascii
 import base64
 import os
+import re
 from .config import BASE_DIR
 
 
@@ -115,7 +116,7 @@ def _image_compact_error(response):
     return response.text.strip()[:300] or f"HTTP {response.status_code}"
 
 
-def _image_save(encoded_image):
+def _image_save(encoded_image, account):
     if "," in encoded_image and encoded_image.startswith("data:"):
         encoded_image = encoded_image.split(",", 1)[1]
 
@@ -131,8 +132,59 @@ def _image_save(encoded_image):
     if extension == "jpeg":
         extension = "jpg"
     filename = f"{uuid.uuid4().hex}.{extension or 'png'}"
-    (IMAGE_OUTPUT_DIR / filename).write_bytes(image_bytes)
-    return filename
+
+    # Cada conta grava na própria pasta: generated/acct_<id>/arquivo.
+    folder = IMAGE_OUTPUT_DIR / account
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / filename).write_bytes(image_bytes)
+
+    return f"{account}/{filename}"
+
+
+def _image_parts(filename):
+    """
+    Caminho relativo validado dentro de generated/: devolve as partes
+    (pasta/nome) ou None se escapar. Aceita a pasta da conta
+    (acct_<id>/nome) e os nomes antigos soltos na raiz (compatibilidade).
+    """
+    raw = str(filename or "").replace("\\", "/").strip()
+    parts = [part for part in raw.split("/") if part not in ("", ".")]
+
+    if not parts or len(parts) > 2 or any(part == ".." for part in parts):
+        return None
+
+    if len(parts) == 2 and not re.fullmatch(r"acct_\d+", parts[0]):
+        return None
+
+    return parts
+
+
+def _image_owner_ok(parts, account):
+    """
+    Imagens novas só abrem/apagam na própria conta. As antigas (raiz, sem
+    dono no nome) seguem visíveis a qualquer conta logada — é a limitação
+    conhecida que a pasta por conta resolve daqui para frente.
+    """
+    if len(parts) == 1:
+        return True
+
+    return parts[0] == account
+
+
+def _image_path(filename):
+    """(partes, caminho resolvido) dentro de generated/, ou None se inválido."""
+    parts = _image_parts(filename)
+
+    if parts is None:
+        return None
+
+    try:
+        caminho = IMAGE_OUTPUT_DIR.joinpath(*parts).resolve()
+        caminho.relative_to(IMAGE_OUTPUT_DIR.resolve())
+    except (OSError, ValueError):
+        return None
+
+    return parts, caminho
 
 
 def image_prompt_agent_model():
@@ -217,7 +269,17 @@ def generated_image(filename):
     if user is None:
         return jsonify({"error": "Faça login."}), 401
 
-    return send_from_directory(IMAGE_OUTPUT_DIR, filename, max_age=86400)
+    resolved = _image_path(filename)
+
+    if resolved is None:
+        return jsonify({"error": "Imagem não encontrada."}), 404
+
+    parts, _ = resolved
+
+    if not _image_owner_ok(parts, "acct_%d" % user["id"]):
+        return jsonify({"error": "Imagem não encontrada."}), 404
+
+    return send_from_directory(IMAGE_OUTPUT_DIR, "/".join(parts), max_age=86400)
 
 
 @app.delete("/generated/<path:filename>")
@@ -230,9 +292,16 @@ def delete_generated_image(filename):
     if key_error:
         return key_error
 
-    # Só o nome base dentro da pasta de saída: nada escapa por traversal.
-    name = os.path.basename(filename.replace("\\", "/"))
-    target = IMAGE_OUTPUT_DIR / name
+    resolved = _image_path(filename)
+
+    if resolved is None:
+        return jsonify({"error": "Imagem não encontrada."}), 404
+
+    parts, target = resolved
+    account = "acct_%d" % user["id"]
+
+    if not _image_owner_ok(parts, account):
+        return jsonify({"error": "Imagem não encontrada."}), 404
 
     if not target.is_file():
         # Apagar é idempotente: já sumiu, sucesso.
@@ -243,7 +312,7 @@ def delete_generated_image(filename):
     except OSError as error:
         return jsonify({"error": "Não foi possível apagar: %s" % error}), 500
 
-    return jsonify({"ok": True, "apagado": True, "caminho": name})
+    return jsonify({"ok": True, "apagado": True, "caminho": "/".join(parts)})
 
 
 @app.post("/api/images/generate")
@@ -304,14 +373,17 @@ def generate_image():
         first = images[0]
         encoded = first.get("b64_json")
         if encoded:
-            filename = _image_save(str(encoded))
+            filename = _image_save(str(encoded), user_id)
         else:
             image_url = first.get("url")
             if not image_url:
                 return jsonify({"error": "A Novita AI devolveu uma resposta sem imagem."}), 502
             image_response = requests.get(image_url, timeout=IMAGE_TIMEOUT)
             image_response.raise_for_status()
-            filename = _image_save(base64.b64encode(image_response.content).decode("ascii"))
+            filename = _image_save(
+                base64.b64encode(image_response.content).decode("ascii"),
+                user_id,
+            )
     except requests.Timeout:
         return jsonify({"error": "A geração demorou mais que o limite configurado."}), 504
     except requests.RequestException as error:

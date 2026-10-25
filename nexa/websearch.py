@@ -5,6 +5,8 @@ import base64
 import urllib.parse
 import html
 import re
+import socket
+import ipaddress
 import threading
 import os
 
@@ -450,6 +452,67 @@ def _resolve_cached_url(url_list, prefix):
     return None
 
 
+PAGE_REDIRECT_LIMIT = 5
+
+
+def _host_is_public(host):
+    """False para hosts que resolvem para loopback/rede interna/reservado."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (socket.gaierror, UnicodeError):
+        return False
+
+    for info in infos:
+        address = str(info[4][0]).split("%", 1)[0]
+
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            return False
+
+        if not ip.is_global:
+            return False
+
+    return True
+
+
+def safe_page_get(url, timeout=(5, 15), max_redirects=PAGE_REDIRECT_LIMIT):
+    """
+    GET de página com proteção contra SSRF: só http/https, só hosts
+    públicos e cada redirecionamento validado — o requests seguiria um
+    302 para 127.0.0.1 sem perguntar, e a página lida volta para o modelo.
+    """
+    current = url
+
+    for _ in range(max_redirects + 1):
+        parsed = urllib.parse.urlparse(current)
+
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise requests.RequestException("URL não permitida.")
+
+        if not _host_is_public(parsed.hostname):
+            raise requests.RequestException(
+                "URL bloqueada: aponta para rede interna."
+            )
+
+        response = requests.get(
+            current,
+            headers=SEARCH_HEADERS,
+            timeout=timeout,
+            allow_redirects=False,
+        )
+
+        location = response.headers.get("Location")
+
+        if response.is_redirect and location:
+            current = urllib.parse.urljoin(current, location)
+            continue
+
+        return response
+
+    raise requests.RequestException("Redirecionamentos demais.")
+
+
 def fetch_pages(user_id, prefixes):
     """
     Busca o conteúdo completo das páginas indicadas pelos prefixos P1, P2...
@@ -474,7 +537,7 @@ def fetch_pages(user_id, prefixes):
             continue
 
         try:
-            resp = requests.get(url, headers=SEARCH_HEADERS, timeout=(5, 15))
+            resp = safe_page_get(url, timeout=(5, 15))
             if resp.status_code != 200:
                 lines.append("%s (%s): erro HTTP %d" % (prefix, url, resp.status_code))
                 continue

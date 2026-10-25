@@ -822,8 +822,13 @@ def studio_raw():
     elif ext in (".svg",):
         mime = "image/svg+xml"
 
+    safe_name = "".join(
+        char if char.isprintable() and char not in '"\\' else "_"
+        for char in path.name
+    ) or "arquivo"
+
     response = app.response_class(data, mimetype=mime)
-    response.headers["Content-Disposition"] = "inline; filename=\"%s\"" % path.name
+    response.headers["Content-Disposition"] = 'inline; filename="%s"' % safe_name
     response.headers["Content-Security-Policy"] = "sandbox"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response

@@ -39,6 +39,15 @@ MAX_PASSWORD = 128
 COOKIE_NAME = "nexa_session"
 USERNAME_RE = re.compile(r"^[a-z0-9_.@+-]{3,64}$")
 
+# IPs de proxy confiável (cloudflared local): somente requisições vindas
+# daqui podem informar CF-Connecting-IP / X-Forwarded-Proto. Sem isso,
+# qualquer cliente na rede poderia forjar o IP e burlar o rate limit.
+TRUSTED_PROXY_IPS = {
+    item.strip().lower()
+    for item in os.environ.get("TRUSTED_PROXY_IPS", "127.0.0.1,::1").split(",")
+    if item.strip()
+}
+
 # Usado quando o usuário não existe, para o login levar o mesmo tempo.
 _DUMMY_HASH = generate_password_hash("nexa-dummy-password")
 
@@ -161,8 +170,28 @@ def rate_limited(key, limit, window):
         return len(recent) > limit
 
 
+def from_trusted_proxy():
+    """True quando a requisição chega do proxy local confiável (cloudflared)."""
+    addr = (request.remote_addr or "").strip().lower()
+
+    if not addr:
+        return False
+
+    if addr in TRUSTED_PROXY_IPS:
+        return True
+
+    # IPv4 mapeado em IPv6: ::ffff:127.0.0.1
+    if addr.startswith("::ffff:") and addr[7:] in TRUSTED_PROXY_IPS:
+        return True
+
+    return False
+
+
 def client_ip():
-    return request.headers.get("CF-Connecting-IP") or request.remote_addr or "?"
+    if from_trusted_proxy():
+        return request.headers.get("CF-Connecting-IP") or request.remote_addr or "?"
+
+    return request.remote_addr or "?"
 
 
 # =========================
@@ -216,7 +245,15 @@ def user_json(user):
 # =========================
 
 def is_https():
-    return request.is_secure or request.headers.get("X-Forwarded-Proto", "") == "https"
+    """True sob HTTPS. O X-Forwarded-Proto só vale vindo do proxy confiável."""
+    if request.is_secure:
+        return True
+
+    if not from_trusted_proxy():
+        return False
+
+    proto = request.headers.get("X-Forwarded-Proto", "")
+    return proto.split(",")[0].strip().lower() == "https"
 
 
 def start_session(conn, user_id, response, message_key):
@@ -367,11 +404,16 @@ def me():
 
 @auth_bp.post("/api/auth/login")
 def login():
+    failed = "Usuário ou senha incorretos."
+
+    # Só aceita corpo JSON: um formulário cross-site (enctype text/plain)
+    # não consegue iniciar sessão — corta o CSRF de login.
+    if not request.is_json:
+        return error(failed, 401)
+
     data = body_json()
     username = normalize_username(data.get("username"))
     password = data.get("password")
-
-    failed = "Usuário ou senha incorretos."
 
     if not username or not isinstance(password, str) or len(password) > MAX_PASSWORD:
         return error(failed, 401)
@@ -494,8 +536,23 @@ def purge_account_data(user_id):
         except OSError as err:
             print("[NEXA-auth] não foi possível apagar %s: %s" % (path, err), flush=True)
 
-    # 1) imagens citadas nas conversas, antes de apagar as conversas
+    # 1) imagens da conta: a pasta generated/acct_<id>/ inteira e, antes
+    # de apagar as conversas, as imagens antigas (sem dono no nome) que as
+    # conversas citam.
     if IMAGE_OUTPUT_DIR.is_dir():
+        account_images = IMAGE_OUTPUT_DIR / account
+
+        if account_images.is_dir():
+            try:
+                shutil.rmtree(account_images)
+                removed.append(account + "/ (imagens)")
+            except OSError as err:
+                print(
+                    "[NEXA-auth] não foi possível apagar %s: %s"
+                    % (account_images, err),
+                    flush=True,
+                )
+
         for name in _images_in_chats(MEMORY_DIR / ("%s.chats.json" % account)):
             drop_file(IMAGE_OUTPUT_DIR / name)
 

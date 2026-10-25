@@ -51,6 +51,9 @@ FLASK_THINK = os.environ.get("FLASK_THINK", "true").strip().lower() != "false"
 PORT = int(os.environ.get("PORT", "8000"))
 
 
+HOST = os.environ.get("HOST", "127.0.0.1").strip() or "127.0.0.1"
+
+
 MEMORY_DIR = BASE_DIR / os.environ.get("MEMORY_DIR", "memoria")
 
 

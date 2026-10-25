@@ -4,8 +4,9 @@ import threading
 from flask import Flask, request
 
 from .config import PORT  # carrega o .env ANTES do auth (que lê ADMIN_USER/ADMIN_PASSWORD no import)
+from .config import HOST
 
-from auth import auth_bp, init_auth_db  # noqa: E402  (precisa do .env já carregado)
+from auth import auth_bp, init_auth_db, is_https  # noqa: E402  (precisa do .env já carregado)
 
 app = Flask(__name__)
 app.register_blueprint(auth_bp)
@@ -18,7 +19,7 @@ def _security_headers(response):
     response.headers.setdefault("Referrer-Policy", "same-origin")
     response.headers.setdefault(
         "Content-Security-Policy",
-        "default-src 'self'; script-src 'self' 'unsafe-inline' "
+        "default-src 'self'; script-src 'self' "
         "cdn.jsdelivr.net cdnjs.cloudflare.com "
         "static.cloudflareinsights.com; "
         "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net "
@@ -31,10 +32,7 @@ def _security_headers(response):
         "wss://generativelanguage.googleapis.com; "
         "frame-ancestors 'none'",
     )
-    if (
-        request.is_secure
-        or request.headers.get("X-Forwarded-Proto", "") == "https"
-    ):
+    if is_https():
         response.headers.setdefault(
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
         )
@@ -59,7 +57,7 @@ init_auth_db()
 
 
 def main():
-    print("[NEXA] rodando em http://localhost:%d" % PORT)
+    print("[NEXA] rodando em http://%s:%d" % (HOST, PORT))
     if not FCM_KEY_FILE.exists():
         print(
             "[NEXA] sem %s — push FCM desativado (lembretes só pela página)."
@@ -73,7 +71,7 @@ def main():
     threading.Thread(
         target=reminder_scheduler_loop, daemon=True, name="nexa-reminders"
     ).start()
-    app.run(host="0.0.0.0", port=PORT, threaded=True)
+    app.run(host=HOST, port=PORT, threaded=True)
 
 
 if __name__ == "__main__":
