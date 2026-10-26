@@ -86,16 +86,20 @@ ALLOWED_FILE_EXTENSIONS = {
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "4096"))
 
 
-# Retry de erros transitórios do provedor (429/500/502/503/504/524):
-# quantas tentativas e como a espera cresce entre elas (backoff
-# exponencial com jitter, teto em LLM_RETRY_MAX_DELAY).
-LLM_MAX_ATTEMPTS = max(1, int(os.environ.get("LLM_MAX_ATTEMPTS", "3")))
+# Retry de erros transitórios do provedor (408/429/500/502/503/504/524).
+# A primeira tentativa é imediata e as seguintes são separadas por 2s.
+# O teto de 10 é rígido: a variável de ambiente só pode reduzi-lo.
+LLM_MAX_ATTEMPTS_LIMIT = 10
+LLM_MAX_ATTEMPTS = min(
+    LLM_MAX_ATTEMPTS_LIMIT,
+    max(1, int(os.environ.get("LLM_MAX_ATTEMPTS", "10"))),
+)
 
 
-LLM_RETRY_BASE_DELAY = max(0.1, float(os.environ.get("LLM_RETRY_BASE_DELAY", "1.5")))
-
-
-LLM_RETRY_MAX_DELAY = max(0.1, float(os.environ.get("LLM_RETRY_MAX_DELAY", "8.0")))
+# O intervalo é fixo por contrato da política de retry. Não depende de
+# configuração para evitar que uma configuração divergente vire backoff
+# exponencial, espera zero ou um intervalo diferente de 2s.
+LLM_RETRY_DELAY = 2.0
 
 
 MAX_TOOL_ROUNDS = int(os.environ.get("MAX_TOOL_ROUNDS", "4"))

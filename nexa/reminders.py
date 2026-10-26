@@ -17,6 +17,7 @@ from .config import STREAM_TIMEOUT
 from .config import CONNECT_TIMEOUT
 from .llm import model_for_reasoning
 from .llm import call_model
+from .llm import ModelTransportError
 from .config import API_BASE
 import requests
 from .config import API_KEY
@@ -507,7 +508,13 @@ def run_reminder_agent(tarefa, when_text):
         data = response.json()
         content = data["choices"][0]["message"]["content"]
         return (content or "").strip()
-    except (requests.RequestException, ValueError, KeyError, IndexError) as error:
+    except (
+        requests.RequestException,
+        ModelTransportError,
+        ValueError,
+        KeyError,
+        IndexError,
+    ) as error:
         print("[NEXA-LEMBRETE] agente falhou:", error)
         return ""
 
@@ -547,7 +554,7 @@ def run_reminder_action(user_id, instrucao, when_text):
                 body,
                 timeout=(CONNECT_TIMEOUT, DEEP_RESEARCH_TIMEOUT),
             )
-        except requests.RequestException as error:
+        except (requests.RequestException, ModelTransportError) as error:
             print("[NEXA-LEMBRETE] ação falhou:", error)
             return last_text
 
@@ -589,7 +596,11 @@ def run_reminder_action(user_id, instrucao, when_text):
             ],
         })
 
-        results, _, _ = run_tools(user_id, calls, "none")
+        try:
+            results, _, _ = run_tools(user_id, calls, "none")
+        except (requests.RequestException, ModelTransportError) as error:
+            print("[NEXA-LEMBRETE] ferramenta falhou:", error)
+            return last_text
 
         for call in calls:
             call_id = tool_call_id(call)

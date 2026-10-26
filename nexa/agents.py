@@ -41,7 +41,7 @@ import requests
 from .config import VISION_AGENT_PROMPT
 
 
-def analyze_image_for_text_model(messages, reasoning):
+def analyze_image_for_text_model(messages, reasoning, budget=None):
     """Converte uma mensagem com imagem em contexto textual para o modelo final."""
     enriched = [dict(message) for message in messages]
     for index in range(len(enriched) - 1, -1, -1):
@@ -67,6 +67,7 @@ def analyze_image_for_text_model(messages, reasoning):
                 "max_tokens": min(MAX_OUTPUT_TOKENS, 4000),
             },
             timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
+            budget=budget,
         )
         if response.status_code != 200:
             log_upstream_error(response)
@@ -165,7 +166,7 @@ def thinking_is_identity_only(text):
 
 
 def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context="",
-                        progress=None, allow_research=True):
+                        progress=None, allow_research=True, budget=None):
     """Executa ferramentas e transmite o andamento para a aba Pensamento."""
     regular = []
     results = {}
@@ -205,11 +206,12 @@ def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context
                 "confirmar a solução."
             )
             research_topic = interpret_deep_intent(
-                user_id, context, [], reasoning, progress, ""
+                user_id, context, [], reasoning, progress, "", budget=budget
             )
             note("Pesquisa profunda iniciada para: %s" % (research_topic or context))
             report = run_deep_research(
-                user_id, research_topic or context, progress, reasoning
+                user_id, research_topic or context, progress, reasoning,
+                budget=budget,
             )
             results[call_id] = report
             searched = True
@@ -224,7 +226,7 @@ def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context
     if regular:
         regular_results, memory_now, search_now = run_tools(
             user_id, regular, reasoning, progress=progress,
-            allow_research=allow_research,
+            allow_research=allow_research, budget=budget,
         )
         results.update(regular_results)
         memory_updated = memory_now
@@ -234,7 +236,7 @@ def thinking_tool_calls(messages, memories, user_id, reasoning, thinking_context
 
 
 def run_thinking_agent(user_id, messages, memories, reasoning, progress=None,
-                       initial_deep_report="", block_research=False):
+                       initial_deep_report="", block_research=False, budget=None):
     """Resolve e revisa a solicitação em rodadas finitas antes da resposta."""
     reasoning = normalize_reasoning_level(reasoning)
     block_research = block_research or bool(initial_deep_report)
@@ -308,6 +310,7 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None,
             response = call_model(
                 body,
                 timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
+                budget=budget,
             )
             if response.status_code != 200:
                 log_upstream_error(response)
@@ -346,6 +349,7 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None,
                 calls, memories, user_id, reasoning, previous or text,
                 progress=progress,
                 allow_research=not block_research,
+                budget=budget,
             )
             if results:
                 history.extend([
@@ -394,7 +398,7 @@ def run_thinking_agent(user_id, messages, memories, reasoning, progress=None,
 
 
 def interpret_deep_intent(user_id, user_message, messages, reasoning=None,
-                          progress=None, visual_report=""):
+                          progress=None, visual_report="", budget=None):
     """Converte pergunta contextual em uma instrução autocontida de pesquisa."""
     if not isinstance(user_message, str) or not user_message.strip():
         return ""
@@ -438,6 +442,7 @@ def interpret_deep_intent(user_id, user_message, messages, reasoning=None,
         response = call_model(
             body,
             timeout=(CONNECT_TIMEOUT, min(DEEP_RESEARCH_TIMEOUT, 60)),
+            budget=budget,
         )
         if response.status_code != 200:
             raise RuntimeError("HTTP %d" % response.status_code)
@@ -450,7 +455,7 @@ def interpret_deep_intent(user_id, user_message, messages, reasoning=None,
         return user_message.strip()[:400]
 
 
-def run_deep_research(user_id, topic, progress=None, reasoning=None):
+def run_deep_research(user_id, topic, progress=None, reasoning=None, budget=None):
     """
     Pesquisa profunda: agente novo, sem o contexto da conversa, com as
     ferramentas de busca. Devolve o relatório final (ou um aviso de falha
@@ -501,6 +506,7 @@ def run_deep_research(user_id, topic, progress=None, reasoning=None):
         response = call_model(
             body,
             timeout=(CONNECT_TIMEOUT, DEEP_RESEARCH_TIMEOUT),
+            budget=budget,
         )
 
         if response.status_code != 200:

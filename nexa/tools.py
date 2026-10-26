@@ -53,7 +53,7 @@ def run_memory_tool(user_id, calls):
 
 
 def run_tools(user_id, calls, reasoning=None, progress=None,
-              allow_research=True):
+              allow_research=True, budget=None):
     """
     Executa todas as ferramentas chamadas pelo modelo e devolve
     (resultados_por_id, memoria_atualizada, pesquisa_realizada).
@@ -184,7 +184,8 @@ def run_tools(user_id, calls, reasoning=None, progress=None,
             print("[NEXA-PROFUNDA] ferramenta chamada: %r" % topic)
             note("🔎 O modelo chamou a pesquisa profunda: «%s»" % topic)
             results[call_id] = run_deep_research(
-                user_id, topic, progress=progress, reasoning=reasoning
+                user_id, topic, progress=progress, reasoning=reasoning,
+                budget=budget,
             )
             note("✅ Pesquisa profunda concluída e devolvida ao modelo.")
             searched = True

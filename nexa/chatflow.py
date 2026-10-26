@@ -26,6 +26,11 @@ from .llm import split_reasoning_from_content
 from .llm import stream_content_field
 from .llm import merge_tool_call
 from .llm import call_model
+from .llm import call_model_stream
+from .llm import RetryBudgetExhausted
+from .llm import RetryWindowExhausted
+from .llm import ModelTransportError
+from .llm import StreamContentDeliveredError
 from .llm import extract_reasoning
 from .llm import parse_data_line
 from .llm import InlineThoughtBuffer
@@ -33,8 +38,6 @@ from .llm import extract_tool_calls
 from .llm import extract_text
 from .llm import log_upstream_error
 from .llm import request_body
-from .llm import auth_headers
-from .config import API_BASE
 import requests
 from .llm import parse_tool_arguments
 import json
@@ -47,7 +50,8 @@ from .config import MAX_TOOL_ROUNDS
 def finish_stream_with_tools(user_id, messages, memories, reasoning,
                              custom_instructions, assistant_text, calls,
                              memory_enabled=True, thinking_report="",
-                             deep_report="", system_prompt_override=""):
+                             deep_report="", system_prompt_override="",
+                             budget=None):
     """
     O modelo pediu ferramenta. Executamos, devolvemos os resultados no papel
     "tool" e pedimos a continuação da resposta.
@@ -68,6 +72,7 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
         results, memory_now, search_now = run_tools(
             user_id, current_calls, reasoning,
             allow_research=not bool(deep_report),
+            budget=budget,
         )
 
         if not results:
@@ -118,6 +123,7 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
                     system_prompt_override=system_prompt_override,
                 ),
                 timeout=(10, 120),
+                budget=budget,
             )
         except requests.RequestException as error:
             print("[NEXA] falha ao continuar após ferramenta:", error)
@@ -176,7 +182,9 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
         forced_body.pop("tool_choice", None)
 
         try:
-            response = call_model(forced_body, timeout=(10, 120))
+            response = call_model(
+                forced_body, timeout=(10, 120), budget=budget
+            )
             if response.status_code == 200:
                 forced_text = (extract_text(response.json()) or "").strip()
                 if forced_text:
@@ -187,6 +195,9 @@ def finish_stream_with_tools(user_id, messages, memories, reasoning,
             else:
                 log_upstream_error(response)
         except requests.RequestException as error:
+            # Um ModelTransportError (inclusive o esgotamento do
+            # orçamento) deve subir para o worker e virar evento SSE
+            # `error`, sem um `done` enganoso depois do SSE aberto.
             print("[NEXA] falha no fechamento forçado:", error)
 
     print("[NEXA] loop de ferramentas encerrado.")
@@ -212,6 +223,7 @@ def probe_stream(lines):
     first_text = None
     tool_calls = []
     inline_buffer = InlineThoughtBuffer()
+    stream_complete = True
 
     try:
         for raw in lines:
@@ -240,6 +252,18 @@ def probe_stream(lines):
                     reasoning_chunks.append(inline_reasoning)
                 if plain_text:
                     first_text = plain_text
+                    stream_complete = False
+                    break
+                # Uma tool call já torna a tentativa útil. O stream
+                # principal continua consumindo os argumentos restantes,
+                # mas o request não pode ser repetido.
+                if tool_calls:
+                    stream_complete = False
+                    break
+                # O raciocínio já é útil e pode ser exibido. A partir daqui
+                # o stream principal o completa, sem repetir a consulta.
+                if inline_reasoning or reasoning_chunks:
+                    stream_complete = False
                     break
                 # Sem plain_text ainda: pode ser um chunk com <think>
                 # parcial. Continua sondando.
@@ -253,11 +277,27 @@ def probe_stream(lines):
                 text = extract_text(data)
                 if text:
                     first_text = text
+                    stream_complete = False
                     break
 
-        # Libera o que ficou acumulado no buffer (caso o raciocínio
-        # inline seja o único conteúdo do modelo).
-        if first_text is None and not tool_calls:
+            # Uma tool call é conteúdo útil: o stream principal continua
+            # consumindo os argumentos restantes. Não repita o request,
+            # para não duplicar uma possível execução da ferramenta.
+            if tool_calls:
+                stream_complete = False
+                break
+
+            # O raciocínio já é útil e pode ser exibido. A partir daqui o
+            # stream principal o completa, sem repetir a consulta.
+            if reasoning_chunks:
+                stream_complete = False
+                break
+
+        # Libera o que ficou acumulado no buffer somente quando o stream
+        # terminou de fato. Se a sondagem parou cedo em conteúdo útil, o
+        # buffer ainda pertence ao stream principal: finalizá-lo aqui
+        # descartaria o início do próximo trecho de raciocínio.
+        if stream_complete and first_text is None and not tool_calls:
             tail_reasoning, tail_text = finalize_inline_buffer(inline_buffer)
             if tail_reasoning:
                 reasoning_chunks.append(tail_reasoning)
@@ -269,7 +309,23 @@ def probe_stream(lines):
             "[NEXA] stream interrompido (%s)."
             % type(error).__name__
         )
-        return None
+        # Se já houve conteúdo útil, a tentativa não pode ser repetida.
+        # O stream principal não consegue continuar um iterador quebrado,
+        # então sinalize explicitamente esse limite para o transporte não
+        # repetir o request nem cair no fallback bloqueante.
+        if (
+            first_text is not None
+            or tool_calls
+            or reasoning_chunks
+            or inline_buffer.has_pending_reasoning
+        ):
+            raise StreamContentDeliveredError(
+                "O stream foi interrompido depois de produzir conteúdo útil."
+            ) from error
+
+        # `None` significa que o stream terminou sem conteúdo útil. Uma
+        # falha de rede é propagada para o transporte decidir o retry.
+        raise
 
     if first_text is None and not tool_calls and not reasoning_chunks:
         return None
@@ -281,7 +337,8 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                        user_id, memory_enabled=True, messages=None,
                        memories=None, reasoning=None, custom_instructions="",
                        thinking_report="", deep_report="",
-                       inline_buffer=None, system_prompt_override=""):
+                       inline_buffer=None, system_prompt_override="",
+                       budget=None):
     """
     Traduz o stream do modelo nos eventos SSE da NEXA. Fica em função
     separada para a pesquisa profunda reaproveitar: lá o relatório entra
@@ -397,7 +454,10 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                             thinking_report,
                             deep_report,
                             system_prompt_override,
+                            budget,
                         )
+                    except ModelTransportError as error:
+                        box["error"] = error
                     except Exception as error:  # noqa: BLE001
                         print("[NEXA] falha inesperada nas ferramentas:", error)
                         box["result"] = (None, False, False)
@@ -409,6 +469,18 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                     pump.join(timeout=SEARCH_HEARTBEAT)
                     if pump.is_alive():
                         yield sse({"type": "ping"})
+
+                if box.get("error") is not None:
+                    error = box["error"]
+                    if isinstance(error, RetryBudgetExhausted):
+                        message = (
+                            "Falha ao consultar o modelo após esgotar as "
+                            "tentativas."
+                        )
+                    else:
+                        message = "Falha ao consultar o modelo."
+                    yield sse({"type": "error", "error": message})
+                    return
 
                 follow_up, memory_updated, searched = box.get(
                     "result", (None, False, False)
@@ -435,8 +507,9 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
 def make_stream_response(lines, user_id, user_message, memory_enabled=True,
                          messages=None, memories=None, reasoning=None,
                          custom_instructions="", thinking_report="",
-                         system_prompt_override=""):
-    probe = probe_stream(lines)
+                         system_prompt_override="", probe=None, budget=None):
+    if probe is None:
+        probe = probe_stream(lines)
 
     if probe is None:
         return None
@@ -452,6 +525,7 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
                 thinking_report,
                 inline_buffer=inline_buffer,
                 system_prompt_override=system_prompt_override,
+                budget=budget,
             )
         ),
         headers=sse_headers(),
@@ -460,7 +534,8 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
 
 def make_deep_response(user_id, user_message, messages, memories, reasoning,
                        custom_instructions="", memory_enabled=True,
-                       thinking_report="", system_prompt_override=""):
+                       thinking_report="", system_prompt_override="",
+                       budget=None):
     """
     Pesquisa profunda pedida pelo botão "+" do composer: a pergunta vai
     direto para o pesquisador (agente separado, sem o contexto da
@@ -485,16 +560,18 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
                 if thinking_report:
                     research_topic = interpret_deep_intent(
                         user_id, thinking_report, [], reasoning, progress.put,
-                        "",
+                        "", budget=budget,
                     )
                     box["report"] = run_deep_research(
                         user_id, research_topic or thinking_report,
-                        progress.put, reasoning
+                        progress.put, reasoning, budget=budget,
                     )
                     return
                 if message_has_image(messages):
                     progress.put("O agente visual está analisando a imagem antes da pesquisa.")
-                    visual_messages = analyze_image_for_text_model(messages, reasoning)
+                    visual_messages = analyze_image_for_text_model(
+                        messages, reasoning, budget=budget
+                    )
                     visual_content = visual_messages[-1].get("content", "")
                     if isinstance(visual_content, str):
                         marker = "Relatório do agente visual (use como contexto da imagem):"
@@ -503,11 +580,14 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
 
                 research_topic = interpret_deep_intent(
                     user_id, user_message, messages, reasoning, progress.put,
-                    visual_report,
+                    visual_report, budget=budget,
                 )
                 box["report"] = run_deep_research(
-                    user_id, research_topic or user_message, progress.put, reasoning
+                    user_id, research_topic or user_message, progress.put,
+                    reasoning, budget=budget,
                 )
+            except ModelTransportError as error:
+                box["error"] = error
             except Exception as error:  # noqa: BLE001
                 print("[NEXA-PROFUNDA] falha inesperada:", error)
                 box["report"] = (
@@ -543,6 +623,17 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
                 "text": progress.get() + "\n\n",
             })
 
+        if box.get("error") is not None:
+            error = box["error"]
+            if isinstance(error, RetryBudgetExhausted):
+                message = (
+                    "Falha ao consultar o modelo após esgotar as tentativas."
+                )
+            else:
+                message = "Falha ao consultar o modelo."
+            yield sse({"type": "error", "error": message})
+            return
+
         report = box.get("report") or ""
         final_thinking_report = ""
 
@@ -569,7 +660,10 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
                         thinking_progress.put,
                         initial_deep_report=report,
                         block_research=True,
+                        budget=budget,
                     )
+                except ModelTransportError as error:
+                    thinking_box["error"] = error
                 except Exception as error:  # noqa: BLE001
                     print("[NEXA-PENSAMENTO] falha após pesquisa profunda:", error)
                     thinking_progress.put(
@@ -599,6 +693,18 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
                     "text": thinking_progress.get() + "\n\n",
                 })
 
+            if thinking_box.get("error") is not None:
+                error = thinking_box["error"]
+                if isinstance(error, RetryBudgetExhausted):
+                    message = (
+                        "Falha ao consultar o modelo após esgotar as "
+                        "tentativas."
+                    )
+                else:
+                    message = "Falha ao consultar o modelo."
+                yield sse({"type": "error", "error": message})
+                return
+
             final_thinking_report = thinking_box.get("report") or ""
             yield sse({
                 "type": "reasoning",
@@ -615,40 +721,36 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
             })
 
         try:
-            upstream = requests.post(
-                API_BASE + "/chat/completions",
-                headers=auth_headers(),
-                json=request_body(
+            upstream, lines, probe = call_model_stream(
+                request_body(
                     True, messages, memories, reasoning, custom_instructions,
                     memory_enabled, user_id, report,
                     thinking_report=final_thinking_report,
                     system_prompt_override=system_prompt_override,
                 ),
-                stream=True,
                 timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
+                probe=probe_stream,
+                budget=budget,
             )
-        except requests.RequestException as error:
-            print("[NEXA-PROFUNDA] modelo principal falhou:", error)
-            upstream = None
-
-        if upstream is None or upstream.status_code != 200:
-            if upstream is not None:
-                log_upstream_error(upstream)
-                upstream.close()
+        except RetryBudgetExhausted as error:
+            print("[NEXA-PROFUNDA] orçamento esgotado no modelo principal:", error)
             yield sse({
                 "type": "error",
                 "error": (
-                    "A pesquisa terminou, mas a NEXA não conseguiu escrever "
-                    "a resposta. Tente de novo."
+                    "Falha ao consultar o modelo após esgotar as tentativas."
                 ),
             })
             return
+        except (ModelTransportError, requests.RequestException) as error:
+            print("[NEXA-PROFUNDA] modelo principal falhou:", error)
+            upstream = None
+            lines = None
+            probe = None
 
-        lines = upstream.iter_lines(decode_unicode=False)
-        probe = probe_stream(lines)
-
-        if probe is None:
-            upstream.close()
+        if upstream is None or upstream.status_code != 200 or probe is None:
+            if upstream is not None:
+                log_upstream_error(upstream)
+                upstream.close()
             yield sse({
                 "type": "error",
                 "error": (
@@ -668,6 +770,7 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
             report,
             inline_buffer=inline_buffer,
             system_prompt_override=system_prompt_override,
+            budget=budget,
         )
 
     return Response(stream_with_context(generate()), headers=sse_headers())
@@ -676,7 +779,7 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
 def make_thinking_response(
     user_id, user_message, messages, memories, reasoning,
     custom_instructions="", memory_enabled=True,
-    system_prompt_override="",
+    system_prompt_override="", budget=None,
 ):
     """Executa o agente de pensamento em segundo plano e transmite progresso."""
     def generate():
@@ -686,8 +789,11 @@ def make_thinking_response(
         def worker():
             try:
                 box["report"] = run_thinking_agent(
-                    user_id, messages, memories, reasoning, progress.put
+                    user_id, messages, memories, reasoning, progress.put,
+                    budget=budget,
                 )
+            except ModelTransportError as error:
+                box["error"] = error
             except Exception as error:  # noqa: BLE001
                 print("[NEXA-PENSAMENTO] falha inesperada: %s" % error)
                 progress.put(
@@ -715,6 +821,17 @@ def make_thinking_response(
         while not progress.empty():
             yield sse({"type": "reasoning", "text": progress.get() + "\n\n"})
 
+        if box.get("error") is not None:
+            error = box["error"]
+            if isinstance(error, RetryBudgetExhausted):
+                message = (
+                    "Falha ao consultar o modelo após esgotar as tentativas."
+                )
+            else:
+                message = "Falha ao consultar o modelo."
+            yield sse({"type": "error", "error": message})
+            return
+
         report = box.get("report") or ""
         yield sse({
             "type": "reasoning",
@@ -722,33 +839,35 @@ def make_thinking_response(
         })
 
         try:
-            upstream = requests.post(
-                API_BASE + "/chat/completions",
-                headers=auth_headers(),
-                json=request_body(
+            upstream, lines, probe = call_model_stream(
+                request_body(
                     True, messages, memories, reasoning, custom_instructions,
                     memory_enabled, user_id, thinking_report=report,
                     system_prompt_override=system_prompt_override,
                 ),
-                stream=True,
                 timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
+                probe=probe_stream,
+                budget=budget,
             )
-        except requests.RequestException as error:
+        except RetryBudgetExhausted as error:
+            print("[NEXA] orçamento esgotado após pensamento: %s" % error)
+            yield sse({
+                "type": "error",
+                "error": (
+                    "Falha ao consultar o modelo após esgotar as tentativas."
+                ),
+            })
+            return
+        except (ModelTransportError, requests.RequestException) as error:
             print("[NEXA] modelo após pensamento falhou: %s" % error)
             yield sse({"type": "error", "error": "Falha ao consultar o modelo."})
             return
 
-        if upstream.status_code != 200:
-            log_upstream_error(upstream)
-            upstream.close()
+        if upstream is None or upstream.status_code != 200 or probe is None:
+            if upstream is not None:
+                log_upstream_error(upstream)
+                upstream.close()
             yield sse({"type": "error", "error": "Falha ao consultar o modelo."})
-            return
-
-        lines = upstream.iter_lines(decode_unicode=False)
-        probe = probe_stream(lines)
-        if probe is None:
-            upstream.close()
-            yield sse({"type": "error", "error": "O modelo não devolveu resposta."})
             return
 
         reasoning_chunks, first_text, tool_calls, inline_buffer = probe
@@ -758,6 +877,7 @@ def make_thinking_response(
             custom_instructions, report,
             inline_buffer=inline_buffer,
             system_prompt_override=system_prompt_override,
+            budget=budget,
         )
 
     return Response(stream_with_context(generate()), headers=sse_headers())
@@ -766,7 +886,7 @@ def make_thinking_response(
 def make_blocking_response(
     user_id, user_message, messages, memories, reasoning,
     custom_instructions="", memory_enabled=True, thinking_report="",
-    system_prompt_override="",
+    system_prompt_override="", budget=None,
 ):
     try:
         response = call_model(
@@ -776,16 +896,24 @@ def make_blocking_response(
                 system_prompt_override=system_prompt_override,
             ),
             timeout=(10, 120),
+            budget=budget,
         )
 
-    except requests.RequestException as error:
+    except (RetryBudgetExhausted, RetryWindowExhausted) as error:
+        print("[NEXA] falha ao consultar o modelo:", error)
+        return jsonify({
+            "error": "Falha ao consultar o modelo após esgotar as tentativas."
+        }), 503
+    except (ModelTransportError, requests.RequestException) as error:
         print("[NEXA] falha ao consultar o modelo:", error)
         return jsonify({"error": "Falha ao consultar o modelo."}), 502
 
     if response.status_code != 200:
         log_upstream_error(response)
+        status_code = response.status_code
+        response.close()
         return jsonify({
-            "error": "Falha ao consultar o modelo (HTTP %d)." % response.status_code
+            "error": "Falha ao consultar o modelo (HTTP %d)." % status_code
         }), 502
 
     try:
@@ -811,12 +939,25 @@ def make_blocking_response(
     memory_updated = False
     searched = False
     if calls:
-        follow_up, memory_updated, searched = finish_stream_with_tools(
-            user_id, messages, memories, reasoning,
-            custom_instructions, text, calls, memory_enabled,
-            thinking_report,
-            system_prompt_override=system_prompt_override,
-        )
+        try:
+            follow_up, memory_updated, searched = finish_stream_with_tools(
+                user_id, messages, memories, reasoning,
+                custom_instructions, text, calls, memory_enabled,
+                thinking_report,
+                system_prompt_override=system_prompt_override,
+                budget=budget,
+            )
+        except (RetryBudgetExhausted, RetryWindowExhausted) as error:
+            print("[NEXA] orçamento esgotado após ferramenta:", error)
+            return jsonify({
+                "error": (
+                    "Falha ao consultar o modelo após esgotar as tentativas."
+                )
+            }), 503
+        except (ModelTransportError, requests.RequestException) as error:
+            print("[NEXA] falha ao continuar após ferramenta:", error)
+            return jsonify({"error": "Falha ao consultar o modelo."}), 502
+
         follow_up = follow_up or ""
 
     def generate():

@@ -23,12 +23,12 @@ from .config import MODEL
 import json
 import re
 import time
-import random
 import hashlib
+import threading
 from .config import API_KEY
 from .config import LLM_MAX_ATTEMPTS
-from .config import LLM_RETRY_BASE_DELAY
-from .config import LLM_RETRY_MAX_DELAY
+from .config import LLM_MAX_ATTEMPTS_LIMIT
+from .config import LLM_RETRY_DELAY
 
 
 def auth_headers():
@@ -40,36 +40,209 @@ def auth_headers():
 
 # Erros do provedor que fazem sentido tentar de novo: limite de taxa,
 # falha momentânea do servidor ou do proxy na frente da API.
-RETRYABLE_STATUS = frozenset((429, 500, 502, 503, 504, 524))
+RETRYABLE_STATUS = frozenset((408, 429, 500, 502, 503, 504, 524))
+
+
+class ModelTransportError(Exception):
+    """Base dos erros de transporte que não devem ser tratados como HTTP comum."""
+
+
+class RetryBudgetExhausted(ModelTransportError):
+    """Indica que o orçamento compartilhado de tentativas acabou."""
+
+    def __init__(self, message, cause=None, status_code=None, total=None):
+        super().__init__(message)
+        self.cause = cause
+        self.status_code = status_code
+        self.total = total
+
+
+class RetryWindowExhausted(ModelTransportError):
+    """Indica que um transporte esgotou sua janela local, não o budget global."""
+
+    def __init__(self, message, cause=None, status_code=None, total=None):
+        super().__init__(message)
+        self.cause = cause
+        self.status_code = status_code
+        self.total = total
+
+
+class PermanentModelError(ModelTransportError):
+    """Indica erro de request que não pode ser corrigido por retry."""
+
+    def __init__(self, message, cause=None):
+        super().__init__(message)
+        self.cause = cause
+
+
+class StreamContentDeliveredError(ModelTransportError):
+    """Indica falha de stream depois que texto, raciocínio ou tool call saiu.
+
+    Esse tipo de falha não pode ser repetido: repetir o request poderia
+    duplicar conteúdo ou executar a mesma ferramenta outra vez.
+    """
+
+
+# Somente falhas que podem mudar com uma nova tentativa entram no retry.
+# Erros de URL, headers ou configuração são permanentes e devem parar
+# imediatamente, sem consumir as dez tentativas.
+RETRYABLE_EXCEPTIONS = (
+    requests.Timeout,
+    requests.ConnectionError,
+    requests.exceptions.ChunkedEncodingError,
+    requests.exceptions.ContentDecodingError,
+    requests.exceptions.RetryError,
+)
+
+
+def is_retryable_request_error(error):
+    """Diz se uma exceção de rede merece uma nova tentativa."""
+    return isinstance(error, RETRYABLE_EXCEPTIONS)
+
+
+class RetryBudget:
+    """Orçamento compartilhado de tentativas para uma consulta lógica.
+
+    Permite que o caminho de streaming e o fallback bloqueante consumam o
+    mesmo teto de tentativas, em vez de multiplicá-lo. O teto de 10 é
+    rígido, independentemente de argumentos ou configuração divergente.
+    """
+
+    MAX_ATTEMPTS = LLM_MAX_ATTEMPTS_LIMIT
+
+    def __init__(self, total=None):
+        maximum = LLM_MAX_ATTEMPTS if total is None else total
+        try:
+            maximum = int(maximum)
+        except (TypeError, ValueError):
+            maximum = LLM_MAX_ATTEMPTS
+
+        self.total = min(self.MAX_ATTEMPTS, max(1, maximum))
+        self._used = 0
+        self._lock = threading.RLock()
+        self._failure_deadline = None
+
+    @property
+    def used(self):
+        with self._lock:
+            return self._used
+
+    @property
+    def remaining(self):
+        with self._lock:
+            return max(0, self.total - self._used)
+
+    def take(self, reserve=0):
+        """Consome uma tentativa e devolve o número global da tentativa.
+
+        ``reserve`` preserva as últimas tentativas para outro transporte
+        (por exemplo, o fallback bloqueante). Quando o que restaria é só a
+        reserva, devolve ``None`` sem consumir o orçamento global.
+        """
+        try:
+            reserve = max(0, int(reserve or 0))
+        except (TypeError, ValueError):
+            reserve = 0
+
+        with self._lock:
+            limit = max(0, self.total - min(reserve, self.total))
+            if self._used >= limit:
+                return None
+
+            self._used += 1
+            return self._used
+
+    def record_failure(self):
+        """Marca que a próxima tentativa deve começar após a espera fixa.
+
+        O prazo é calculado no momento em que a tentativa anterior termina.
+        Assim, o intervalo de 2s não depende da duração do request anterior.
+        """
+        with self._lock:
+            self._failure_deadline = time.monotonic() + _retry_delay(self.used)
+
+    def wait_before_attempt(self):
+        """Aguarda o prazo deixado pela última falha transitória.
+
+        A primeira tentativa é imediata. Se a tentativa anterior foi
+        bem-sucedida, a próxima chamada também pode começar sem espera.
+        """
+        with self._lock:
+            deadline = self._failure_deadline
+            self._failure_deadline = None
+
+        if deadline is None:
+            return
+
+        delay = max(0.0, deadline - time.monotonic())
+        if delay > 0:
+            time.sleep(delay)
 
 
 def _retry_delay(attempt, response=None):
-    """Espera antes da próxima tentativa: Retry-After quando o provedor
-    informa, senão backoff exponencial com jitter (1,5s, 3s, 6s...)."""
-    if response is not None:
-        retry_after = (getattr(response, "headers", None) or {}).get("Retry-After")
-        if retry_after:
-            try:
-                return min(float(retry_after), 20.0)
-            except (TypeError, ValueError):
-                pass
-    delay = min(LLM_RETRY_BASE_DELAY * (2 ** (attempt - 1)), LLM_RETRY_MAX_DELAY)
-    return delay + random.uniform(0, 0.5)
+    """Calcula a espera fixa antes da próxima tentativa.
 
-
-def call_model(payload, timeout=(10, 60), attempts=None):
+    A primeira tentativa é imediata e cada nova tentativa espera 2s. Os
+    argumentos ficam para compatibilidade, mas não alteram a política.
     """
-    POST /chat/completions com retry para erros transitórios (429/5xx e
-    falha de rede). Só para chamadas bloqueantes: stream não tem retry
-    seguro, porque os primeiros bytes podem já ter sido consumidos.
+    return LLM_RETRY_DELAY
 
-    Em caso de falha de rede definitiva, levanta a exceção (os callers já
-    tratam requests.RequestException). Se o provedor seguir respondendo
-    erro, devolve a última resposta para o caller tratar como hoje.
+
+def _attempt_limit(budget, attempts, reserve=0):
+    """Limita uma chamada ao orçamento global e à janela local informada.
+
+    ``reserve`` mantém as últimas tentativas disponíveis para o fallback
+    bloqueante. Se só a reserva resta, a janela local é zero.
     """
-    tries = LLM_MAX_ATTEMPTS if not attempts or attempts < 1 else attempts
+    requested = LLM_MAX_ATTEMPTS if not attempts or attempts < 1 else attempts
+    try:
+        requested = int(requested)
+    except (TypeError, ValueError):
+        requested = LLM_MAX_ATTEMPTS
 
-    for attempt in range(1, tries + 1):
+    try:
+        reserve = max(0, int(reserve or 0))
+    except (TypeError, ValueError):
+        reserve = 0
+
+    available = max(0, budget.remaining - reserve)
+    if available <= 0:
+        return 0
+
+    return max(1, min(requested, available))
+
+
+def call_model(payload, timeout=(10, 60), attempts=None, budget=None):
+    """Faz uma chamada bloqueante ao modelo com retry seguro.
+
+    Erros de rede transitórios e respostas HTTP transitórias são repetidos
+    até o orçamento acabar. Quando o orçamento global é esgotado, levanta
+    :class:`RetryBudgetExhausted`; erros HTTP definitivos são devolvidos
+    para o caller tratar como antes.
+
+    Quando ``budget`` é informado, ele é a autoridade: o total de requests
+    da chamada bloqueante e do fallback de streaming continua sendo o mesmo.
+    """
+    retry_budget = budget if budget is not None else RetryBudget(attempts)
+    limit = _attempt_limit(retry_budget, attempts)
+    local_attempts = 0
+
+    while True:
+        attempt = retry_budget.take()
+
+        if attempt is None:
+            print(
+                "[NEXA] orçamento de %d tentativa(s) ao modelo esgotado."
+                % retry_budget.total
+            )
+            raise RetryBudgetExhausted(
+                "Orçamento de tentativas ao modelo esgotado.",
+                total=retry_budget.total,
+            )
+
+        local_attempts += 1
+        retry_budget.wait_before_attempt()
+
         try:
             response = requests.post(
                 API_BASE + "/chat/completions",
@@ -78,36 +251,283 @@ def call_model(payload, timeout=(10, 60), attempts=None):
                 timeout=timeout,
             )
         except requests.RequestException as error:
-            if attempt >= tries:
-                print(
-                    "[NEXA] chamada ao modelo falhou após %d tentativa(s): %s"
-                    % (attempt, error)
-                )
-                raise
+            if not is_retryable_request_error(error):
+                raise PermanentModelError(
+                    "Falha permanente ao consultar o modelo.",
+                    cause=error,
+                ) from error
+
+            retry_budget.record_failure()
+            if local_attempts >= limit:
+                response = None
+                if retry_budget.remaining <= 0:
+                    print(
+                        "[NEXA] chamada ao modelo falhou após %d tentativa(s): %s"
+                        % (attempt, error)
+                    )
+                    raise RetryBudgetExhausted(
+                        "Orçamento de tentativas ao modelo esgotado.",
+                        cause=error,
+                        total=retry_budget.total,
+                    ) from error
+
+                raise RetryWindowExhausted(
+                    "Janela de tentativas do transporte esgotada.",
+                    cause=error,
+                    total=retry_budget.total,
+                ) from error
 
             delay = _retry_delay(attempt)
             print(
-                "[NEXA] erro transitório (%s); tentando de novo em %.1fs "
+                "[NEXA] erro transitório (%s); nova tentativa em %.1fs "
                 "(tentativa %d/%d)."
-                % (type(error).__name__, delay, attempt, tries)
+                % (type(error).__name__, delay, attempt, retry_budget.total)
             )
-            time.sleep(delay)
             continue
 
-        if response.status_code in RETRYABLE_STATUS and attempt < tries:
-            delay = _retry_delay(attempt, response)
-            print(
-                "[NEXA] HTTP %d transitório; tentando de novo em %.1fs "
-                "(tentativa %d/%d)."
-                % (response.status_code, delay, attempt, tries)
-            )
+        if response.status_code in RETRYABLE_STATUS:
+            retry_budget.record_failure()
+            if local_attempts < limit:
+                delay = _retry_delay(attempt, response)
+                print(
+                    "[NEXA] HTTP %d transitório; nova tentativa em %.1fs "
+                    "(tentativa %d/%d)."
+                    % (response.status_code, delay, attempt, retry_budget.total)
+                )
+                response.close()
+                continue
+
+            status_code = response.status_code
+            if retry_budget.remaining <= 0:
+                log_upstream_error(response)
+                response.close()
+                raise RetryBudgetExhausted(
+                    "Orçamento de tentativas ao modelo esgotado.",
+                    status_code=status_code,
+                    total=retry_budget.total,
+                )
+
             response.close()
-            time.sleep(delay)
-            continue
+            raise RetryWindowExhausted(
+                "Janela de tentativas do transporte esgotada.",
+                status_code=status_code,
+                total=retry_budget.total,
+            )
 
         return response
 
-    return response
+
+def call_model_stream(
+    payload, timeout=(10, 60), attempts=None, probe=None, budget=None, reserve=0
+):
+    """Abre um stream do modelo com retry seguro antes da resposta.
+
+    O retry só acontece enquanto o provedor ainda não entregou conteúdo
+    útil. Depois do primeiro texto, raciocínio ou tool call, a resposta é
+    devolvida ao caller e não é repetida, evitando texto duplicado e
+    ferramentas executadas mais de uma vez.
+
+    ``probe`` recebe o iterador de linhas e deve consumir o stream até
+    encontrar o primeiro conteúdo útil. Se devolver ``None``, a tentativa
+    falhou e pode ser refeita com segurança.
+
+    Quando ``budget`` é informado, streaming e fallback bloqueante
+    consomem o mesmo teto global de tentativas. ``reserve`` preserva as
+    últimas tentativas para o fallback sem consumir o décimo request.
+    """
+    retry_budget = budget if budget is not None else RetryBudget(attempts)
+    try:
+        reserve = max(0, int(reserve or 0))
+    except (TypeError, ValueError):
+        reserve = 0
+
+    limit = _attempt_limit(retry_budget, attempts, reserve)
+    if limit <= 0:
+        if retry_budget.remaining <= 0:
+            print(
+                "[NEXA] orçamento de %d tentativa(s) ao stream esgotado."
+                % retry_budget.total
+            )
+            raise RetryBudgetExhausted(
+                "Orçamento de tentativas ao modelo esgotado.",
+                total=retry_budget.total,
+            )
+
+        raise RetryWindowExhausted(
+            "Orçamento do stream reservado ao fallback bloqueante.",
+            total=retry_budget.total,
+        )
+
+    local_attempts = 0
+
+    while True:
+        attempt = retry_budget.take(reserve=reserve)
+
+        if attempt is None:
+            if retry_budget.remaining <= 0:
+                print(
+                    "[NEXA] orçamento de %d tentativa(s) ao stream esgotado."
+                    % retry_budget.total
+                )
+                raise RetryBudgetExhausted(
+                    "Orçamento de tentativas ao modelo esgotado.",
+                    total=retry_budget.total,
+                )
+
+            raise RetryWindowExhausted(
+                "Orçamento do stream reservado ao fallback bloqueante.",
+                total=retry_budget.total,
+            )
+
+        local_attempts += 1
+        retry_budget.wait_before_attempt()
+
+        try:
+            response = requests.post(
+                API_BASE + "/chat/completions",
+                headers=auth_headers(),
+                json=payload,
+                stream=True,
+                timeout=timeout,
+            )
+        except requests.RequestException as error:
+            if not is_retryable_request_error(error):
+                raise PermanentModelError(
+                    "Falha permanente ao consultar o modelo.",
+                    cause=error,
+                ) from error
+
+            retry_budget.record_failure()
+
+            if local_attempts >= limit:
+                if retry_budget.remaining <= 0:
+                    print(
+                        "[NEXA] stream do modelo falhou após %d tentativa(s): %s"
+                        % (attempt, error)
+                    )
+                    raise RetryBudgetExhausted(
+                        "Orçamento de tentativas ao modelo esgotado.",
+                        cause=error,
+                        total=retry_budget.total,
+                    ) from error
+
+                raise RetryWindowExhausted(
+                    "Janela de tentativas do stream esgotada.",
+                    cause=error,
+                    total=retry_budget.total,
+                ) from error
+
+            delay = _retry_delay(attempt)
+            print(
+                "[NEXA] stream falhou (%s); nova tentativa em %.1fs "
+                "(tentativa %d/%d)."
+                % (type(error).__name__, delay, attempt, retry_budget.total)
+            )
+            continue
+
+        if response.status_code in RETRYABLE_STATUS:
+            retry_budget.record_failure()
+            if local_attempts < limit:
+                delay = _retry_delay(attempt, response)
+                print(
+                    "[NEXA] stream HTTP %d transitório; nova tentativa em %.1fs "
+                    "(tentativa %d/%d)."
+                    % (response.status_code, delay, attempt, retry_budget.total)
+                )
+                response.close()
+                continue
+
+            status_code = response.status_code
+            if retry_budget.remaining <= 0:
+                log_upstream_error(response)
+                response.close()
+                raise RetryBudgetExhausted(
+                    "Orçamento de tentativas ao modelo esgotado.",
+                    status_code=status_code,
+                    total=retry_budget.total,
+                )
+
+            response.close()
+            raise RetryWindowExhausted(
+                "Janela de tentativas do stream esgotada.",
+                status_code=status_code,
+                total=retry_budget.total,
+            )
+
+        if response.status_code != 200 or probe is None:
+            return response, None, None
+
+        lines = response.iter_lines(decode_unicode=False)
+
+        try:
+            probe_result = probe(lines)
+        except StreamContentDeliveredError:
+            # Já houve conteúdo útil. Repetir este request duplicaria a
+            # resposta ou poderia executar a ferramenta outra vez.
+            response.close()
+            raise
+        except requests.RequestException as error:
+            if not is_retryable_request_error(error):
+                response.close()
+                raise PermanentModelError(
+                    "Falha permanente ao consultar o modelo.",
+                    cause=error,
+                ) from error
+
+            # Uma sondagem interrompida ainda não entregou nada ao
+            # frontend; fechar a resposta e repetir é seguro.
+            retry_budget.record_failure()
+            response.close()
+            if local_attempts >= limit:
+                if retry_budget.remaining <= 0:
+                    print(
+                        "[NEXA] stream do modelo falhou após %d tentativa(s): %s"
+                        % (attempt, error)
+                    )
+                    raise RetryBudgetExhausted(
+                        "Orçamento de tentativas ao modelo esgotado.",
+                        cause=error,
+                        total=retry_budget.total,
+                    ) from error
+
+                raise RetryWindowExhausted(
+                    "Janela de tentativas do stream esgotada.",
+                    cause=error,
+                    total=retry_budget.total,
+                ) from error
+
+            delay = _retry_delay(attempt)
+            print(
+                "[NEXA] stream interrompido (%s); nova tentativa em %.1fs "
+                "(tentativa %d/%d)."
+                % (type(error).__name__, delay, attempt, retry_budget.total)
+            )
+            continue
+
+        if probe_result is not None:
+            return response, lines, probe_result
+
+        response.close()
+        retry_budget.record_failure()
+        if local_attempts >= limit:
+            if retry_budget.remaining <= 0:
+                raise RetryBudgetExhausted(
+                    "O modelo não entregou uma resposta útil após esgotar as "
+                    "tentativas.",
+                    total=retry_budget.total,
+                )
+
+            raise RetryWindowExhausted(
+                "O modelo não entregou resposta na janela do stream.",
+                total=retry_budget.total,
+            )
+
+        delay = _retry_delay(attempt)
+        print(
+            "[NEXA] o modelo não entregou resposta; nova tentativa em %.1fs "
+            "(tentativa %d/%d)."
+            % (delay, attempt, retry_budget.total)
+        )
 
 
 def extract_text(data):
@@ -257,6 +677,16 @@ class InlineThoughtBuffer:
         self._open_pattern = ""
         self._close_pattern = ""
         self._reasoning_seen = 0
+
+    @property
+    def has_pending_reasoning(self):
+        """Diz se o buffer preserva conteúdo útil ainda incompleto.
+
+        Isso inclui um bloco de raciocínio aberto e também um sufixo que
+        pode ser o início de um marcador. Uma falha nesse ponto não pode
+        ser repetida, pois o conteúdo parcial já foi consumido do stream.
+        """
+        return self._inside or bool(self._buffer)
 
     def feed(self, chunk):
         """Recebe um chunk de conteúdo e devolve (reasoning, plain_text).
@@ -813,7 +1243,13 @@ def generate_chat_title(user_message):
         if title and len(title) <= 60:
             return title
             
-    except (requests.RequestException, ValueError) as error:
+    except (
+        requests.RequestException,
+        RetryBudgetExhausted,
+        RetryWindowExhausted,
+        PermanentModelError,
+        ValueError,
+    ) as error:
         print("[NEXA] falha ao gerar título:", error)
     
     return None

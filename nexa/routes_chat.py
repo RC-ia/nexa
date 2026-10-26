@@ -2,11 +2,17 @@
 from .chatflow import make_blocking_response
 from .llm import log_upstream_error
 from .chatflow import make_stream_response
+from .chatflow import probe_stream
 from .config import STREAM_TIMEOUT
 from .config import CONNECT_TIMEOUT
+from .llm import call_model_stream
+from .llm import RetryBudget
+from .llm import RetryBudgetExhausted
+from .llm import RetryWindowExhausted
+from .llm import PermanentModelError
+from .llm import ModelTransportError
+from .llm import StreamContentDeliveredError
 from .llm import request_body
-from .llm import auth_headers
-from .config import API_BASE
 from .chatflow import make_thinking_response
 from .config import THINKING_AGENT_ROUNDS
 from .chatflow import make_deep_response
@@ -111,11 +117,13 @@ def chat():
             ).strip()
         return ""
 
-    already_present = any(
-        isinstance(message, dict)
-        and message.get("role") == "user"
-        and text_content(message.get("content")) == direct_message
-        for message in incoming
+    # O navegador já inclui a mensagem atual no histórico que envia. Só
+    # considere-a presente quando ela for a última mensagem do recorte;
+    # assim, repetir um texto antigo não faz a nova mensagem ser omitida.
+    already_present = bool(incoming) and (
+        isinstance(incoming[-1], dict)
+        and incoming[-1].get("role") == "user"
+        and text_content(incoming[-1].get("content")) == direct_message
     )
 
     if direct_message and not already_present:
@@ -188,10 +196,25 @@ def chat():
     if not messages:
         return jsonify({"error": "Nenhuma mensagem foi enviada para a NEXA."}), 400
 
+    # Um único orçamento cobre toda a operação lógica: visão, agentes,
+    # streaming e o fallback bloqueante. O fallback reserva a última
+    # tentativa para não ser bloqueado por um stream que gastou tudo.
+    retry_budget = RetryBudget()
+
     if message_has_image(messages):
         try:
-            messages = analyze_image_for_text_model(messages, reasoning)
-        except (requests.RequestException, RuntimeError) as error:
+            messages = analyze_image_for_text_model(
+                messages, reasoning, budget=retry_budget
+            )
+        except RetryBudgetExhausted as error:
+            print(
+                "[NEXA-VISÃO] orçamento de %d tentativa(s) esgotado: %s"
+                % (retry_budget.total, error)
+            )
+            return jsonify({
+                "error": "Falha ao consultar o modelo após esgotar as tentativas."
+            }), 503
+        except (ModelTransportError, requests.RequestException, RuntimeError) as error:
             # Degradar em vez de 502: o modelo normal responde pelo texto
             # e avisa que a imagem não pôde ser analisada.
             print(
@@ -217,6 +240,7 @@ def chat():
             user_id, user_message, messages, memories, reasoning,
             custom_instructions, memory_enabled,
             system_prompt_override=spicy_override,
+            budget=retry_budget,
         )
 
     if reasoning in THINKING_AGENT_ROUNDS and reasoning != "none":
@@ -224,22 +248,51 @@ def chat():
             user_id, user_message, messages, memories, reasoning,
             custom_instructions, memory_enabled,
             system_prompt_override=spicy_override,
+            budget=retry_budget,
         )
 
     thinking_report = ""
+    upstream = None
+    stream_lines = None
+    stream_probe = None
+
     try:
-        upstream = requests.post(
-            API_BASE + "/chat/completions",
-            headers=auth_headers(),
-            json=request_body(
+        upstream, stream_lines, stream_probe = call_model_stream(
+            request_body(
                 True, messages, memories, reasoning, custom_instructions,
                 memory_enabled, user_id, thinking_report=thinking_report,
                 system_prompt_override=spicy_override,
             ),
-            stream=True,
             timeout=(CONNECT_TIMEOUT, STREAM_TIMEOUT),
+            probe=probe_stream,
+            budget=retry_budget,
+            reserve=1,
         )
-
+    except RetryWindowExhausted as error:
+        # O stream usou a janela dele, mas ainda há a tentativa reservada
+        # para o caminho bloqueante. Não é esgotamento global.
+        print(
+            "[NEXA] janela do stream esgotada (%s); indo pelo caminho "
+            "bloqueante." % error
+        )
+        upstream = None
+    except RetryBudgetExhausted as error:
+        print(
+            "[NEXA] orçamento de %d tentativa(s) esgotado no stream: %s"
+            % (retry_budget.total, error)
+        )
+        return jsonify({
+            "error": "Falha ao consultar o modelo após esgotar as tentativas."
+        }), 503
+    except PermanentModelError as error:
+        print("[NEXA] falha permanente no stream:", error)
+        return jsonify({"error": "Falha ao consultar o modelo."}), 502
+    except StreamContentDeliveredError as error:
+        # Texto, raciocínio ou tool call já saíram do stream. Repetir a
+        # operação poderia duplicar conteúdo ou executar a ferramenta de
+        # novo, então encerra sem o fallback bloqueante.
+        print("[NEXA] stream interrompido após conteúdo útil:", error)
+        return jsonify({"error": "Erro durante a resposta da NEXA."}), 502
     except requests.RequestException as error:
         print(
             "[NEXA] stream não respondeu em %ds (%s). Indo pelo caminho bloqueante."
@@ -247,9 +300,14 @@ def chat():
         )
         upstream = None
 
-    if upstream is not None and upstream.status_code == 200:
+    if (
+        upstream is not None
+        and upstream.status_code == 200
+        and stream_lines is not None
+        and stream_probe is not None
+    ):
         streamed = make_stream_response(
-            upstream.iter_lines(decode_unicode=False),
+            stream_lines,
             user_id,
             user_message,
             memory_enabled,
@@ -259,6 +317,8 @@ def chat():
             custom_instructions,
             thinking_report,
             system_prompt_override=spicy_override,
+            probe=stream_probe,
+            budget=retry_budget,
         )
 
         if streamed is not None:
@@ -274,4 +334,5 @@ def chat():
         user_id, user_message, messages, memories, reasoning,
         custom_instructions, memory_enabled, thinking_report,
         system_prompt_override=spicy_override,
+        budget=retry_budget,
     )

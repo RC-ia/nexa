@@ -63,8 +63,8 @@ API_GEMA=sua-chave-gemini-aqui
 ```
 
 Opcionais (já têm padrão): `API_BASE`, `MODEL`, `VISION_MODEL`, `PORT`,
-`HOST`, `TRUSTED_PROXY_IPS`, `MAX_OUTPUT_TOKENS`, `MEMORY_DIR`,
-`STUDIO_DIR`, `STREAM_TIMEOUT`,
+`HOST`, `TRUSTED_PROXY_IPS`, `MAX_OUTPUT_TOKENS`, `LLM_MAX_ATTEMPTS`,
+`MEMORY_DIR`, `STUDIO_DIR`, `STREAM_TIMEOUT`,
 `THINKING_MINIMUM_ROUNDS`, `THINKING_LOW_ROUNDS`,
 `THINKING_MEDIUM_ROUNDS`, `THINKING_HIGH_ROUNDS`,
 `THINKING_VERY_HIGH_ROUNDS`, `THINKING_MAXIMUM_ROUNDS`,
@@ -606,19 +606,46 @@ não expõem raciocínio deixam o painel com a mensagem "O modelo não expôs
 o raciocínio desta resposta". Nesses casos, selecionar um nível no seletor
 de reforço também pode não ter efeito.
 
-## Timeout e HTTP 524
+## Timeout, HTTP 524 e retry do modelo
 
-A NEXA tenta o streaming primeiro; se não der certo, repete a chamada de
-forma bloqueante. A API fica atrás de um proxy (Cloudflare) que responde
-**524** quando a resposta não chega a tempo — o padrão é ~100s.
+A NEXA consulta o provedor com retry no backend. A política é rígida:
 
-Para não esperar o proxy cortar, o servidor desiste do stream antes disso:
+- no máximo **10 requests ao modelo por operação lógica**;
+- a tentativa 1 é imediata e, depois de cada falha transitória, a próxima
+  tentativa começa **2s após o término da falha anterior** (não é um
+  cronograma fixo de `0s`, `2s`, `4s` desde o início);
+- HTTP `408`, `429`, `500`, `502`, `503`, `504` e `524`, além de timeout e
+  falha de rede, são considerados transitórios;
+- streaming e fallback bloqueante compartilham o mesmo orçamento global:
+  na rota normal, a última tentativa fica reservada ao fallback, então o
+  stream não consome o décimo request sozinho;
+- depois que o stream entrega texto, raciocínio ou uma tool call, ele não
+  é repetido. A sondagem inicial é reaproveitada, de modo que o stream não
+  seja consumido nem a resposta repetida.
+
+`LLM_MAX_ATTEMPTS` no `.env` pode reduzir esse teto, mas nunca permitir
+mais de 10 tentativas. O intervalo de 2s é fixo e não depende de
+configuração. Quando o orçamento acaba, a rota normal responde HTTP `503`
+antes de abrir o SSE, e o frontend mostra o erro. Depois que o SSE já
+começou — em ferramentas, pensamento ou pesquisa profunda — o esgotamento
+vira um evento `error`, nunca um `done` falso. O frontend **não repete
+`/api/chat` automaticamente**. A repetição manual continua disponível pelo
+botão “Tentar novamente”.
+
+A mesma política de transporte é usada nos caminhos normal, de pensamento e
+de pesquisa profunda. Como uma tool call é o limite de repetibilidade, uma
+memória ou um lembrete não é executado duas vezes pelo mesmo retry.
+
+A API fica atrás de um proxy (Cloudflare) que responde **524** quando a
+resposta não chega a tempo — o padrão é ~100s. Para limitar o tempo de cada
+tentativa de streaming:
 
 - `STREAM_TIMEOUT` — tempo máximo até o primeiro pedaço do stream, em
   segundos (padrão `45`). Mantenha abaixo de ~100.
 
-Se o stream estoura esse prazo, o log mostra algo como
-`stream não respondeu em 45s (ReadTimeout)` e a chamada segue pelo caminho
-bloqueante. Ainda assim o **524 pode aparecer** quando o modelo é lento demais
-(alto `MAX_OUTPUT_TOKENS` combinado com raciocínio alto) — nesse caso a única
-saída é reduzir `MAX_OUTPUT_TOKENS` ou o nível de raciocínio.
+Como o servidor espera e pode repetir antes de abrir o SSE, dez timeouts
+consecutivos podem ultrapassar o timeout ocioso de um proxy externo. Se o
+túnel cortar antes das tentativas terminarem, reduza `STREAM_TIMEOUT` ou
+`LLM_MAX_ATTEMPTS`. O **524** também pode aparecer quando o modelo é lento
+demais (alto `MAX_OUTPUT_TOKENS` combinado com raciocínio alto); nesse caso,
+reduzir `MAX_OUTPUT_TOKENS` ou o nível de raciocínio evita a espera longa.
