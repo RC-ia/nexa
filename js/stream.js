@@ -35,7 +35,11 @@ export async function askNexa(text, deep, image, file) {
         customInstructions,
         deep: deep === true,
         image: image || null,
-        file: file || null
+        file: file || null,
+
+        // O agente de memória usa o id para saber quando um chat novo
+        // aparece (e chamar o observador na hora).
+        chatId: activeChatId || ""
       }),
 
       signal: abortController?.signal

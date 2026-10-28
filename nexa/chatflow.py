@@ -45,6 +45,7 @@ from .llm import tool_call_name
 from .llm import tool_call_id
 from .tools import run_tools
 from .config import MAX_TOOL_ROUNDS
+from .memory_agent import enqueue_turn
 
 
 def finish_stream_with_tools(user_id, messages, memories, reasoning,
@@ -338,7 +339,7 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
                        memories=None, reasoning=None, custom_instructions="",
                        thinking_report="", deep_report="",
                        inline_buffer=None, system_prompt_override="",
-                       budget=None):
+                       budget=None, user_message="", chat_id=""):
     """
     Traduz o stream do modelo nos eventos SSE da NEXA. Fica em função
     separada para a pesquisa profunda reaproveitar: lá o relatório entra
@@ -358,6 +359,7 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
         reason = None
         memory_updated = False
         searched = False
+        follow_up = ""
 
         try:
             if thinking_report:
@@ -497,6 +499,17 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
 
             yield sse({"type": "done", "model": model_for_reasoning(reasoning)})
 
+            # O turno fechou: o agente de memória pode olhar para ele em
+            # segundo plano. Isso acontece depois do "done", para não
+            # atrasar a resposta do cliente.
+            enqueue_turn(
+                user_id,
+                user_message,
+                (full_text + follow_up).strip(),
+                chat_id,
+                enabled=memory_enabled,
+            )
+
         except requests.RequestException as error:
             print("[NEXA] erro durante o stream:", error)
             yield sse({"type": "error", "error": "Erro durante a resposta da NEXA."})
@@ -507,7 +520,8 @@ def stream_chat_events(lines, reasoning_chunks, first_text, tool_calls,
 def make_stream_response(lines, user_id, user_message, memory_enabled=True,
                          messages=None, memories=None, reasoning=None,
                          custom_instructions="", thinking_report="",
-                         system_prompt_override="", probe=None, budget=None):
+                         system_prompt_override="", probe=None, budget=None,
+                         chat_id=""):
     if probe is None:
         probe = probe_stream(lines)
 
@@ -526,6 +540,8 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
                 inline_buffer=inline_buffer,
                 system_prompt_override=system_prompt_override,
                 budget=budget,
+                user_message=user_message,
+                chat_id=chat_id,
             )
         ),
         headers=sse_headers(),
@@ -535,7 +551,7 @@ def make_stream_response(lines, user_id, user_message, memory_enabled=True,
 def make_deep_response(user_id, user_message, messages, memories, reasoning,
                        custom_instructions="", memory_enabled=True,
                        thinking_report="", system_prompt_override="",
-                       budget=None):
+                       budget=None, chat_id=""):
     """
     Pesquisa profunda pedida pelo botão "+" do composer: a pergunta vai
     direto para o pesquisador (agente separado, sem o contexto da
@@ -771,6 +787,8 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
             inline_buffer=inline_buffer,
             system_prompt_override=system_prompt_override,
             budget=budget,
+            user_message=user_message,
+            chat_id=chat_id,
         )
 
     return Response(stream_with_context(generate()), headers=sse_headers())
@@ -779,7 +797,7 @@ def make_deep_response(user_id, user_message, messages, memories, reasoning,
 def make_thinking_response(
     user_id, user_message, messages, memories, reasoning,
     custom_instructions="", memory_enabled=True,
-    system_prompt_override="", budget=None,
+    system_prompt_override="", budget=None, chat_id="",
 ):
     """Executa o agente de pensamento em segundo plano e transmite progresso."""
     def generate():
@@ -878,6 +896,8 @@ def make_thinking_response(
             inline_buffer=inline_buffer,
             system_prompt_override=system_prompt_override,
             budget=budget,
+            user_message=user_message,
+            chat_id=chat_id,
         )
 
     return Response(stream_with_context(generate()), headers=sse_headers())
@@ -886,7 +906,7 @@ def make_thinking_response(
 def make_blocking_response(
     user_id, user_message, messages, memories, reasoning,
     custom_instructions="", memory_enabled=True, thinking_report="",
-    system_prompt_override="", budget=None,
+    system_prompt_override="", budget=None, chat_id="",
 ):
     try:
         response = call_model(
@@ -984,5 +1004,14 @@ def make_blocking_response(
             yield sse({"type": "memory"})
 
         yield sse({"type": "done", "model": model_for_reasoning(reasoning)})
+
+        # Turno concluído: o agente de memória observa em segundo plano.
+        enqueue_turn(
+            user_id,
+            user_message,
+            (text + follow_up).strip(),
+            chat_id,
+            enabled=memory_enabled,
+        )
 
     return Response(stream_with_context(generate()), headers=sse_headers())

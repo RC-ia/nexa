@@ -18,6 +18,10 @@ from .usertime import get_time_settings
 from .usertime import format_offset
 from .usertime import user_now
 from .config import MEMORY_PROMPT_HEADER
+from .config import MEMORY_INSIGHTS_HEADER
+from .config import MEMORY_STATS_HEADER
+from .memory import get_observation_context
+from .memory import get_statistical_context
 from .prompts import current_system_prompt
 from .config import MODEL
 import json
@@ -1018,7 +1022,8 @@ def log_upstream_error(response):
 
 def build_messages(messages, memories, custom_instructions="", user_id="",
                    deep_report="", system_prompt_override="", memory_header="",
-                   model_name="", reasoning_level="", thinking_report=""):
+                   model_name="", reasoning_level="", thinking_report="",
+                   memory_enabled=True):
     system_prompt = system_prompt_override or current_system_prompt(user_id)
 
     # Adiciona token de raciocínio para diffusiongemma
@@ -1031,6 +1036,23 @@ def build_messages(messages, memories, custom_instructions="", user_id="",
             "\n\n" + (memory_header or MEMORY_PROMPT_HEADER) + "\n"
             + "\n\n".join(memories)
         )
+
+    # Observações do agente de memória: hipóteses ainda não promovidas ao
+    # documento. Entram como contexto, nunca como instrução.
+    if memory_enabled and user_id:
+        insights = get_observation_context(user_id)
+        if insights:
+            system_prompt += (
+                "\n\n" + MEMORY_INSIGHTS_HEADER + "\n" + insights
+            )
+
+        # Camada estatística: contagens de uso e fatos recorrentes. Sai
+        # sem chamar o modelo nenhum (é leitura do arquivo da conta).
+        stats = get_statistical_context(user_id)
+        if stats:
+            system_prompt += (
+                "\n\n" + MEMORY_STATS_HEADER + "\n" + stats
+            )
 
     if custom_instructions:
         system_prompt += (
@@ -1186,6 +1208,7 @@ def request_body(stream, messages, memories, reasoning, custom_instructions="",
             system_prompt_override=system_prompt_override,
             model_name=model, reasoning_level=reasoning,
             thinking_report=thinking_report,
+            memory_enabled=memory_enabled,
         ),
         "stream": stream,
         "max_tokens": MAX_OUTPUT_TOKENS,

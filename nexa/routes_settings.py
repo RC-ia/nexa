@@ -19,8 +19,20 @@ from flask import request
 from .reminders import delete_reminder
 from .reminders import user_reminders
 from .memory import clear_memory
+from .memory import clear_observations
+from .memory import discard_observation
+from .memory import get_observation_stats
+from .memory import get_observations
+from .memory import promote_observation
 from .memory import save_memory
 from .memory import MEMORY_FILE_LIMIT
+from .memory_agent import load_state as load_memory_agent_state
+from .memory_agent import notify_new_chat
+from .memory_agent import request_reflection
+from .config import MEMORY_DECAY_ARCHIVE_AFTER_DAYS
+from .config import MEMORY_DECAY_HALF_LIFE_DAYS
+from .config import MEMORY_REFLECTION_INTERVAL
+from .config import MEMORY_REFLECTION_MIN_OBSERVATIONS
 from datetime import datetime, timezone
 from .memory import memory_path
 from .memory import get_memories
@@ -364,6 +376,171 @@ def clear_memories():
     return jsonify({"ok": True})
 
 
+@app.get("/api/memory/observations")
+def list_observations():
+    """Observações que o agente de memória registrou sobre o usuário."""
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para ver as observações."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    user_id = "acct_%d" % user["id"]
+    items = get_observations(user_id)
+
+    return jsonify({
+        "observations": [
+            {
+                "key": item.get("chave") or "",
+                "fact": item.get("fato") or "",
+                "category": item.get("categoria") or "contexto",
+                "confidence": item.get("confianca") or 0,
+                "explicit": bool(item.get("explicito")),
+                "evidence": item.get("evidencia") or "",
+                "occurrences": item.get("ocorrencias") or 1,
+                "promoted": bool(item.get("promovido")),
+                "first_seen": item.get("primeira_vez") or "",
+                "last_seen": item.get("ultima_vez") or "",
+            }
+            for item in items
+        ],
+    })
+
+
+@app.post("/api/memory/observations/<path:key>/promote")
+def promote_observation_route(key):
+    """Move uma observação para o documento de memória."""
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para promover a observação."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    user_id = "acct_%d" % user["id"]
+    if not promote_observation(user_id, key, force=True):
+        return jsonify({"error": "Observação não encontrada."}), 404
+
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/memory/observations/<path:key>")
+def discard_observation_route(key):
+    """Descarta uma observação (e a linha que ela tinha criado)."""
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para descartar a observação."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    user_id = "acct_%d" % user["id"]
+    if not discard_observation(user_id, key):
+        return jsonify({"error": "Observação não encontrada."}), 404
+
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/memory/observations")
+def clear_observations_route():
+    """Descarta todas as observações do agente de memória."""
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para descartar as observações."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    user_id = "acct_%d" % user["id"]
+    if not clear_observations(user_id):
+        return jsonify({"error": "Não foi possível descartar as observações."}), 500
+
+    return jsonify({"ok": True})
+
+
+@app.get("/api/memory/stats")
+def memory_stats():
+    """Camada estatística da memória: contagens sem chamar o modelo."""
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para ver as estatísticas."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    user_id = "acct_%d" % user["id"]
+    stats = get_observation_stats(user_id)
+    state = load_memory_agent_state(user_id)
+
+    return jsonify({
+        "stats": {
+            "turns_observed": stats.get("turnos_observados") or 0,
+            "active_days": stats.get("dias_ativos") or 0,
+            "first_activity": stats.get("primeira_atividade") or "",
+            "last_activity": stats.get("ultima_atividade") or "",
+            "observations": stats.get("observacoes") or 0,
+            "archived": stats.get("arquivadas") or 0,
+            "promoted": stats.get("promovidas") or 0,
+            "pending": stats.get("pendentes") or 0,
+            "by_category": stats.get("por_categoria") or {},
+            "average_confidence": stats.get("confianca_media") or 0,
+            "recurring_facts": [
+                {
+                    "key": entry.get("chave") or "",
+                    "fact": entry.get("fato") or "",
+                    "category": entry.get("categoria") or "contexto",
+                    "occurrences": entry.get("ocorrencias") or 1,
+                    "confidence": entry.get("confianca") or 0,
+                }
+                for entry in stats.get("fatos_recorrentes") or []
+            ],
+        },
+        "reflection": {
+            "last_at": state.get("last_reflection_at") or "",
+            "count": int(state.get("reflections") or 0),
+            "running": bool(state.get("reflection_running")),
+            "failures": int(state.get("reflection_failures") or 0),
+        },
+        "settings": {
+            "half_life_days": MEMORY_DECAY_HALF_LIFE_DAYS,
+            "archive_after_days": MEMORY_DECAY_ARCHIVE_AFTER_DAYS,
+            "interval_seconds": MEMORY_REFLECTION_INTERVAL,
+            "min_observations": MEMORY_REFLECTION_MIN_OBSERVATIONS,
+        },
+    })
+
+
+@app.post("/api/memory/reflect")
+def trigger_reflection():
+    """Pede uma reflexão imediata da memória da conta.
+
+    A reflexão roda em segundo plano: a resposta é imediata e o
+    trabalho sai para a fila do agente de memória.
+    """
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Faça login para pedir a reflexão."}), 401
+
+    key_error = message_key_error(user)
+    if key_error:
+        return key_error
+
+    user_id = "acct_%d" % user["id"]
+
+    if not request_reflection(user_id):
+        return jsonify({
+            "error": "Não foi possível agendar a reflexão agora.",
+        }), 503
+
+    return jsonify({"ok": True, "scheduled": True})
+
+
 @app.get("/api/reminders")
 def list_reminders():
     user = current_user()
@@ -490,6 +667,8 @@ def save_chat(chat_id):
             None,
         )
 
+        is_new_chat = index is None
+
         if index is None:
             if base_rev > 0:
                 # A conversa existia e foi apagada em outro aparelho.
@@ -525,6 +704,11 @@ def save_chat(chat_id):
         except OSError as error:
             print("[NEXA] falha ao salvar conversas:", error)
             return jsonify({"error": "Falha ao salvar as conversas."}), 500
+
+    if is_new_chat:
+        # Chat novo: o agente de memória é chamado na hora, sem esperar
+        # encher a janela de 5 turnos.
+        notify_new_chat(user_id, chat_id)
 
     return jsonify({"rev": new_rev})
 

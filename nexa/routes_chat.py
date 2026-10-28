@@ -85,6 +85,10 @@ def chat():
     # A memória fica presa à conta logada; o userId vindo do navegador é ignorado.
     user_id = "acct_%d" % user["id"]
 
+    # Id da conversa no navegador. Serve para o agente de memória saber
+    # quando um chat novo aparece (e chamar o observador na hora).
+    chat_id = str(body.get("chatId") or "").strip()[:100]
+
     reasoning = body.get("reasoning")
     reasoning = reasoning.strip() if isinstance(reasoning, str) else ""
     reasoning = normalize_reasoning_level(reasoning)
@@ -241,6 +245,7 @@ def chat():
             custom_instructions, memory_enabled,
             system_prompt_override=spicy_override,
             budget=retry_budget,
+            chat_id=chat_id,
         )
 
     if reasoning in THINKING_AGENT_ROUNDS and reasoning != "none":
@@ -249,6 +254,7 @@ def chat():
             custom_instructions, memory_enabled,
             system_prompt_override=spicy_override,
             budget=retry_budget,
+            chat_id=chat_id,
         )
 
     thinking_report = ""
@@ -319,6 +325,7 @@ def chat():
             system_prompt_override=spicy_override,
             probe=stream_probe,
             budget=retry_budget,
+            chat_id=chat_id,
         )
 
         if streamed is not None:
@@ -335,4 +342,5 @@ def chat():
         custom_instructions, memory_enabled, thinking_report,
         system_prompt_override=spicy_override,
         budget=retry_budget,
+        chat_id=chat_id,
     )

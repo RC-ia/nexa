@@ -119,6 +119,24 @@ export const memoryList = document.getElementById("memoryList");
 export const memoryStatus = document.getElementById("memoryStatus");
 
 
+export const observationsList = document.getElementById("observationsList");
+
+
+export const observationsStatus = document.getElementById("observationsStatus");
+
+
+export const memoryStats = document.getElementById("memoryStats");
+
+
+export const memoryStatsStatus = document.getElementById("memoryStatsStatus");
+
+
+export const memoryReflectButton = document.getElementById("memoryReflect");
+
+
+export const memoryReflectStatus = document.getElementById("memoryReflectStatus");
+
+
 export const customInstructionsInput = document.getElementById("customInstructions");
 
 

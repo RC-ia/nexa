@@ -17,7 +17,8 @@ Estrutura:
   - `tools.py` — executor das ferramentas (`pesquisar`, `visitar_pagina`, `salvar_memoria`, `criar_lembrete`...)
   - `websearch.py` — busca DuckDuckGo/Bing, leitura de páginas e cache de resultados
   - `reminders.py` — lembretes: criação, agendamento, agentes e disparo
-  - `memory.py` — memória consolidada por conta (Markdown)
+  - `memory.py` — memória consolidada por conta (Markdown) + observações do agente
+  - `memory_agent.py` — agente de memória: observa as conversas em segundo plano
   - `prompts.py` — system prompt e prompt "safadinho" personalizados por conta
   - `settings.py`, `usertime.py`, `chatsync.py`, `push.py` — pesquisa profunda por conta, fuso horário, sync de conversas e push FCM
   - `images.py`, `studio.py`, `live.py` — gerador de imagens, Estúdio e chamada Gemini Live
@@ -30,9 +31,8 @@ Estrutura:
 - `live.html`, `live.css`, `live.js` — página da chamada Gemini Live
 - `requirements.txt` — dependências Python
 - `.env.example` — modelo de configuração
-- `memoria/` — um arquivo `.md` por conta com a memória consolidada (criado automaticamente)
+- `memoria/` — por conta: `acct_<id>.md` (documento consolidado), `acct_<id>.observations.json` (observações do agente) e `acct_<id>.memory_agent.json` (estado do agente)
 - `auth.db` — contas, cadastros pendentes e sessões (criado automaticamente, **não versionar**)
-
 - `server.py` — servidor Flask (serve o site + `/api/chat` com streaming SSE + `/api/images/generate` do gerador de imagens)
 - `auth.py` — login, sessões e painel admin
 - `run.py` — supervisor: roda o servidor e aplica auto-update via git
@@ -283,15 +283,98 @@ em tempo real. O navegador precisa permitir acesso ao microfone; fora de
 
 ## Memória
 
-A memória de longo prazo é um **único arquivo Markdown por conta**, dentro de
-`memoria/`. Ela entra no **system prompt** e quem salva é o **próprio modelo,
-durante a conversa**, pela ferramenta `salvar_memoria` — não existe mais uma
-passada separada de extração depois da resposta.
+A memória de longo prazo tem **duas camadas de armazenamento** dentro de
+`memoria/` (e uma terceira camada, só no prompt):
 
-Quando o modelo chama a ferramenta, o servidor grava o documento, responde à
-chamada com o resultado e pede a continuação da resposta, que já sai com a
-memória atualizada no system prompt. O arquivo é limitado a 10.000 caracteres
-e pode ser editado à mão em **Configurações > Memória**.
+1. **Documento consolidado** — um arquivo Markdown por conta (`acct_<id>.md`).
+   Entra no **system prompt** e é editável à mão em **Configurações > Memória**.
+   O arquivo é limitado a 10.000 caracteres.
+2. **Observações** — o que o **agente de memória** deduziu das conversas
+   (`acct_<id>.observations.json`). Entram no system prompt como hipóteses
+   (com categoria e confiança) e nunca como instruções.
+3. **Camada estatística** — contagens de uso e fatos recorrentes, calculadas
+   pelo servidor em Python (sem chamar o modelo) e injetadas no prompt como
+   contexto de personalização.
+
+### O que grava a memória
+
+- O **próprio modelo, durante a conversa**, pela ferramenta `salvar_memoria`.
+  A ferramenta tem **semântica de patch**: cada operação mexe em **uma linha**
+  do documento (`adicionar`, `atualizar` ou `remover`) e o resto do documento
+  fica intacto. Isso evita que uma gravação apague o que já estava lá.
+- O **agente de memória**, em segundo plano, que promove ao documento as
+  observações que já têm confiança (ver abaixo).
+
+### Agente de memória
+
+O agente é **separado do chat** e **nunca o atrasa**: roda em uma thread
+própria, com orçamento de tentativas próprio (10 requests por operação
+lógica, como o resto do sistema).
+
+**Janela:** ele vê as **duas mensagens** de cada turno (usuário e resposta da
+NEXA), dos **últimos 5 turnos**.
+
+**Gatilhos** — o observador é chamado quando:
+
+- acumulou **5 turnos** pendentes;
+- os turnos ficaram **mais de 1 dia** esperando (o servidor procura a cada
+  `MEMORY_AGENT_POLL_SECONDS`, padrão 10 minutos);
+- um **chat novo** é criado (detectado no primeiro `PUT /api/chats/<id>`).
+
+**O que ele registra:** só o que é durável (ferramentas e linguagens usadas,
+preferências, projetos, domínio de trabalho, estilo de comunicação, rotinas).
+Cada observação precisa de **evidência literal** de uma mensagem; sem
+evidência, não entra. Preferências inferidas exigem **repetição (2+ turnos)**
+ou declaração explícita — uma pergunta sobre uma tecnologia é evidência de
+interesse, não de preferência.
+
+**Proteções:** segredos (senhas, chaves, tokens) e textos que parecem
+instruções para o modelo são descartados na hora. As observações entram no
+prompt como contexto, nunca como ordem.
+
+**Promoção:** quando a confiança passa de `MEMORY_PROMOTION_CONFIDENCE`
+(0,75) e o fato se repetiu (ou foi explícito), a observação vira uma linha na
+seção correspondente do documento (`Ferramentas e stack`, `Preferências`,
+`Projetos`, `Contexto`, `Estilo de comunicação`, `Rotinas`). Se o fato
+mudar depois, a linha é atualizada; se a observação for removida, a linha
+sai de lá.
+
+**Controle pelo usuário:** em **Configurações > Memória** dá para ver cada
+observação (fato, categoria, confiança, evidência), **promover** uma
+observação ao documento ou **descartá-la**. Descartar uma observação que já
+foi promovida também tira a linha correspondente do documento.
+
+### Reflexão, decaimento e perfil observado (Fase 3)
+
+A memória envelhece. Três peças cuidam do tempo, todas em segundo plano e
+sem chamar o modelo no caminho do chat:
+
+**Decaimento** — a confiança de uma observação cai pela metade a cada
+meia-vida (`MEMORY_DECAY_HALF_LIFE_DAYS`, padrão 30 dias) sem ela ser
+reconfirmada. Fato que o próprio usuário declarou decai cerca de **4x mais
+devagar** (meia-vida maior). A confiança nunca chega a zero (piso de 0,05:
+o fato pode voltar). Abaixo de `MEMORY_DECAY_DROP_BELOW` (0,15) a
+observação **sai do contexto injetado**; depois de
+`MEMORY_DECAY_ARCHIVE_AFTER_DAYS` (180 dias) sem reconfirmação ela vai para
+o histórico (`arquivadas`) e sai da lista ativa — mas volta sozinha se a
+pessoa voltar a falar do assunto.
+
+**Camada estatística** — contagens puras, calculadas em Python, sem
+nenhuma chamada ao modelo: turnos observados, dias de conversa,
+observações por categoria, fatos recorrentes e confiança média. Uma parte
+desse resumo entra no system prompt (`MEMORY_STATS_HEADER`) como contexto
+de personalização, nunca como instrução.
+
+**Reflexão periódica** — uma vez por dia (`MEMORY_REFLECTION_INTERVAL`) o
+mesmo agente olha a loja inteira de observações e devolve a versão
+consolidada: junta fatos duplicados, refina o texto do que ficou mais
+claro, corrige o que está contraditório e remove o que deixou de valer.
+A reflexão usa prompt próprio (`MEMORY_REFLECTION_PROMPT`), orçamento de
+tentativas próprio e **não infla a contagem de ocorrências** (refinar um
+fato não é uma evidência nova). Ela roda na fila dos workers, disparada
+pelo servidor a cada `MEMORY_REFLECTION_POLL_SECONDS` (1 hora) ou pelo
+botão **Refletir agora** em **Configurações > Memória** — que agenda a
+rodada e devolve a resposta na hora, sem travar a tela.
 
 Ao entrar, a tela de boas-vindas mostra uma **saudação curta, montada no
 próprio navegador** pelo horário ("Bom dia, Ana!", "Boa tarde, Ana!",
@@ -300,7 +383,8 @@ para esse título — ele é simples por definição — e não é gravado no
 histórico da conversa.
 
 Apagar a pasta `memoria/` remove a memória persistente (as conversas do
-navegador continuam no `localStorage`).
+navegador continuam no `localStorage`). Apagar a memória em
+**Configurações > Memória** apaga também as observações do agente.
 
 ## Pesquisa
 

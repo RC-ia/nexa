@@ -7,6 +7,7 @@ from .websearch import run_web_search
 from .usertime import current_time_text
 from .config import RESEARCH_TOOL_NAMES
 from .llm import tool_call_id
+from .memory import apply_memory_patch
 from .memory import sanitize_memory
 from .memory import save_memory
 from .llm import parse_tool_arguments
@@ -25,27 +26,38 @@ READ_POOL_MAX_WORKERS = 4
 def run_memory_tool(user_id, calls):
     """
     Executa as chamadas de salvar_memoria vindas do modelo em conversa e
-    grava o documento consolidado. Devolve o texto de resposta da
-    ferramenta, que volta para o modelo no proximo turno.
+    aplica as operações no documento consolidado. Devolve o texto de
+    resposta da ferramenta, que volta para o modelo no proximo turno.
+
+    A semântica é de patch: cada operação mexe em uma linha do documento
+    (adicionar, atualizar ou remover) e o resto do documento fica intacto.
+    O documento inteiro só entra no formato antigo, para compatibilidade.
     """
     if not user_id or not API_KEY:
         return ""
 
-    saved = False
+    changed = 0
 
     for call in calls:
         if tool_call_name(call) != "salvar_memoria":
             continue
 
         arguments = parse_tool_arguments(call)
+        operations = arguments.get("operacoes")
+
+        if isinstance(operations, list) and operations:
+            changed += apply_memory_patch(user_id, operations)
+            continue
+
         document = arguments.get("documento")
 
         if not isinstance(document, str) or not document.strip():
             continue
 
-        saved = save_memory(user_id, sanitize_memory(document)) or saved
+        if save_memory(user_id, sanitize_memory(document)):
+            changed += 1
 
-    if not saved:
+    if not changed:
         return ""
 
     print("[NEXA] memória atualizada pela ferramenta do modelo.")

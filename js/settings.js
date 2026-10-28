@@ -6,7 +6,8 @@ import { api } from "./auth.js";
 import { chatTitle, currentChat, renderChatList, saveChats, scheduleChatsPush } from "./chats.js";
 import { INSTRUCTIONS_KEY, LIVE_VOICE_KEY, MEMORY_ENABLED_KEY } from "./constants.js";
 import { customInstructionsInput, drawerSettings, drawerToggle, instructionStatus, liveCallOpenButton, liveVoiceSelect, liveVoiceStatus, memoryList } from "./dom.js";
-import { memoryStatus, memoryToggle, settingsClose, settingsHome, settingsPanel, settingsTitle, settingsViews, systemPromptInput } from "./dom.js";
+import { memoryStatus, memoryToggle, observationsList, observationsStatus, settingsClose, settingsHome, settingsPanel, settingsTitle, settingsViews, systemPromptInput } from "./dom.js";
+import { memoryReflectButton, memoryReflectStatus, memoryStats, memoryStatsStatus } from "./dom.js";
 import { systemPromptStatus } from "./dom.js";
 import { closeDrawer } from "./drawer.js";
 import { loadListenSettings } from "./native.js";
@@ -160,6 +161,8 @@ export function showSettingsView(viewName) {
     loadLiveSettings();
   } else if (viewName === "memory") {
     loadMemories();
+    loadObservations();
+    loadMemoryStats();
   } else if (viewName === "instructions") {
     customInstructionsInput.value = customInstructions;
     loadSystemPrompt();
@@ -383,11 +386,198 @@ export async function loadMemories() {
 }
 
 
+export async function loadObservations() {
+  observationsList.replaceChildren();
+  observationsStatus.textContent = "Carregando…";
+
+  try {
+    const data = await api("GET", "/api/memory/observations");
+    const items = data.observations || [];
+
+    observationsList.replaceChildren();
+
+    if (!items.length) {
+      const empty = document.createElement("p");
+      empty.className = "settings-status";
+      empty.textContent =
+        "Nenhuma observação ainda. O agente registra o que deduz a cada 5 turnos.";
+      observationsList.appendChild(empty);
+      observationsStatus.textContent = "";
+      return;
+    }
+
+    items.forEach(item => {
+      const row = document.createElement("div");
+      row.className = "settings-item settings-item-stack";
+
+      const copy = document.createElement("div");
+      copy.className = "settings-item-copy";
+
+      const fact = document.createElement("strong");
+      fact.textContent = item.fact || "";
+      copy.appendChild(fact);
+
+      const meta = document.createElement("small");
+      meta.textContent =
+        `${item.category || "contexto"} · confiança ` +
+        `${Math.round(Number(item.confidence || 0) * 100)}% · ` +
+        `${item.occurrences || 1} ocorrência(s)` +
+        (item.promoted ? " · já está no documento" : "");
+      copy.appendChild(meta);
+
+      if (item.evidence) {
+        const evidence = document.createElement("small");
+        evidence.textContent = `Evidência: “${item.evidence}”`;
+        copy.appendChild(evidence);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "settings-more-actions";
+
+      if (!item.promoted) {
+        const promote = document.createElement("button");
+        promote.type = "button";
+        promote.className = "settings-action";
+        promote.textContent = "Promover";
+
+        promote.addEventListener("click", async function () {
+          promote.disabled = true;
+          try {
+            await api(
+              "POST",
+              `/api/memory/observations/${encodeURIComponent(item.key)}/promote`
+            );
+            await loadObservations();
+            await loadMemories();
+            observationsStatus.textContent = "Observação promovida ao documento.";
+          } catch (error) {
+            observationsStatus.textContent = error.message;
+          } finally {
+            promote.disabled = false;
+          }
+        });
+
+        actions.appendChild(promote);
+      }
+
+      const discard = document.createElement("button");
+      discard.type = "button";
+      discard.className = "settings-danger";
+      discard.textContent = "Descartar";
+
+      discard.addEventListener("click", async function () {
+        if (!confirm("Descartar esta observação?")) {
+          return;
+        }
+        discard.disabled = true;
+        try {
+          await api(
+            "DELETE",
+            `/api/memory/observations/${encodeURIComponent(item.key)}`
+          );
+          await loadObservations();
+          observationsStatus.textContent = "Observação descartada.";
+        } catch (error) {
+          observationsStatus.textContent = error.message;
+        } finally {
+          discard.disabled = false;
+        }
+      });
+
+      actions.appendChild(discard);
+      row.append(copy, actions);
+      observationsList.appendChild(row);
+    });
+
+    observationsStatus.textContent = `${items.length} observação(ões).`;
+  } catch (error) {
+    observationsStatus.textContent = error.message;
+  }
+}
+
+
 export function openSettings() {
   showSettingsView("home");
   closeDrawer();
   settingsPanel.hidden = false;
   settingsClose.focus();
+}
+
+
+export async function loadMemoryStats() {
+  memoryStats.replaceChildren();
+  memoryStatsStatus.textContent = "Carregando…";
+
+  try {
+    const data = await api("GET", "/api/memory/stats");
+    const stats = data.stats || {};
+    const reflection = data.reflection || {};
+
+    memoryStats.replaceChildren();
+
+    const summary = document.createElement("p");
+    summary.className = "settings-description";
+    summary.textContent =
+      `${stats.turns_observed || 0} turno(s) observado(s) em ` +
+      `${stats.active_days || 0} dia(s) de conversa · ` +
+      `${stats.observations || 0} observação(ões) ` +
+      `(${stats.promoted || 0} no documento, ${stats.pending || 0} pendentes, ` +
+      `${stats.archived || 0} arquivadas) · confiança média ` +
+      `${Math.round(Number(stats.average_confidence || 0) * 100)}%`;
+    memoryStats.appendChild(summary);
+
+    const categories = stats.by_category || {};
+    const names = Object.keys(categories);
+
+    if (names.length) {
+      const line = document.createElement("p");
+      line.className = "settings-description";
+      line.textContent =
+        "Por categoria: " +
+        names
+          .sort((a, b) => categories[b] - categories[a])
+          .map(name => `${name} ${categories[name]}`)
+          .join(", ");
+      memoryStats.appendChild(line);
+    }
+
+    const recurring = stats.recurring_facts || [];
+
+    if (recurring.length) {
+      const list = document.createElement("div");
+      list.className = "settings-item-list";
+
+      recurring.slice(0, 6).forEach(entry => {
+        const row = document.createElement("div");
+        row.className = "settings-item";
+
+        const copy = document.createElement("div");
+        copy.className = "settings-item-copy";
+
+        const fact = document.createElement("strong");
+        fact.textContent = entry.fact || "";
+        copy.appendChild(fact);
+
+        const meta = document.createElement("small");
+        meta.textContent =
+          `${entry.category || "contexto"} · ${entry.occurrences || 1} ` +
+          `ocorrência(s) · confiança ` +
+          `${Math.round(Number(entry.confidence || 0) * 100)}%`;
+        copy.appendChild(meta);
+
+        row.appendChild(copy);
+        list.appendChild(row);
+      });
+
+      memoryStats.appendChild(list);
+    }
+
+    memoryStatsStatus.textContent = reflection.last_at
+      ? `Última reflexão: ${new Date(reflection.last_at).toLocaleString()}.`
+      : "Nenhuma reflexão ainda.";
+  } catch (error) {
+    memoryStatsStatus.textContent = error.message;
+  }
 }
 
 
@@ -455,6 +645,35 @@ memoryToggle.addEventListener("change", function () {
 
 
 document.getElementById("memoryRefresh").addEventListener("click", loadMemories);
+
+
+document.getElementById("observationsRefresh").addEventListener(
+  "click",
+  loadObservations
+);
+
+
+document.getElementById("memoryStatsRefresh").addEventListener(
+  "click",
+  loadMemoryStats
+);
+
+
+memoryReflectButton.addEventListener("click", async function () {
+  memoryReflectButton.disabled = true;
+  memoryReflectStatus.textContent = "Agendando a reflexão…";
+
+  try {
+    await api("POST", "/api/memory/reflect", {});
+    memoryReflectStatus.textContent =
+      "Reflexão agendada: ela roda em segundo plano.";
+    setTimeout(loadMemoryStats, 3000);
+  } catch (error) {
+    memoryReflectStatus.textContent = error.message;
+  } finally {
+    memoryReflectButton.disabled = false;
+  }
+});
 
 
 document.getElementById("saveInstructions").addEventListener("click", function () {

@@ -413,6 +413,9 @@ def studio_request_body(stream, messages, user_id, reasoning):
             memory_header=STUDIO_MEMORY_HEADER,
             model_name=model,
             reasoning_level=reasoning,
+            # O studio tem memória própria: as observações do agente do
+            # chat principal não entram aqui.
+            memory_enabled=False,
         ),
         "stream": stream,
         "max_tokens": STUDIO_MAX_OUTPUT_TOKENS,
